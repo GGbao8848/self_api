@@ -10,9 +10,7 @@ setup_logging(settings.log_level)
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description=(
-        "Image preprocessing API with sliding-window crop and image deduplication"
-    ),
+    description="Image preprocessing API for sliding-window crop and dataset conversion/splitting",
 )
 
 
