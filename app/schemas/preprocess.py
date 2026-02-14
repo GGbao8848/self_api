@@ -161,3 +161,63 @@ class SplitYoloDatasetResponse(BaseModel):
     test_images: int
     copied_classes_file: str | None
     details: list[SplitYoloFileDetail]
+
+
+class ZipFolderRequest(BaseModel):
+    input_dir: str = Field(description="Input folder path to package")
+    output_zip_path: str | None = Field(
+        default=None,
+        description="Output zip path; defaults to <input_dir_parent>/<input_dir_name>.zip",
+    )
+    include_root_dir: bool = Field(
+        default=True,
+        description="Whether to keep root directory name inside zip archive",
+    )
+    overwrite: bool = Field(
+        default=False,
+        description="Whether to overwrite existing output zip file",
+    )
+
+
+class ZipFolderResponse(BaseModel):
+    status: str = "ok"
+    input_dir: str
+    output_zip_path: str
+    packed_files: int
+    total_bytes: int
+
+
+class UnzipArchiveRequest(BaseModel):
+    archive_path: str = Field(description="Zip archive path to extract")
+    output_dir: str | None = Field(
+        default=None,
+        description="Output directory; defaults to <archive_parent>/<archive_stem>",
+    )
+    overwrite: bool = Field(
+        default=False,
+        description="Whether to overwrite existing extracted files",
+    )
+
+
+class UnzipArchiveResponse(BaseModel):
+    status: str = "ok"
+    archive_path: str
+    output_dir: str
+    extracted_files: int
+    skipped_files: int
+
+
+class MovePathRequest(BaseModel):
+    source_path: str = Field(description="Source file or directory path")
+    target_dir: str = Field(description="Target directory path")
+    overwrite: bool = Field(
+        default=False,
+        description="Whether to overwrite target when name conflicts",
+    )
+
+
+class MovePathResponse(BaseModel):
+    status: str = "ok"
+    source_path: str
+    target_path: str
+    moved_type: Literal["file", "directory"]

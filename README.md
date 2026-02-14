@@ -1,10 +1,13 @@
 # self_api - 图像/数据集预处理 API
 
-用于图像与图像数据集预处理的最小可交付 API 服务，当前提供 3 个核心能力：
+用于图像与图像数据集预处理的最小可交付 API 服务，当前提供 6 个核心能力：
 
 1. 指定目录图像按滑窗规则裁剪并保存
 2. Pascal VOC XML 标注转换为 YOLO 标注
 3. YOLO 数据集按 train/val/test 划分
+4. 指定目录打包为 zip 压缩包
+5. 指定 zip 压缩包解压到目标目录
+6. 文件或文件夹整体移动到目标目录
 
 ## 1. 最小可交付范围
 
@@ -25,7 +28,7 @@ self_api/
 │   ├── api/
 │   │   └── v1/
 │   │       ├── endpoints/
-│   │       │   ├── preprocess.py      # 三个预处理 API
+│   │       │   ├── preprocess.py      # 六个预处理 API
 │   │       │   └── system.py          # 健康检查
 │   │       └── router.py              # v1 路由聚合
 │   ├── core/
@@ -34,6 +37,7 @@ self_api/
 │   ├── schemas/
 │   │   └── preprocess.py              # 请求/响应模型
 │   ├── services/
+│   │   ├── file_operations.py         # 压缩/解压/移动服务
 │   │   ├── sliding_window.py          # 滑窗裁剪服务
 │   │   ├── split_yolo_dataset.py      # YOLO 数据集划分服务
 │   │   └── xml_to_yolo.py             # VOC XML 转 YOLO 标签服务
@@ -41,7 +45,13 @@ self_api/
 │   │   └── images.py                  # 图像文件扫描工具
 │   └── main.py                        # FastAPI 应用入口
 ├── tests/
-│   └── test_api.py
+│   ├── test_healthz_api.py
+│   ├── test_sliding_window_crop_api.py
+│   ├── test_xml_to_yolo_api.py
+│   ├── test_split_yolo_dataset_api.py
+│   ├── test_zip_folder_api.py
+│   ├── test_unzip_archive_api.py
+│   └── test_move_path_api.py
 ├── Dockerfile
 ├── Makefile
 ├── pyproject.toml
@@ -158,6 +168,68 @@ docker run --rm -p 8000:8000 self-api:0.1.0
   "shuffle": true,
   "seed": 42,
   "copy_files": true
+}
+```
+
+### 4.5 目录打包为 ZIP
+
+- `POST /api/v1/preprocess/zip-folder`
+
+关键参数：
+
+- `input_dir`: 待打包目录
+- `output_zip_path`: 输出压缩包路径（可选，默认 `input_dir` 同级）
+- `include_root_dir`: 压缩包内是否保留根目录名
+- `overwrite`: 压缩包已存在时是否覆盖
+
+示例请求：
+
+```json
+{
+  "input_dir": "./data/source_folder",
+  "output_zip_path": "./data/source_folder.zip",
+  "include_root_dir": true,
+  "overwrite": true
+}
+```
+
+### 4.6 ZIP 解压
+
+- `POST /api/v1/preprocess/unzip-archive`
+
+关键参数：
+
+- `archive_path`: 压缩包路径（zip）
+- `output_dir`: 解压输出目录（可选）
+- `overwrite`: 目标文件已存在时是否覆盖
+
+示例请求：
+
+```json
+{
+  "archive_path": "./data/source_folder.zip",
+  "output_dir": "./data/unpacked",
+  "overwrite": true
+}
+```
+
+### 4.7 文件或目录移动
+
+- `POST /api/v1/preprocess/move-path`
+
+关键参数：
+
+- `source_path`: 源文件或源目录
+- `target_dir`: 目标目录
+- `overwrite`: 目标同名已存在时是否覆盖
+
+示例请求：
+
+```json
+{
+  "source_path": "./data/unpacked",
+  "target_dir": "./data/archive_ready",
+  "overwrite": true
 }
 ```
 
