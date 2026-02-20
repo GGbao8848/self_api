@@ -11,6 +11,8 @@ from app.schemas.preprocess import (
     UnzipArchiveResponse,
     XmlToYoloRequest,
     XmlToYoloResponse,
+    YoloSlidingWindowCropRequest,
+    YoloSlidingWindowCropResponse,
     ZipFolderRequest,
     ZipFolderResponse,
 )
@@ -18,6 +20,7 @@ from app.services.file_operations import run_move_path, run_unzip_archive, run_z
 from app.services.sliding_window import run_sliding_window_crop
 from app.services.split_yolo_dataset import run_split_yolo_dataset
 from app.services.xml_to_yolo import run_xml_to_yolo
+from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
 
 router = APIRouter(prefix="/preprocess", tags=["preprocess"])
 
@@ -66,5 +69,15 @@ def unzip_archive(payload: UnzipArchiveRequest) -> UnzipArchiveResponse:
 def move_path(payload: MovePathRequest) -> MovePathResponse:
     try:
         return run_move_path(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/yolo-sliding-window-crop", response_model=YoloSlidingWindowCropResponse)
+def yolo_sliding_window_crop(
+    payload: YoloSlidingWindowCropRequest,
+) -> YoloSlidingWindowCropResponse:
+    try:
+        return run_yolo_sliding_window_crop(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

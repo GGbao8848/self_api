@@ -221,3 +221,74 @@ class MovePathResponse(BaseModel):
     source_path: str
     target_path: str
     moved_type: Literal["file", "directory"]
+
+
+class YoloSlidingWindowCropRequest(BaseModel):
+    dataset_dir: str = Field(
+        description="YOLO dataset root directory containing images and labels folders",
+    )
+    output_dir: str | None = Field(
+        default=None,
+        description="Output directory; defaults to <dataset_dir>/yolo_crops",
+    )
+    images_dir_name: str = Field(default="images", description="Image folder name")
+    labels_dir_name: str = Field(default="labels", description="Label folder name")
+    recursive: bool = Field(default=True, description="Search image files recursively")
+    extensions: list[str] | None = Field(
+        default=None,
+        description="Allowed image extensions, e.g. ['.jpg', '.png']",
+    )
+    window_width: int = Field(ge=1, description="Sliding window width")
+    window_height: int = Field(ge=1, description="Sliding window height")
+    stride_x: int = Field(ge=1, description="Horizontal stride")
+    stride_y: int = Field(ge=1, description="Vertical stride")
+    include_partial_edges: bool = Field(
+        default=False,
+        description="Include edge windows smaller than configured window size",
+    )
+    keep_subdirs: bool = Field(
+        default=True,
+        description="Keep source folder structure in output dataset",
+    )
+    output_format: Literal["keep", "png", "jpg", "jpeg", "webp"] = Field(
+        default="keep",
+        description="Output image format",
+    )
+    require_label: bool = Field(
+        default=True,
+        description="Skip image when paired label file is missing",
+    )
+    keep_empty_labels: bool = Field(
+        default=False,
+        description="Keep crop even if it contains no boxes",
+    )
+    min_box_area_ratio: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Minimum intersection/original-box area ratio to keep clipped box",
+    )
+    overwrite: bool = Field(
+        default=False,
+        description="Whether to overwrite output image/label files",
+    )
+
+
+class YoloSlidingWindowCropDetail(BaseModel):
+    source_image: str
+    source_label: str | None = None
+    crop_count: int = 0
+    label_count: int = 0
+    skipped_reason: str | None = None
+
+
+class YoloSlidingWindowCropResponse(BaseModel):
+    status: str = "ok"
+    dataset_dir: str
+    output_dir: str
+    input_images: int
+    processed_images: int
+    skipped_images: int
+    generated_crops: int
+    generated_labels: int
+    details: list[YoloSlidingWindowCropDetail]
