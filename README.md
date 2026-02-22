@@ -1,9 +1,14 @@
 # self_api - 图像/数据集预处理 API
 
-用于图像与图像数据集预处理的最小可交付 API 服务，当前提供 2 个核心能力：
+用于图像与图像数据集预处理的最小可交付 API 服务，当前提供 7 个核心能力：
 
 1. 指定目录图像按滑窗规则裁剪并保存
-2. 指定目录图像去重（`md5` 精确去重 / `phash` 感知去重）
+2. Pascal VOC XML 标注转换为 YOLO 标注
+3. YOLO 数据集按 train/val/test 划分
+4. 指定目录打包为 zip 压缩包
+5. 指定 zip 压缩包解压到目标目录
+6. 文件或文件夹整体移动到目标目录
+7. YOLO 大图数据集滑窗裁剪为小图数据集（标签同步裁剪）
 
 ## 1. 最小可交付范围
 
@@ -24,7 +29,7 @@ self_api/
 │   ├── api/
 │   │   └── v1/
 │   │       ├── endpoints/
-│   │       │   ├── preprocess.py      # 两个预处理 API
+│   │       │   ├── preprocess.py      # 七个预处理 API
 │   │       │   └── system.py          # 健康检查
 │   │       └── router.py              # v1 路由聚合
 │   ├── core/
@@ -33,13 +38,23 @@ self_api/
 │   ├── schemas/
 │   │   └── preprocess.py              # 请求/响应模型
 │   ├── services/
-│   │   ├── deduplicate.py             # 图像去重服务
-│   │   └── sliding_window.py          # 滑窗裁剪服务
+│   │   ├── file_operations.py         # 压缩/解压/移动服务
+│   │   ├── sliding_window.py          # 滑窗裁剪服务
+│   │   ├── split_yolo_dataset.py      # YOLO 数据集划分服务
+│   │   ├── xml_to_yolo.py             # VOC XML 转 YOLO 标签服务
+│   │   └── yolo_sliding_window.py     # YOLO 大图数据集滑窗裁剪服务
 │   ├── utils/
 │   │   └── images.py                  # 图像文件扫描工具
 │   └── main.py                        # FastAPI 应用入口
 ├── tests/
-│   └── test_api.py
+│   ├── test_healthz_api.py
+│   ├── test_sliding_window_crop_api.py
+│   ├── test_xml_to_yolo_api.py
+│   ├── test_split_yolo_dataset_api.py
+│   ├── test_zip_folder_api.py
+│   ├── test_unzip_archive_api.py
+│   ├── test_move_path_api.py
+│   └── test_yolo_sliding_window_crop_api.py
 ├── Dockerfile
 ├── Makefile
 ├── pyproject.toml
@@ -53,7 +68,7 @@ self_api/
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .[dev]
+pip install -e ".[dev]"
 make run
 ```
 
@@ -102,28 +117,152 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 }
 ```
 
-### 4.3 图像去重
+### 4.3 VOC XML 转 YOLO 标签
 
-- `POST /api/v1/preprocess/deduplicate`
+- `POST /api/v1/preprocess/xml-to-yolo`
+
+要求输入目录下有 `images/` 与 `xmls/`，服务会把 YOLO 标签写到 `labels/`（目录名可配置）。
 
 关键参数：
 
-- `method`: `md5`（精确）或 `phash`（感知）
-- `distance_threshold`: `phash` 汉明距离阈值（越大越宽松）
-- `copy_unique_to`: 可选，将唯一图像导出到新目录
-- `report_path`: 可选，输出 JSON 报告
+- `dataset_dir`: 数据集根目录（含 `images` 和 `xmls`）
+- `images_dir_name/xmls_dir_name/labels_dir_name`: 目录名配置
+- `classes`: 可选，固定类别顺序；不传则自动从 XML 推断
+- `include_difficult`: 是否包含 `difficult=1` 目标
+- `write_classes_file`: 是否在根目录写出 `classes.txt`
 
 示例请求：
 
 ```json
 {
-  "input_dir": "./data/raw",
+  "dataset_dir": "./data/voc_like",
+  "images_dir_name": "images",
+  "xmls_dir_name": "xmls",
+  "labels_dir_name": "labels",
   "recursive": true,
-  "method": "phash",
-  "distance_threshold": 5,
-  "hash_size": 8,
-  "copy_unique_to": "./data/unique",
-  "report_path": "./data/reports/dedup.json"
+  "include_difficult": false,
+  "write_classes_file": true
+}
+```
+
+### 4.4 YOLO 数据集划分
+
+- `POST /api/v1/preprocess/split-yolo-dataset`
+
+关键参数：
+
+- `dataset_dir`: YOLO 数据集根目录（含 `images` 与 `labels`）
+- `output_dir`: 输出目录（默认 `dataset_dir/split_dataset`）
+- `mode`: `train_val_test` / `train_val` / `train_only`
+- `train_ratio/val_ratio/test_ratio`: 划分比例（会自动归一化）
+- `shuffle/seed`: 是否打乱及随机种子
+- `copy_files`: `true` 复制，`false` 移动
+
+示例请求：
+
+```json
+{
+  "dataset_dir": "./data/yolo_raw",
+  "output_dir": "./data/yolo_split",
+  "mode": "train_val_test",
+  "train_ratio": 0.8,
+  "val_ratio": 0.1,
+  "test_ratio": 0.1,
+  "shuffle": true,
+  "seed": 42,
+  "copy_files": true
+}
+```
+
+### 4.5 目录打包为 ZIP
+
+- `POST /api/v1/preprocess/zip-folder`
+
+关键参数：
+
+- `input_dir`: 待打包目录
+- `output_zip_path`: 输出压缩包路径（可选，默认 `input_dir` 同级）
+- `include_root_dir`: 压缩包内是否保留根目录名
+- `overwrite`: 压缩包已存在时是否覆盖
+
+示例请求：
+
+```json
+{
+  "input_dir": "./data/source_folder",
+  "output_zip_path": "./data/source_folder.zip",
+  "include_root_dir": true,
+  "overwrite": true
+}
+```
+
+### 4.6 ZIP 解压
+
+- `POST /api/v1/preprocess/unzip-archive`
+
+关键参数：
+
+- `archive_path`: 压缩包路径（zip）
+- `output_dir`: 解压输出目录（可选）
+- `overwrite`: 目标文件已存在时是否覆盖
+
+示例请求：
+
+```json
+{
+  "archive_path": "./data/source_folder.zip",
+  "output_dir": "./data/unpacked",
+  "overwrite": true
+}
+```
+
+### 4.7 文件或目录移动
+
+- `POST /api/v1/preprocess/move-path`
+
+关键参数：
+
+- `source_path`: 源文件或源目录
+- `target_dir`: 目标目录
+- `overwrite`: 目标同名已存在时是否覆盖
+
+示例请求：
+
+```json
+{
+  "source_path": "./data/unpacked",
+  "target_dir": "./data/archive_ready",
+  "overwrite": true
+}
+```
+
+### 4.8 YOLO 大图滑窗裁剪为小图数据集
+
+- `POST /api/v1/preprocess/yolo-sliding-window-crop`
+
+输入为 YOLO 数据集目录（`images/` + `labels/`），输出为新的小图数据集（`images/` + `labels/`），标签会按窗口裁剪并重新归一化。
+
+关键参数：
+
+- `dataset_dir`: YOLO 数据集根目录
+- `output_dir`: 输出目录（默认 `dataset_dir/yolo_crops`）
+- `window_width/window_height`: 窗口大小
+- `stride_x/stride_y`: 滑窗步长
+- `keep_empty_labels`: 是否保留无目标窗口
+- `min_box_area_ratio`: 目标框与窗口相交面积占原框面积的最小阈值
+
+示例请求：
+
+```json
+{
+  "dataset_dir": "./data/yolo_large",
+  "output_dir": "./data/yolo_small",
+  "window_width": 1024,
+  "window_height": 1024,
+  "stride_x": 512,
+  "stride_y": 512,
+  "keep_empty_labels": false,
+  "min_box_area_ratio": 0.2
 }
 ```
 
