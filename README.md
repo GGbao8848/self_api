@@ -1,6 +1,6 @@
 # self_api - 图像/数据集预处理 API
 
-用于图像与图像数据集预处理的最小可交付 API 服务，当前提供 7 个核心能力：
+用于图像与图像数据集预处理的最小可交付 API 服务，当前提供 8 个核心能力：
 
 1. 指定目录图像按滑窗规则裁剪并保存
 2. Pascal VOC XML 标注转换为 YOLO 标注
@@ -8,7 +8,8 @@
 4. 指定目录打包为 zip 压缩包
 5. 指定 zip 压缩包解压到目标目录
 6. 文件或文件夹整体移动到目标目录
-7. YOLO 大图数据集滑窗裁剪为小图数据集（标签同步裁剪）
+7. 文件或文件夹整体复制到目标目录
+8. YOLO 大图数据集滑窗裁剪为小图数据集（标签同步裁剪）
 
 ## 1. 最小可交付范围
 
@@ -29,7 +30,7 @@ self_api/
 │   ├── api/
 │   │   └── v1/
 │   │       ├── endpoints/
-│   │       │   ├── preprocess.py      # 七个预处理 API
+│   │       │   ├── preprocess.py      # 八个预处理 API
 │   │       │   └── system.py          # 健康检查
 │   │       └── router.py              # v1 路由聚合
 │   ├── core/
@@ -38,7 +39,7 @@ self_api/
 │   ├── schemas/
 │   │   └── preprocess.py              # 请求/响应模型
 │   ├── services/
-│   │   ├── file_operations.py         # 压缩/解压/移动服务
+│   │   ├── file_operations.py         # 压缩/解压/移动/复制服务
 │   │   ├── sliding_window.py          # 滑窗裁剪服务
 │   │   ├── split_yolo_dataset.py      # YOLO 数据集划分服务
 │   │   ├── xml_to_yolo.py             # VOC XML 转 YOLO 标签服务
@@ -72,7 +73,16 @@ pip install -e ".[dev]"
 make run
 ```
 
-打开文档：`http://127.0.0.1:8000/docs`
+启动后可访问：
+
+- 本机：`http://127.0.0.1:8666/docs`
+- 内网：`http://<你的内网IP>:8666/docs`
+
+说明：
+
+- `make run` 默认绑定 `0.0.0.0:8666`，可被同一局域网设备访问
+- 如需自定义端口/地址：`make run HOST=0.0.0.0 PORT=9000`
+- 若内网仍不可达，请检查系统防火墙是否允许该端口入站访问
 
 ### 3.2 Docker
 
@@ -82,6 +92,8 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 ```
 
 ## 4. API 要素与接口定义
+
+接口示例请求已拆分到独立文档：`docs/api_examples.md`。
 
 ### 4.1 健康检查
 
@@ -100,23 +112,6 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `include_partial_edges`: 是否保留边缘不完整窗口
 - `output_format`: `keep/png/jpg/jpeg/webp`
 
-示例请求：
-
-```json
-{
-  "input_dir": "./data/raw",
-  "output_dir": "./data/crops",
-  "window_width": 512,
-  "window_height": 512,
-  "stride_x": 256,
-  "stride_y": 256,
-  "include_partial_edges": false,
-  "recursive": true,
-  "keep_subdirs": true,
-  "output_format": "png"
-}
-```
-
 ### 4.3 VOC XML 转 YOLO 标签
 
 - `POST /api/v1/preprocess/xml-to-yolo`
@@ -131,20 +126,6 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `include_difficult`: 是否包含 `difficult=1` 目标
 - `write_classes_file`: 是否在根目录写出 `classes.txt`
 
-示例请求：
-
-```json
-{
-  "dataset_dir": "./data/voc_like",
-  "images_dir_name": "images",
-  "xmls_dir_name": "xmls",
-  "labels_dir_name": "labels",
-  "recursive": true,
-  "include_difficult": false,
-  "write_classes_file": true
-}
-```
-
 ### 4.4 YOLO 数据集划分
 
 - `POST /api/v1/preprocess/split-yolo-dataset`
@@ -158,22 +139,6 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `shuffle/seed`: 是否打乱及随机种子
 - `copy_files`: `true` 复制，`false` 移动
 
-示例请求：
-
-```json
-{
-  "dataset_dir": "./data/yolo_raw",
-  "output_dir": "./data/yolo_split",
-  "mode": "train_val_test",
-  "train_ratio": 0.8,
-  "val_ratio": 0.1,
-  "test_ratio": 0.1,
-  "shuffle": true,
-  "seed": 42,
-  "copy_files": true
-}
-```
-
 ### 4.5 目录打包为 ZIP
 
 - `POST /api/v1/preprocess/zip-folder`
@@ -185,17 +150,6 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `include_root_dir`: 压缩包内是否保留根目录名
 - `overwrite`: 压缩包已存在时是否覆盖
 
-示例请求：
-
-```json
-{
-  "input_dir": "./data/source_folder",
-  "output_zip_path": "./data/source_folder.zip",
-  "include_root_dir": true,
-  "overwrite": true
-}
-```
-
 ### 4.6 ZIP 解压
 
 - `POST /api/v1/preprocess/unzip-archive`
@@ -205,16 +159,6 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `archive_path`: 压缩包路径（zip）
 - `output_dir`: 解压输出目录（可选）
 - `overwrite`: 目标文件已存在时是否覆盖
-
-示例请求：
-
-```json
-{
-  "archive_path": "./data/source_folder.zip",
-  "output_dir": "./data/unpacked",
-  "overwrite": true
-}
-```
 
 ### 4.7 文件或目录移动
 
@@ -226,17 +170,17 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `target_dir`: 目标目录
 - `overwrite`: 目标同名已存在时是否覆盖
 
-示例请求：
+### 4.8 文件或目录复制
 
-```json
-{
-  "source_path": "./data/unpacked",
-  "target_dir": "./data/archive_ready",
-  "overwrite": true
-}
-```
+- `POST /api/v1/preprocess/copy-path`
 
-### 4.8 YOLO 大图滑窗裁剪为小图数据集
+关键参数：
+
+- `source_path`: 源文件或源目录
+- `target_dir`: 目标目录
+- `overwrite`: 目标同名已存在时是否覆盖
+
+### 4.9 YOLO 大图滑窗裁剪为小图数据集
 
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 
@@ -250,21 +194,6 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `stride_x/stride_y`: 滑窗步长
 - `keep_empty_labels`: 是否保留无目标窗口
 - `min_box_area_ratio`: 目标框与窗口相交面积占原框面积的最小阈值
-
-示例请求：
-
-```json
-{
-  "dataset_dir": "./data/yolo_large",
-  "output_dir": "./data/yolo_small",
-  "window_width": 1024,
-  "window_height": 1024,
-  "stride_x": 512,
-  "stride_y": 512,
-  "keep_empty_labels": false,
-  "min_box_area_ratio": 0.2
-}
-```
 
 ## 5. 开发命令
 

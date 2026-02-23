@@ -3,6 +3,8 @@ import zipfile
 from pathlib import Path
 
 from app.schemas.preprocess import (
+    CopyPathRequest,
+    CopyPathResponse,
     MovePathRequest,
     MovePathResponse,
     UnzipArchiveRequest,
@@ -146,4 +148,52 @@ def run_move_path(request: MovePathRequest) -> MovePathResponse:
         source_path=str(source_path),
         target_path=str(target_path),
         moved_type="directory" if moved_type == "directory" else "file",
+    )
+
+
+def run_copy_path(request: CopyPathRequest) -> CopyPathResponse:
+    source_path = Path(request.source_path).expanduser().resolve()
+    target_dir = Path(request.target_dir).expanduser().resolve()
+
+    if not source_path.exists():
+        raise ValueError(f"source_path does not exist: {source_path}")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if not target_dir.is_dir():
+        raise ValueError(f"target_dir is not a directory: {target_dir}")
+
+    copied_type = "directory" if source_path.is_dir() else "file"
+    target_path = target_dir / source_path.name
+
+    if source_path == target_path:
+        raise ValueError("source_path and target_path are identical")
+
+    if copied_type == "directory" and (source_path in target_dir.parents or source_path == target_dir):
+        raise ValueError("cannot copy directory into itself or its subdirectory")
+
+    if target_path.exists():
+        if not request.overwrite:
+            raise ValueError(f"target path already exists: {target_path}")
+
+        if source_path.is_file() and target_path.is_dir():
+            raise ValueError("cannot overwrite directory with file")
+        if source_path.is_dir() and target_path.is_file():
+            raise ValueError("cannot overwrite file with directory")
+
+        if target_path.is_file():
+            target_path.unlink()
+        else:
+            shutil.rmtree(target_path)
+
+    try:
+        if source_path.is_file():
+            shutil.copy2(str(source_path), str(target_path))
+        else:
+            shutil.copytree(str(source_path), str(target_path))
+    except OSError as exc:
+        raise ValueError(f"failed to copy path: {exc}") from exc
+
+    return CopyPathResponse(
+        source_path=str(source_path),
+        target_path=str(target_path),
+        copied_type="directory" if copied_type == "directory" else "file",
     )

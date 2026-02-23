@@ -1,6 +1,6 @@
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 
 class SlidingWindowCropRequest(BaseModel):
@@ -43,6 +43,53 @@ class SlidingWindowCropResponse(BaseModel):
     generated_crops: int
     output_dir: str
     details: list[CropImageDetail]
+
+
+class SlidingWindowCropAsyncRequest(SlidingWindowCropRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class AsyncTaskSubmitResponse(BaseModel):
+    status: str = "accepted"
+    task_id: str
+    task_type: str
+    status_url: str
+    callback_url: str | None = None
+
+
+class AsyncTaskCallbackEvent(BaseModel):
+    state: Literal["pending", "running", "succeeded", "failed"]
+    attempted_at: str
+    callback_url: str
+    status_code: int | None = None
+    method: Literal["POST", "GET"] = "POST"
+    success: bool
+    error: str | None = None
+
+
+class AsyncTaskStatusResponse(BaseModel):
+    task_id: str
+    task_type: str
+    state: Literal["pending", "running", "succeeded", "failed"]
+    created_at: str
+    updated_at: str
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    callback_url: str | None = None
+    callback_state: Literal["pending", "running", "succeeded", "failed"] = "succeeded"
+    callback_sent_at: str | None = None
+    callback_status_code: int | None = None
+    callback_error: str | None = None
+    callback_events: list[AsyncTaskCallbackEvent] = []
 
 
 class XmlToYoloRequest(BaseModel):
@@ -223,6 +270,22 @@ class MovePathResponse(BaseModel):
     moved_type: Literal["file", "directory"]
 
 
+class CopyPathRequest(BaseModel):
+    source_path: str = Field(description="Source file or directory path")
+    target_dir: str = Field(description="Target directory path")
+    overwrite: bool = Field(
+        default=False,
+        description="Whether to overwrite target when name conflicts",
+    )
+
+
+class CopyPathResponse(BaseModel):
+    status: str = "ok"
+    source_path: str
+    target_path: str
+    copied_type: Literal["file", "directory"]
+
+
 class YoloSlidingWindowCropRequest(BaseModel):
     dataset_dir: str = Field(
         description="YOLO dataset root directory containing images and labels folders",
@@ -271,6 +334,97 @@ class YoloSlidingWindowCropRequest(BaseModel):
     overwrite: bool = Field(
         default=False,
         description="Whether to overwrite output image/label files",
+    )
+
+
+class XmlToYoloAsyncRequest(XmlToYoloRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class SplitYoloDatasetAsyncRequest(SplitYoloDatasetRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class ZipFolderAsyncRequest(ZipFolderRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class UnzipArchiveAsyncRequest(UnzipArchiveRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class MovePathAsyncRequest(MovePathRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class CopyPathAsyncRequest(CopyPathRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class YoloSlidingWindowCropAsyncRequest(YoloSlidingWindowCropRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
     )
 
 
