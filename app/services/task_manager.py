@@ -4,14 +4,22 @@ import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
 from json import dumps
+from pathlib import Path
 from typing import Any, Callable, Literal, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-TaskState = Literal["pending", "running", "succeeded", "failed"]
+from app.services.artifact_store import register_path, summarize_record
+
+TaskState = Literal["pending", "running", "succeeded", "failed", "cancelled"]
 CallbackState = Literal["pending", "running", "succeeded", "failed"]
 _IDEMPOTENT_CALLBACK_SUCCESS_CODES = {409}
 _UNSET = object()
+_TASK_LOCAL = threading.local()
+
+
+class TaskCancelledError(RuntimeError):
+    pass
 
 
 class TaskRecord(TypedDict):
@@ -20,14 +28,17 @@ class TaskRecord(TypedDict):
     state: TaskState
     created_at: str
     updated_at: str
+    finished_at: str | None
     result: dict[str, Any] | None
     error: str | None
+    cancellation_requested: bool
     callback_url: str | None
     callback_state: CallbackState
     callback_sent_at: str | None
     callback_status_code: int | None
     callback_error: str | None
     callback_events: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]]
 
 
 _TASKS: dict[str, TaskRecord] = {}
@@ -41,17 +52,37 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _set_current_task_id(task_id: str | None) -> None:
+    _TASK_LOCAL.task_id = task_id
+
+
+def get_current_task_id() -> str | None:
+    return getattr(_TASK_LOCAL, "task_id", None)
+
+
+def ensure_current_task_active() -> None:
+    task_id = get_current_task_id()
+    if not task_id:
+        return
+    task = get_task(task_id)
+    if task is not None and task["cancellation_requested"]:
+        raise TaskCancelledError(f"task cancelled: {task_id}")
+
+
 def _update_task(
     task_id: str,
     *,
     state: TaskState | None = None,
+    finished_at: str | None | object = _UNSET,
     result: dict[str, Any] | None | object = _UNSET,
     error: str | None | object = _UNSET,
+    cancellation_requested: bool | None = None,
     callback_state: CallbackState | None = None,
     callback_sent_at: str | None | object = _UNSET,
     callback_status_code: int | None | object = _UNSET,
     callback_error: str | None | object = _UNSET,
     callback_event: dict[str, Any] | object = _UNSET,
+    artifacts: list[dict[str, Any]] | object = _UNSET,
 ) -> None:
     with _LOCK:
         task = _TASKS.get(task_id)
@@ -59,10 +90,14 @@ def _update_task(
             return
         if state is not None:
             task["state"] = state
+        if finished_at is not _UNSET:
+            task["finished_at"] = finished_at
         if result is not _UNSET:
             task["result"] = result
         if error is not _UNSET:
             task["error"] = error
+        if cancellation_requested is not None:
+            task["cancellation_requested"] = cancellation_requested
         if callback_state is not None:
             task["callback_state"] = callback_state
         if callback_sent_at is not _UNSET:
@@ -73,6 +108,8 @@ def _update_task(
             task["callback_error"] = callback_error
         if callback_event is not _UNSET:
             task["callback_events"].append(callback_event)
+        if artifacts is not _UNSET:
+            task["artifacts"] = artifacts
         task["updated_at"] = _now_iso()
 
 
@@ -101,8 +138,10 @@ def _build_callback_payload(task: TaskRecord) -> dict[str, Any]:
         "state": task["state"],
         "created_at": task["created_at"],
         "updated_at": task["updated_at"],
+        "finished_at": task["finished_at"],
         "result": task["result"],
         "error": task["error"],
+        "artifacts": task["artifacts"],
     }
 
 
@@ -197,15 +236,6 @@ def _send_task_callback(task_id: str, timeout_seconds: float) -> None:
                         "error": f"callback returned non-2xx status: {status_code}",
                     },
                 )
-                logger.warning(
-                    "webhook callback sent: task_id=%s state=%s callback_url=%s method=%s status_code=%s success=false error=%s",
-                    task_id,
-                    event_state,
-                    task["callback_url"],
-                    method_used,
-                    status_code,
-                    f"callback returned non-2xx status: {status_code}",
-                )
         except HTTPError as exc:
             if exc.code in _IDEMPOTENT_CALLBACK_SUCCESS_CODES:
                 _update_task(
@@ -224,14 +254,6 @@ def _send_task_callback(task_id: str, timeout_seconds: float) -> None:
                         "error": None,
                     },
                 )
-                logger.info(
-                    "webhook callback sent: task_id=%s state=%s callback_url=%s method=%s status_code=%s success=true",
-                    task_id,
-                    event_state,
-                    task["callback_url"],
-                    method_used,
-                    exc.code,
-                )
             else:
                 _update_task(
                     task_id,
@@ -248,15 +270,6 @@ def _send_task_callback(task_id: str, timeout_seconds: float) -> None:
                         "success": False,
                         "error": f"callback returned non-2xx status: {exc.code}",
                     },
-                )
-                logger.warning(
-                    "webhook callback sent: task_id=%s state=%s callback_url=%s method=%s status_code=%s success=false error=%s",
-                    task_id,
-                    event_state,
-                    task["callback_url"],
-                    method_used,
-                    exc.code,
-                    f"callback returned non-2xx status: {exc.code}",
                 )
         except (URLError, TimeoutError, OSError, ValueError) as exc:
             _update_task(
@@ -275,15 +288,47 @@ def _send_task_callback(task_id: str, timeout_seconds: float) -> None:
                     "error": str(exc),
                 },
             )
-            logger.warning(
-                "webhook callback sent: task_id=%s state=%s callback_url=%s method=%s status_code=%s success=false error=%s",
-                task_id,
-                event_state,
-                task["callback_url"],
-                method_used,
-                "none",
-                str(exc),
+
+
+def _extract_artifact_candidates(result: dict[str, Any]) -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+    for key, value in result.items():
+        if not isinstance(value, str):
+            continue
+        if key.startswith("output_") or key in {
+            "target_path",
+            "labels_dir",
+            "classes_file",
+            "copied_classes_file",
+        }:
+            candidates.append((key, value))
+    return candidates
+
+
+def _register_task_artifacts(
+    *,
+    task_id: str,
+    task_type: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+    for key, value in _extract_artifact_candidates(result):
+        candidate = Path(value).expanduser().resolve(strict=False)
+        if candidate in seen or not candidate.exists():
+            continue
+        seen.add(candidate)
+        try:
+            record = register_path(
+                candidate,
+                source=f"task:{task_type}:{key}",
+                task_id=task_id,
+                task_type=task_type,
             )
+        except ValueError:
+            continue
+        artifacts.append(summarize_record(record))
+    return artifacts
 
 
 def submit_task(
@@ -295,7 +340,6 @@ def submit_task(
 ) -> str:
     task_id = uuid.uuid4().hex
     now = _now_iso()
-    # If callback is not requested, treat callback lifecycle as already completed.
     callback_state: CallbackState = "pending" if callback_url else "succeeded"
     with _LOCK:
         _TASKS[task_id] = {
@@ -304,28 +348,65 @@ def submit_task(
             "state": "pending",
             "created_at": now,
             "updated_at": now,
+            "finished_at": None,
             "result": None,
             "error": None,
+            "cancellation_requested": False,
             "callback_url": callback_url,
             "callback_state": callback_state,
             "callback_sent_at": None,
             "callback_status_code": None,
             "callback_error": None,
             "callback_events": [],
+            "artifacts": [],
         }
 
     def _run() -> None:
-        _update_task(task_id, state="running")
+        _set_current_task_id(task_id)
         try:
+            ensure_current_task_active()
+            _update_task(task_id, state="running")
             task_result = runner()
+            ensure_current_task_active()
+        except TaskCancelledError as exc:
+            _update_task(
+                task_id,
+                state="cancelled",
+                error=str(exc),
+                result=None,
+                finished_at=_now_iso(),
+            )
+            if callback_url:
+                _send_task_callback(task_id, callback_timeout_seconds)
         except Exception as exc:  # noqa: BLE001
-            _update_task(task_id, state="failed", error=str(exc), result=None)
+            _update_task(
+                task_id,
+                state="failed",
+                error=str(exc),
+                result=None,
+                finished_at=_now_iso(),
+            )
             if callback_url:
                 _send_task_callback(task_id, callback_timeout_seconds)
         else:
-            _update_task(task_id, state="succeeded", result=task_result, error=None)
+            artifacts = _register_task_artifacts(
+                task_id=task_id,
+                task_type=task_type,
+                result=task_result,
+            )
+            _update_task(
+                task_id,
+                state="succeeded",
+                result=task_result,
+                error=None,
+                finished_at=_now_iso(),
+                artifacts=artifacts,
+            )
             if callback_url:
                 _send_task_callback(task_id, callback_timeout_seconds)
+        finally:
+            _set_current_task_id(None)
+
     thread = threading.Thread(
         target=_run,
         daemon=True,
@@ -339,3 +420,45 @@ def get_task(task_id: str) -> TaskRecord | None:
     with _LOCK:
         task = _TASKS.get(task_id)
         return deepcopy(task) if task is not None else None
+
+
+def list_tasks(
+    *,
+    task_type: str | None = None,
+    state: TaskState | None = None,
+    limit: int = 100,
+) -> list[TaskRecord]:
+    with _LOCK:
+        tasks = list(_TASKS.values())
+    tasks.sort(key=lambda item: item["created_at"], reverse=True)
+    filtered: list[TaskRecord] = []
+    for task in tasks:
+        if task_type and task["task_type"] != task_type:
+            continue
+        if state and task["state"] != state:
+            continue
+        filtered.append(deepcopy(task))
+        if len(filtered) >= limit:
+            break
+    return filtered
+
+
+def cancel_task(task_id: str) -> TaskRecord | None:
+    task = get_task(task_id)
+    if task is None:
+        return None
+    if task["state"] in {"succeeded", "failed", "cancelled"}:
+        return task
+
+    _update_task(task_id, cancellation_requested=True)
+    updated = get_task(task_id)
+    if updated is not None and updated["state"] == "pending":
+        _update_task(
+            task_id,
+            state="cancelled",
+            error=f"task cancelled: {task_id}",
+            result=None,
+            finished_at=_now_iso(),
+        )
+        updated = get_task(task_id)
+    return updated

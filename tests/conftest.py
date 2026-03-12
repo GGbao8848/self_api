@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.main import app
+from app.services import task_manager
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -35,3 +37,23 @@ def case_dir(tmp_datasets_root: Path, request: pytest.FixtureRequest) -> Path:
         shutil.rmtree(case_path)
     case_path.mkdir(parents=True, exist_ok=True)
     return case_path
+
+
+@pytest.fixture
+def isolated_runtime(monkeypatch: pytest.MonkeyPatch) -> Path:
+    storage_dir = ROOT_DIR / "tmp_datasets" / "test_storage"
+    if storage_dir.exists():
+        shutil.rmtree(storage_dir)
+
+    monkeypatch.setenv("SELF_API_STORAGE_ROOT", "./tmp_datasets/test_storage")
+    get_settings.cache_clear()
+    task_manager._TASKS.clear()
+    task_manager._CALLBACK_URL_LOCKS.clear()
+
+    yield storage_dir
+
+    task_manager._TASKS.clear()
+    task_manager._CALLBACK_URL_LOCKS.clear()
+    get_settings.cache_clear()
+    if storage_dir.exists():
+        shutil.rmtree(storage_dir)

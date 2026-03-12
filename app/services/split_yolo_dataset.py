@@ -2,11 +2,13 @@ import random
 import shutil
 from pathlib import Path
 
+from app.core.path_safety import resolve_safe_path
 from app.schemas.preprocess import (
     SplitYoloDatasetRequest,
     SplitYoloDatasetResponse,
     SplitYoloFileDetail,
 )
+from app.services.task_manager import ensure_current_task_active
 from app.utils.images import normalize_extensions
 
 _SPLIT_DIR_NAMES = {"train", "val", "test"}
@@ -46,9 +48,12 @@ def _copy_or_move(src: Path, dst: Path, copy_files: bool) -> None:
 
 
 def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDatasetResponse:
-    dataset_dir = Path(request.dataset_dir).expanduser().resolve()
-    if not dataset_dir.exists() or not dataset_dir.is_dir():
-        raise ValueError(f"dataset_dir does not exist or is not a directory: {dataset_dir}")
+    dataset_dir = resolve_safe_path(
+        request.dataset_dir,
+        field_name="dataset_dir",
+        must_exist=True,
+        expect_directory=True,
+    )
 
     images_dir = dataset_dir / request.images_dir_name
     labels_dir = dataset_dir / request.labels_dir_name
@@ -58,7 +63,7 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
         raise ValueError(f"labels_dir does not exist or is not a directory: {labels_dir}")
 
     output_dir = (
-        Path(request.output_dir).expanduser().resolve()
+        resolve_safe_path(request.output_dir, field_name="output_dir")
         if request.output_dir
         else (dataset_dir / "split_dataset").resolve()
     )
@@ -69,6 +74,7 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
     iterator = images_dir.rglob("*") if request.recursive else images_dir.glob("*")
     image_paths = []
     for path in iterator:
+        ensure_current_task_active()
         if not path.is_file() or path.suffix.lower() not in normalized_exts:
             continue
         rel = path.relative_to(images_dir)
@@ -82,6 +88,7 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
     skipped_images = 0
 
     for image_path in image_paths:
+        ensure_current_task_active()
         rel_path = image_path.relative_to(images_dir)
         label_path = (labels_dir / rel_path).with_suffix(".txt")
 
@@ -136,6 +143,7 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
 
     for split_name in ordered_splits:
         for source_image, source_label, rel_path in split_assignments[split_name]:
+            ensure_current_task_active()
             target_rel = rel_path if request.keep_subdirs else Path(rel_path.name)
             target_image = output_dir / request.images_dir_name / split_name / target_rel
             target_label = (

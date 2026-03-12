@@ -59,6 +59,7 @@ ENV/
 *.tmp
 logs/
 tmp/
+storage/
 
 # OS files
 .DS_Store

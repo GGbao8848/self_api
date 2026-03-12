@@ -2,11 +2,13 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
+from app.core.path_safety import resolve_safe_path
 from app.schemas.preprocess import (
     YoloSlidingWindowCropDetail,
     YoloSlidingWindowCropRequest,
     YoloSlidingWindowCropResponse,
 )
+from app.services.task_manager import ensure_current_task_active
 from app.utils.images import list_image_paths
 
 _SAVE_FORMAT_MAP = {
@@ -119,9 +121,12 @@ def _clip_boxes_to_window(
 
 
 def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloSlidingWindowCropResponse:
-    dataset_dir = Path(request.dataset_dir).expanduser().resolve()
-    if not dataset_dir.exists() or not dataset_dir.is_dir():
-        raise ValueError(f"dataset_dir does not exist or is not a directory: {dataset_dir}")
+    dataset_dir = resolve_safe_path(
+        request.dataset_dir,
+        field_name="dataset_dir",
+        must_exist=True,
+        expect_directory=True,
+    )
 
     images_dir = dataset_dir / request.images_dir_name
     labels_dir = dataset_dir / request.labels_dir_name
@@ -131,7 +136,7 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
         raise ValueError(f"labels_dir does not exist or is not a directory: {labels_dir}")
 
     output_dir = (
-        Path(request.output_dir).expanduser().resolve()
+        resolve_safe_path(request.output_dir, field_name="output_dir")
         if request.output_dir
         else (dataset_dir / "yolo_crops").resolve()
     )
@@ -151,6 +156,7 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
     generated_labels = 0
 
     for image_path in image_paths:
+        ensure_current_task_active()
         rel_image = image_path.relative_to(images_dir)
         label_path = (labels_dir / rel_image).with_suffix(".txt")
         if request.require_label and not label_path.exists():
@@ -192,6 +198,7 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
                 label_count = 0
 
                 for y in y_values:
+                    ensure_current_task_active()
                     for x in x_values:
                         right = min(x + request.window_width, image_width)
                         bottom = min(y + request.window_height, image_height)

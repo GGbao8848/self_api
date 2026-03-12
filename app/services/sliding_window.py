@@ -2,11 +2,13 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
+from app.core.path_safety import resolve_safe_path
 from app.schemas.preprocess import (
     CropImageDetail,
     SlidingWindowCropRequest,
     SlidingWindowCropResponse,
 )
+from app.services.task_manager import ensure_current_task_active
 from app.utils.images import list_image_paths
 
 
@@ -37,11 +39,13 @@ def _save_crop(crop: Image.Image, output_path: Path, output_ext: str) -> None:
 
 
 def run_sliding_window_crop(request: SlidingWindowCropRequest) -> SlidingWindowCropResponse:
-    input_dir = Path(request.input_dir).expanduser().resolve()
-    output_dir = Path(request.output_dir).expanduser().resolve()
-
-    if not input_dir.exists() or not input_dir.is_dir():
-        raise ValueError(f"input_dir does not exist or is not a directory: {input_dir}")
+    input_dir = resolve_safe_path(
+        request.input_dir,
+        field_name="input_dir",
+        must_exist=True,
+        expect_directory=True,
+    )
+    output_dir = resolve_safe_path(request.output_dir, field_name="output_dir")
 
     image_paths = list_image_paths(
         input_dir,
@@ -55,6 +59,7 @@ def run_sliding_window_crop(request: SlidingWindowCropRequest) -> SlidingWindowC
     skipped_images = 0
 
     for image_path in image_paths:
+        ensure_current_task_active()
         try:
             with Image.open(image_path) as image:
                 width, height = image.size
@@ -72,6 +77,7 @@ def run_sliding_window_crop(request: SlidingWindowCropRequest) -> SlidingWindowC
                 )
 
                 for y in y_values:
+                    ensure_current_task_active()
                     for x in x_values:
                         right = min(x + request.window_width, width)
                         bottom = min(y + request.window_height, height)

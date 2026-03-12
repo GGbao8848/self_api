@@ -2,6 +2,8 @@ from typing import Any, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, Field
 
+from app.schemas.artifacts import ArtifactSummary
+
 
 class SlidingWindowCropRequest(BaseModel):
     input_dir: str = Field(description="Input directory containing images")
@@ -79,17 +81,20 @@ class AsyncTaskCallbackEvent(BaseModel):
 class AsyncTaskStatusResponse(BaseModel):
     task_id: str
     task_type: str
-    state: Literal["pending", "running", "succeeded", "failed"]
+    state: Literal["pending", "running", "succeeded", "failed", "cancelled"]
     created_at: str
     updated_at: str
+    finished_at: str | None = None
     result: dict[str, Any] | None = None
     error: str | None = None
+    cancellation_requested: bool = False
     callback_url: str | None = None
     callback_state: Literal["pending", "running", "succeeded", "failed"] = "succeeded"
     callback_sent_at: str | None = None
     callback_status_code: int | None = None
     callback_error: str | None = None
-    callback_events: list[AsyncTaskCallbackEvent] = []
+    callback_events: list[AsyncTaskCallbackEvent] = Field(default_factory=list)
+    artifacts: list[ArtifactSummary] = Field(default_factory=list)
 
 
 class XmlToYoloRequest(BaseModel):

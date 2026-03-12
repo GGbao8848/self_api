@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.core.security import require_api_auth
 from app.schemas.preprocess import (
     AsyncTaskStatusResponse,
     AsyncTaskSubmitResponse,
@@ -40,7 +41,11 @@ from app.services.task_manager import get_task, submit_task
 from app.services.xml_to_yolo import run_xml_to_yolo
 from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
 
-router = APIRouter(prefix="/preprocess", tags=["preprocess"])
+router = APIRouter(
+    prefix="/preprocess",
+    tags=["preprocess"],
+    dependencies=[Depends(require_api_auth)],
+)
 
 
 @router.post("/sliding-window-crop", response_model=SlidingWindowCropResponse)

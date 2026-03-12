@@ -3,11 +3,13 @@ from xml.etree import ElementTree
 
 from PIL import Image, UnidentifiedImageError
 
+from app.core.path_safety import resolve_safe_path
 from app.schemas.preprocess import (
     XmlToYoloFileDetail,
     XmlToYoloRequest,
     XmlToYoloResponse,
 )
+from app.services.task_manager import ensure_current_task_active
 
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
 
@@ -105,9 +107,12 @@ def _load_xml_annotation(
 
 
 def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
-    dataset_dir = Path(request.dataset_dir).expanduser().resolve()
-    if not dataset_dir.exists() or not dataset_dir.is_dir():
-        raise ValueError(f"dataset_dir does not exist or is not a directory: {dataset_dir}")
+    dataset_dir = resolve_safe_path(
+        request.dataset_dir,
+        field_name="dataset_dir",
+        must_exist=True,
+        expect_directory=True,
+    )
 
     images_dir = dataset_dir / request.images_dir_name
     xmls_dir = dataset_dir / request.xmls_dir_name
@@ -128,6 +133,7 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
     details: list[XmlToYoloFileDetail] = []
 
     for xml_path in xml_paths:
+        ensure_current_task_active()
         width, height, objects, error = _load_xml_annotation(
             xml_path=xml_path,
             images_dir=images_dir,
@@ -158,6 +164,7 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
     total_boxes = 0
 
     for xml_path, width, height, objects, error in parsed_entries:
+        ensure_current_task_active()
         rel_xml = xml_path.relative_to(xmls_dir)
         label_path = (labels_dir / rel_xml).with_suffix(".txt")
 

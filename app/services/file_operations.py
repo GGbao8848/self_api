@@ -2,6 +2,7 @@ import shutil
 import zipfile
 from pathlib import Path
 
+from app.core.path_safety import resolve_safe_path
 from app.schemas.preprocess import (
     CopyPathRequest,
     CopyPathResponse,
@@ -12,15 +13,22 @@ from app.schemas.preprocess import (
     ZipFolderRequest,
     ZipFolderResponse,
 )
+from app.services.task_manager import ensure_current_task_active
 
 
 def run_zip_folder(request: ZipFolderRequest) -> ZipFolderResponse:
-    input_dir = Path(request.input_dir).expanduser().resolve()
-    if not input_dir.exists() or not input_dir.is_dir():
-        raise ValueError(f"input_dir does not exist or is not a directory: {input_dir}")
+    input_dir = resolve_safe_path(
+        request.input_dir,
+        field_name="input_dir",
+        must_exist=True,
+        expect_directory=True,
+    )
 
     if request.output_zip_path:
-        output_zip_path = Path(request.output_zip_path).expanduser().resolve()
+        output_zip_path = resolve_safe_path(
+            request.output_zip_path,
+            field_name="output_zip_path",
+        )
     else:
         output_zip_path = input_dir.parent / f"{input_dir.name}.zip"
 
@@ -37,6 +45,7 @@ def run_zip_folder(request: ZipFolderRequest) -> ZipFolderResponse:
     mode = "w" if request.overwrite else "x"
     with zipfile.ZipFile(output_zip_path, mode=mode, compression=zipfile.ZIP_DEFLATED) as zipf:
         for path in sorted(input_dir.rglob("*")):
+            ensure_current_task_active()
             if not path.is_file():
                 continue
             if request.include_root_dir:
@@ -67,14 +76,17 @@ def _ensure_safe_extract_path(output_dir: Path, member_name: str) -> Path:
 
 
 def run_unzip_archive(request: UnzipArchiveRequest) -> UnzipArchiveResponse:
-    archive_path = Path(request.archive_path).expanduser().resolve()
-    if not archive_path.exists() or not archive_path.is_file():
-        raise ValueError(f"archive_path does not exist or is not a file: {archive_path}")
+    archive_path = resolve_safe_path(
+        request.archive_path,
+        field_name="archive_path",
+        must_exist=True,
+        expect_file=True,
+    )
     if not zipfile.is_zipfile(archive_path):
         raise ValueError(f"archive_path is not a valid zip file: {archive_path}")
 
     if request.output_dir:
-        output_dir = Path(request.output_dir).expanduser().resolve()
+        output_dir = resolve_safe_path(request.output_dir, field_name="output_dir")
     else:
         output_dir = (archive_path.parent / archive_path.stem).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -84,6 +96,7 @@ def run_unzip_archive(request: UnzipArchiveRequest) -> UnzipArchiveResponse:
 
     with zipfile.ZipFile(archive_path, mode="r") as zipf:
         for member in zipf.infolist():
+            ensure_current_task_active()
             if member.is_dir():
                 continue
 
@@ -107,11 +120,12 @@ def run_unzip_archive(request: UnzipArchiveRequest) -> UnzipArchiveResponse:
 
 
 def run_move_path(request: MovePathRequest) -> MovePathResponse:
-    source_path = Path(request.source_path).expanduser().resolve()
-    target_dir = Path(request.target_dir).expanduser().resolve()
-
-    if not source_path.exists():
-        raise ValueError(f"source_path does not exist: {source_path}")
+    source_path = resolve_safe_path(
+        request.source_path,
+        field_name="source_path",
+        must_exist=True,
+    )
+    target_dir = resolve_safe_path(request.target_dir, field_name="target_dir")
     target_dir.mkdir(parents=True, exist_ok=True)
     if not target_dir.is_dir():
         raise ValueError(f"target_dir is not a directory: {target_dir}")
@@ -152,11 +166,12 @@ def run_move_path(request: MovePathRequest) -> MovePathResponse:
 
 
 def run_copy_path(request: CopyPathRequest) -> CopyPathResponse:
-    source_path = Path(request.source_path).expanduser().resolve()
-    target_dir = Path(request.target_dir).expanduser().resolve()
-
-    if not source_path.exists():
-        raise ValueError(f"source_path does not exist: {source_path}")
+    source_path = resolve_safe_path(
+        request.source_path,
+        field_name="source_path",
+        must_exist=True,
+    )
+    target_dir = resolve_safe_path(request.target_dir, field_name="target_dir")
     target_dir.mkdir(parents=True, exist_ok=True)
     if not target_dir.is_dir():
         raise ValueError(f"target_dir is not a directory: {target_dir}")
