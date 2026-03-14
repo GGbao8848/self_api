@@ -1,0 +1,484 @@
+{
+  "name": "TEDS小图数据集整理-WebHook版-兼容imagesxml",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "teds-small-dataset",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        420,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $input.first().json.body || {};\nconst inputDir = String(payload.input_dir || '').replace(/\\/+$/, '');\nif (!inputDir) {\n  throw new Error('input_dir 是必填项');\n}\n\nreturn [{\n  json: {\n    api_base_url: payload.api_base_url || 'http://192.168.2.26:8666/api/v1',\n    input_dir: inputDir,\n    clean_output_dir: payload.clean_output_dir || `${inputDir}/cleaned_dataset`,\n    aggregated_output_dir: payload.aggregated_output_dir || `${inputDir}/dataset`,\n    images_dir_name: payload.images_dir_name || 'images',\n    xmls_dir_name: payload.xmls_dir_name || 'xmls',\n    labels_dir_name: payload.labels_dir_name || 'labels',\n    backgrounds_dir_name: payload.backgrounds_dir_name || 'backgrounds',\n    include_difficult: payload.include_difficult ?? false,\n    copy_files: payload.copy_files ?? true,\n    overwrite: payload.overwrite ?? true\n  }\n}];"
+      },
+      "id": "prepare-config",
+      "name": "Prepare Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'accepted', input_dir: $json.input_dir, clean_output_dir: $json.clean_output_dir, aggregated_output_dir: $json.aggregated_output_dir, message: 'workflow started' } }}",
+        "options": {}
+      },
+      "id": "respond-accepted",
+      "name": "Respond Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        900,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.api_base_url + \"/preprocess/discover-leaf-dirs\"}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  input_dir: $json.input_dir,\n  recursive: true\n} }}",
+        "options": {}
+      },
+      "id": "discover-leaf-dirs",
+      "name": "Discover Leaf Dirs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nif (!data.total_leaf_dirs || data.total_leaf_dirs <= 0) {\n  throw new Error(`未发现可处理的叶子目录: ${$node[\"Prepare Config\"].json.input_dir}`);\n}\nreturn [{\n  json: {\n    total_leaf_dirs: data.total_leaf_dirs,\n    leaf_dirs: data.leaf_dirs,\n  },\n}];"
+      },
+      "id": "validate-leaf-dirs",
+      "name": "Validate Leaf Dirs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst config = $node[\"Prepare Config\"].json;\nconst leafDirs = Array.isArray(data.leaf_dirs) ? data.leaf_dirs : [];\nconst xmlDirNames = new Set([config.xmls_dir_name, 'xml'].filter(Boolean));\nconst reservedLeafNames = new Set([\n  config.images_dir_name,\n  config.xmls_dir_name,\n  'xml',\n  config.labels_dir_name,\n  config.backgrounds_dir_name,\n].filter(Boolean));\n\nconst splitGroups = new Map();\nlet nonReservedLeafCount = 0;\n\nfor (const rawDir of leafDirs) {\n  const dir = String(rawDir || '').replace(/\\/+$/, '');\n  const parts = dir.split('/').filter(Boolean);\n  if (!parts.length) {\n    continue;\n  }\n  const leafName = parts[parts.length - 1];\n  const parentDir = `/${parts.slice(0, -1).join('/')}`;\n\n  if (!reservedLeafNames.has(leafName)) {\n    nonReservedLeafCount += 1;\n    continue;\n  }\n\n  if (!splitGroups.has(parentDir)) {\n    splitGroups.set(parentDir, {\n      parent_dir: parentDir,\n      images_dir_name: null,\n      xmls_dir_name: null,\n    });\n  }\n\n  const entry = splitGroups.get(parentDir);\n  if (leafName === config.images_dir_name) {\n    entry.images_dir_name = leafName;\n  }\n  if (xmlDirNames.has(leafName)) {\n    entry.xmls_dir_name = leafName;\n  }\n}\n\nconst splitFragmentDirs = Array.from(splitGroups.values()).filter((entry) => entry.images_dir_name && entry.xmls_dir_name);\nconst layoutMode = splitFragmentDirs.length > 0 && nonReservedLeafCount === 0\n  ? 'split_images_xml_dirs'\n  : 'mixed_leaf_files';\n\nreturn [{\n  json: {\n    total_leaf_dirs: data.total_leaf_dirs,\n    leaf_dirs: leafDirs,\n    layout_mode: layoutMode,\n    split_fragment_count: splitFragmentDirs.length,\n    split_fragment_dirs: splitFragmentDirs,\n    non_reserved_leaf_count: nonReservedLeafCount,\n  },\n}];"
+      },
+      "id": "detect-dataset-layout",
+      "name": "Detect Dataset Layout",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "layout-mode-equals-split",
+              "leftValue": "={{$json.layout_mode}}",
+              "rightValue": "split_images_xml_dirs",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "route-dataset-layout",
+      "name": "Route Dataset Layout",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1620,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$node[\"Prepare Config\"].json.api_base_url + \"/preprocess/clean-nested-dataset\"}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  input_dir: $node[\"Prepare Config\"].json.input_dir,\n  output_dir: $node[\"Prepare Config\"].json.clean_output_dir,\n  images_dir_name: $node[\"Prepare Config\"].json.images_dir_name,\n  xmls_dir_name: $node[\"Prepare Config\"].json.xmls_dir_name,\n  backgrounds_dir_name: $node[\"Prepare Config\"].json.backgrounds_dir_name,\n  include_difficult: $node[\"Prepare Config\"].json.include_difficult,\n  copy_files: $node[\"Prepare Config\"].json.copy_files,\n  overwrite: $node[\"Prepare Config\"].json.overwrite\n} }}",
+        "options": {}
+      },
+      "id": "clean-nested-dataset",
+      "name": "Clean Nested Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1860,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cleanResp = $input.first().json;\nconst config = $node[\"Prepare Config\"].json;\nconst details = Array.isArray(cleanResp.details) ? cleanResp.details : [];\nconst items = details\n  .filter((detail) => detail.labeled_images > 0)\n  .map((detail) => ({\n    json: {\n      api_base_url: config.api_base_url,\n      input_dir: config.input_dir,\n      dataset_dir: detail.output_dir,\n      source_dir: detail.source_dir,\n      processing_mode: 'mixed_leaf_files',\n      aggregate_input_dir: config.clean_output_dir,\n      clean_output_dir: config.clean_output_dir,\n      aggregated_output_dir: config.aggregated_output_dir,\n      images_dir_name: config.images_dir_name,\n      xmls_dir_name: config.xmls_dir_name,\n      labels_dir_name: config.labels_dir_name,\n      backgrounds_dir_name: config.backgrounds_dir_name,\n      include_difficult: config.include_difficult,\n      overwrite: config.overwrite\n    }\n  }));\n\nif (!items.length) {\n  throw new Error('未发现可转换的混放目录；如果原始数据已经是 images/xml 分目录结构，请走兼容分支。');\n}\n\nreturn items;"
+      },
+      "id": "build-mixed-xml-to-yolo-inputs",
+      "name": "Build Mixed XML To YOLO Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.api_base_url + \"/preprocess/xml-to-yolo\"}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  dataset_dir: $json.dataset_dir,\n  images_dir_name: $json.images_dir_name,\n  xmls_dir_name: $json.xmls_dir_name,\n  labels_dir_name: $json.labels_dir_name,\n  recursive: true,\n  include_difficult: $json.include_difficult,\n  write_classes_file: true,\n  overwrite: $json.overwrite\n} }}",
+        "options": {}
+      },
+      "id": "xml-to-yolo-mixed",
+      "name": "XML To YOLO Mixed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (!items.length) {\n  throw new Error('xml-to-yolo 未返回任何结果');\n}\n\nconst config = $node[\"Prepare Config\"].json;\nconst clean = $node[\"Clean Nested Dataset\"].json;\nconst detect = $node[\"Detect Dataset Layout\"].json;\nconst convertedFragments = items.map((item) => ({\n  dataset_dir: item.json.dataset_dir,\n  converted_files: item.json.converted_files,\n  total_boxes: item.json.total_boxes,\n  classes: item.json.classes,\n}));\n\nreturn [{\n  json: {\n    processing_mode: 'mixed_leaf_files',\n    input_dir: config.input_dir,\n    discovered_leaf_dirs: detect.total_leaf_dirs,\n    cleaned_leaf_dirs: clean.processed_leaf_dirs,\n    labeled_images: clean.labeled_images,\n    background_images: clean.background_images,\n    converted_fragment_count: convertedFragments.length,\n    converted_fragments: convertedFragments,\n    aggregate_input_dir: config.clean_output_dir,\n    clean_output_dir: config.clean_output_dir,\n    aggregated_output_dir: config.aggregated_output_dir,\n    images_dir_name: config.images_dir_name,\n    labels_dir_name: config.labels_dir_name,\n    backgrounds_dir_name: config.backgrounds_dir_name,\n    overwrite: config.overwrite\n  },\n}];"
+      },
+      "id": "summarize-mixed-conversion",
+      "name": "Summarize Mixed Conversion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2580,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$node[\"Prepare Config\"].json.api_base_url + \"/preprocess/aggregate-nested-dataset\"}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  input_dir: $json.aggregate_input_dir,\n  output_dir: $json.aggregated_output_dir,\n  images_dir_name: $json.images_dir_name,\n  labels_dir_name: $json.labels_dir_name,\n  backgrounds_dir_name: $json.backgrounds_dir_name,\n  classes_file_name: 'classes.txt',\n  require_non_empty_labels: true,\n  overwrite: $json.overwrite\n} }}",
+        "options": {}
+      },
+      "id": "aggregate-mixed-dataset",
+      "name": "Aggregate Mixed Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2820,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const aggregate = $input.first().json;\nconst summary = $node[\"Summarize Mixed Conversion\"].json;\n\nreturn [{\n  json: {\n    status: 'ok',\n    processing_mode: summary.processing_mode,\n    input_dir: summary.input_dir,\n    discovered_leaf_dirs: summary.discovered_leaf_dirs,\n    cleaned_leaf_dirs: summary.cleaned_leaf_dirs,\n    labeled_images: summary.labeled_images,\n    background_images: summary.background_images,\n    aggregated_images: aggregate.aggregated_images,\n    aggregated_backgrounds: aggregate.aggregated_backgrounds,\n    classes: aggregate.classes,\n    clean_output_dir: summary.clean_output_dir,\n    dataset_output_dir: aggregate.output_dir,\n    classes_file: aggregate.classes_file,\n    manifest_path: aggregate.manifest_path\n  },\n}];"
+      },
+      "id": "final-summary-mixed",
+      "name": "Final Summary Mixed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3060,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const detect = $input.first().json;\nconst config = $node[\"Prepare Config\"].json;\nconst fragments = Array.isArray(detect.split_fragment_dirs) ? detect.split_fragment_dirs : [];\nif (!fragments.length) {\n  throw new Error('未发现 images/xml 成对目录');\n}\n\nreturn fragments.map((fragment) => ({\n  json: {\n    api_base_url: config.api_base_url,\n    input_dir: config.input_dir,\n    dataset_dir: fragment.parent_dir,\n    source_dir: fragment.parent_dir,\n    processing_mode: 'split_images_xml_dirs',\n    aggregate_input_dir: config.input_dir,\n    clean_output_dir: null,\n    aggregated_output_dir: config.aggregated_output_dir,\n    images_dir_name: fragment.images_dir_name,\n    xmls_dir_name: fragment.xmls_dir_name,\n    labels_dir_name: config.labels_dir_name,\n    backgrounds_dir_name: config.backgrounds_dir_name,\n    include_difficult: config.include_difficult,\n    overwrite: config.overwrite\n  }\n}));"
+      },
+      "id": "build-split-xml-to-yolo-inputs",
+      "name": "Build Split XML To YOLO Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1860,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.api_base_url + \"/preprocess/xml-to-yolo\"}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  dataset_dir: $json.dataset_dir,\n  images_dir_name: $json.images_dir_name,\n  xmls_dir_name: $json.xmls_dir_name,\n  labels_dir_name: $json.labels_dir_name,\n  recursive: true,\n  include_difficult: $json.include_difficult,\n  write_classes_file: true,\n  overwrite: $json.overwrite\n} }}",
+        "options": {}
+      },
+      "id": "xml-to-yolo-split",
+      "name": "XML To YOLO Split",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2100,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (!items.length) {\n  throw new Error('xml-to-yolo 未返回任何结果');\n}\n\nconst config = $node[\"Prepare Config\"].json;\nconst detect = $node[\"Detect Dataset Layout\"].json;\nconst convertedFragments = items.map((item) => ({\n  dataset_dir: item.json.dataset_dir,\n  converted_files: item.json.converted_files,\n  total_boxes: item.json.total_boxes,\n  classes: item.json.classes,\n}));\nconst labeledImages = items.reduce((sum, item) => sum + (item.json.converted_files || 0), 0);\n\nreturn [{\n  json: {\n    processing_mode: 'split_images_xml_dirs',\n    input_dir: config.input_dir,\n    discovered_leaf_dirs: detect.total_leaf_dirs,\n    cleaned_leaf_dirs: detect.split_fragment_count,\n    labeled_images: labeledImages,\n    background_images: 0,\n    converted_fragment_count: convertedFragments.length,\n    converted_fragments: convertedFragments,\n    aggregate_input_dir: config.input_dir,\n    clean_output_dir: null,\n    aggregated_output_dir: config.aggregated_output_dir,\n    images_dir_name: config.images_dir_name,\n    labels_dir_name: config.labels_dir_name,\n    backgrounds_dir_name: config.backgrounds_dir_name,\n    overwrite: config.overwrite\n  },\n}];"
+      },
+      "id": "summarize-split-conversion",
+      "name": "Summarize Split Conversion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$node[\"Prepare Config\"].json.api_base_url + \"/preprocess/aggregate-nested-dataset\"}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  input_dir: $json.aggregate_input_dir,\n  output_dir: $json.aggregated_output_dir,\n  images_dir_name: $json.images_dir_name,\n  labels_dir_name: $json.labels_dir_name,\n  backgrounds_dir_name: $json.backgrounds_dir_name,\n  classes_file_name: 'classes.txt',\n  require_non_empty_labels: true,\n  overwrite: $json.overwrite\n} }}",
+        "options": {}
+      },
+      "id": "aggregate-split-dataset",
+      "name": "Aggregate Split Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2580,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const aggregate = $input.first().json;\nconst summary = $node[\"Summarize Split Conversion\"].json;\n\nreturn [{\n  json: {\n    status: 'ok',\n    processing_mode: summary.processing_mode,\n    input_dir: summary.input_dir,\n    discovered_leaf_dirs: summary.discovered_leaf_dirs,\n    cleaned_leaf_dirs: summary.cleaned_leaf_dirs,\n    labeled_images: summary.labeled_images,\n    background_images: summary.background_images,\n    aggregated_images: aggregate.aggregated_images,\n    aggregated_backgrounds: aggregate.aggregated_backgrounds,\n    classes: aggregate.classes,\n    clean_output_dir: summary.clean_output_dir,\n    dataset_output_dir: aggregate.output_dir,\n    classes_file: aggregate.classes_file,\n    manifest_path: aggregate.manifest_path\n  },\n}];"
+      },
+      "id": "final-summary-split",
+      "name": "Final Summary Split",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2820,
+        40
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Config": {
+      "main": [
+        [
+          {
+            "node": "Respond Accepted",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Discover Leaf Dirs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discover Leaf Dirs": {
+      "main": [
+        [
+          {
+            "node": "Validate Leaf Dirs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Leaf Dirs": {
+      "main": [
+        [
+          {
+            "node": "Detect Dataset Layout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Dataset Layout": {
+      "main": [
+        [
+          {
+            "node": "Route Dataset Layout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Dataset Layout": {
+      "main": [
+        [
+          {
+            "node": "Build Split XML To YOLO Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clean Nested Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Split XML To YOLO Inputs": {
+      "main": [
+        [
+          {
+            "node": "XML To YOLO Split",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "XML To YOLO Split": {
+      "main": [
+        [
+          {
+            "node": "Summarize Split Conversion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Split Conversion": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Split Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Split Dataset": {
+      "main": [
+        [
+          {
+            "node": "Final Summary Split",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Nested Dataset": {
+      "main": [
+        [
+          {
+            "node": "Build Mixed XML To YOLO Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Mixed XML To YOLO Inputs": {
+      "main": [
+        [
+          {
+            "node": "XML To YOLO Mixed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "XML To YOLO Mixed": {
+      "main": [
+        [
+          {
+            "node": "Summarize Mixed Conversion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Mixed Conversion": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Mixed Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Mixed Dataset": {
+      "main": [
+        [
+          {
+            "node": "Final Summary Mixed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
