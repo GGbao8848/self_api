@@ -342,6 +342,168 @@ class YoloSlidingWindowCropRequest(BaseModel):
     )
 
 
+class DiscoverLeafDirsRequest(BaseModel):
+    input_dir: str = Field(description="Root directory to scan for leaf data folders")
+    recursive: bool = Field(default=True, description="Scan nested directories recursively")
+    extensions: list[str] | None = Field(
+        default=None,
+        description="Allowed image extensions, e.g. ['.jpg', '.png']",
+    )
+
+
+class DiscoverLeafDirsResponse(BaseModel):
+    status: str = "ok"
+    input_dir: str
+    total_leaf_dirs: int
+    leaf_dirs: list[str]
+
+
+class CleanNestedDatasetRequest(BaseModel):
+    input_dir: str = Field(description="Root directory containing nested raw image/xml folders")
+    output_dir: str | None = Field(
+        default=None,
+        description="Output directory; defaults to <input_dir>/cleaned_dataset",
+    )
+    recursive: bool = Field(default=True, description="Scan nested directories recursively")
+    extensions: list[str] | None = Field(
+        default=None,
+        description="Allowed image extensions, e.g. ['.jpg', '.png']",
+    )
+    images_dir_name: str = Field(default="images", description="Output folder name for labeled images")
+    xmls_dir_name: str = Field(default="xmls", description="Output folder name for xml annotations")
+    backgrounds_dir_name: str = Field(
+        default="backgrounds",
+        description="Output folder name for background images",
+    )
+    include_difficult: bool = Field(
+        default=False,
+        description="Whether difficult objects count as valid annotations",
+    )
+    copy_files: bool = Field(default=True, description="Copy files instead of moving")
+    overwrite: bool = Field(
+        default=False,
+        description="Whether to overwrite existing target files",
+    )
+
+
+class CleanNestedDatasetLeafDetail(BaseModel):
+    source_dir: str
+    output_dir: str
+    total_images: int
+    labeled_images: int
+    background_images: int
+    copied_xml_files: int
+    empty_or_invalid_xml_files: int
+    orphan_xml_files: int
+
+
+class CleanNestedDatasetResponse(BaseModel):
+    status: str = "ok"
+    input_dir: str
+    output_dir: str
+    discovered_leaf_dirs: int
+    processed_leaf_dirs: int
+    total_images: int
+    labeled_images: int
+    background_images: int
+    copied_xml_files: int
+    empty_or_invalid_xml_files: int
+    orphan_xml_files: int
+    details: list[CleanNestedDatasetLeafDetail]
+
+
+class AggregateNestedDatasetRequest(BaseModel):
+    input_dir: str = Field(description="Root directory containing cleaned per-leaf datasets")
+    output_dir: str | None = Field(
+        default=None,
+        description="Output directory; defaults to <input_dir>/dataset",
+    )
+    images_dir_name: str = Field(default="images", description="Input/output image folder name")
+    labels_dir_name: str = Field(default="labels", description="Input/output label folder name")
+    backgrounds_dir_name: str = Field(
+        default="backgrounds",
+        description="Input/output background folder name",
+    )
+    classes_file_name: str = Field(
+        default="classes.txt",
+        description="Class index file name",
+    )
+    recursive: bool = Field(default=True, description="Scan nested directories recursively")
+    extensions: list[str] | None = Field(
+        default=None,
+        description="Allowed image extensions, e.g. ['.jpg', '.png']",
+    )
+    require_non_empty_labels: bool = Field(
+        default=True,
+        description="Skip image when paired label file is empty",
+    )
+    overwrite: bool = Field(
+        default=False,
+        description="Whether to overwrite existing aggregated target files",
+    )
+
+
+class AggregateNestedDatasetItemDetail(BaseModel):
+    source_path: str
+    target_path: str | None = None
+    item_type: Literal["image", "label", "background"]
+    skipped_reason: str | None = None
+
+
+class AggregateNestedDatasetResponse(BaseModel):
+    status: str = "ok"
+    input_dir: str
+    output_dir: str
+    fragment_dirs: int
+    aggregated_images: int
+    aggregated_backgrounds: int
+    skipped_images: int
+    classes: list[str]
+    class_to_id: dict[str, int]
+    classes_file: str | None
+    manifest_path: str
+    details: list[AggregateNestedDatasetItemDetail]
+
+
+class DiscoverLeafDirsAsyncRequest(DiscoverLeafDirsRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class CleanNestedDatasetAsyncRequest(CleanNestedDatasetRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class AggregateNestedDatasetAsyncRequest(AggregateNestedDatasetRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
 class XmlToYoloAsyncRequest(XmlToYoloRequest):
     callback_url: AnyHttpUrl | None = Field(
         default=None,

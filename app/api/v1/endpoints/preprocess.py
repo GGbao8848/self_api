@@ -2,11 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.core.security import require_api_auth
 from app.schemas.preprocess import (
+    AggregateNestedDatasetAsyncRequest,
+    AggregateNestedDatasetRequest,
+    AggregateNestedDatasetResponse,
     AsyncTaskStatusResponse,
     AsyncTaskSubmitResponse,
+    CleanNestedDatasetAsyncRequest,
+    CleanNestedDatasetRequest,
+    CleanNestedDatasetResponse,
     CopyPathAsyncRequest,
     CopyPathRequest,
     CopyPathResponse,
+    DiscoverLeafDirsAsyncRequest,
+    DiscoverLeafDirsRequest,
+    DiscoverLeafDirsResponse,
     MovePathAsyncRequest,
     MovePathRequest,
     MovePathResponse,
@@ -34,6 +43,11 @@ from app.services.file_operations import (
     run_move_path,
     run_unzip_archive,
     run_zip_folder,
+)
+from app.services.nested_dataset import (
+    run_aggregate_nested_dataset,
+    run_clean_nested_dataset,
+    run_discover_leaf_dirs,
 )
 from app.services.sliding_window import run_sliding_window_crop
 from app.services.split_yolo_dataset import run_split_yolo_dataset
@@ -94,6 +108,116 @@ def get_preprocess_task_status(task_id: str) -> AsyncTaskStatusResponse:
     if task is None:
         raise HTTPException(status_code=404, detail=f"task not found: {task_id}")
     return AsyncTaskStatusResponse(**task)
+
+
+@router.post("/discover-leaf-dirs", response_model=DiscoverLeafDirsResponse)
+def discover_leaf_dirs(payload: DiscoverLeafDirsRequest) -> DiscoverLeafDirsResponse:
+    try:
+        return run_discover_leaf_dirs(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/discover-leaf-dirs/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def discover_leaf_dirs_async(
+    payload: DiscoverLeafDirsAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "discover_leaf_dirs"
+    sync_payload = DiscoverLeafDirsRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_discover_leaf_dirs(sync_payload).model_dump(),
+        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
+    return AsyncTaskSubmitResponse(
+        task_id=task_id,
+        task_type=task_type,
+        status_url=status_url,
+        callback_url=str(payload.callback_url) if payload.callback_url else None,
+    )
+
+
+@router.post("/clean-nested-dataset", response_model=CleanNestedDatasetResponse)
+def clean_nested_dataset(payload: CleanNestedDatasetRequest) -> CleanNestedDatasetResponse:
+    try:
+        return run_clean_nested_dataset(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/clean-nested-dataset/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def clean_nested_dataset_async(
+    payload: CleanNestedDatasetAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "clean_nested_dataset"
+    sync_payload = CleanNestedDatasetRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_clean_nested_dataset(sync_payload).model_dump(),
+        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
+    return AsyncTaskSubmitResponse(
+        task_id=task_id,
+        task_type=task_type,
+        status_url=status_url,
+        callback_url=str(payload.callback_url) if payload.callback_url else None,
+    )
+
+
+@router.post("/aggregate-nested-dataset", response_model=AggregateNestedDatasetResponse)
+def aggregate_nested_dataset(
+    payload: AggregateNestedDatasetRequest,
+) -> AggregateNestedDatasetResponse:
+    try:
+        return run_aggregate_nested_dataset(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/aggregate-nested-dataset/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def aggregate_nested_dataset_async(
+    payload: AggregateNestedDatasetAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "aggregate_nested_dataset"
+    sync_payload = AggregateNestedDatasetRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_aggregate_nested_dataset(sync_payload).model_dump(),
+        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
+    return AsyncTaskSubmitResponse(
+        task_id=task_id,
+        task_type=task_type,
+        status_url=status_url,
+        callback_url=str(payload.callback_url) if payload.callback_url else None,
+    )
 
 
 @router.post("/xml-to-yolo", response_model=XmlToYoloResponse)

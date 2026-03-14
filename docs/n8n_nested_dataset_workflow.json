@@ -1,0 +1,268 @@
+{
+  "name": "TEDS Nested Dataset Callback Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const discover = $node[\"Validate Leaf Dirs\"].json;\nconst clean = $node[\"Clean Nested Dataset\"].json;\nconst aggregate = $input.first().json;\n\nreturn [{\n  json: {\n    status: 'ok',\n    input_dir: $node[\"Set Config\"].json.input_dir,\n    discovered_leaf_dirs: discover.total_leaf_dirs,\n    cleaned_leaf_dirs: clean.processed_leaf_dirs,\n    labeled_images: clean.labeled_images,\n    background_images: clean.background_images,\n    aggregated_images: aggregate.aggregated_images,\n    aggregated_backgrounds: aggregate.aggregated_backgrounds,\n    classes: aggregate.classes,\n    clean_output_dir: clean.output_dir,\n    dataset_output_dir: aggregate.output_dir,\n    classes_file: aggregate.classes_file,\n    manifest_path: aggregate.manifest_path,\n  },\n}];"
+      },
+      "id": "9d52f49e-60fa-4a3a-8897-6227b0c9ddee",
+      "name": "Final Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2560,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$node[\"Set Config\"].json.api_base_url + \"/preprocess/aggregate-nested-dataset\"}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  input_dir: $node[\"Set Config\"].json.clean_output_dir,\n  output_dir: $node[\"Set Config\"].json.aggregated_output_dir,\n  images_dir_name: $node[\"Set Config\"].json.images_dir_name,\n  labels_dir_name: $node[\"Set Config\"].json.labels_dir_name,\n  backgrounds_dir_name: $node[\"Set Config\"].json.backgrounds_dir_name,\n  classes_file_name: 'classes.txt',\n  require_non_empty_labels: true,\n  overwrite: $node[\"Set Config\"].json.overwrite\n} }}",
+        "options": {}
+      },
+      "id": "9a6ab820-3fc2-4789-b5ed-d83ed080e5de",
+      "name": "Aggregate Nested Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2320,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst convertedFragments = items.map((item) => ({\n  dataset_dir: item.json.dataset_dir,\n  converted_files: item.json.converted_files,\n  total_boxes: item.json.total_boxes,\n  classes: item.json.classes,\n}));\n\nreturn [{\n  json: {\n    converted_fragment_count: convertedFragments.length,\n    converted_fragments: convertedFragments,\n    clean_output_dir: $node[\"Set Config\"].json.clean_output_dir,\n    aggregated_output_dir: $node[\"Set Config\"].json.aggregated_output_dir,\n    images_dir_name: $node[\"Set Config\"].json.images_dir_name,\n    labels_dir_name: $node[\"Set Config\"].json.labels_dir_name,\n    backgrounds_dir_name: $node[\"Set Config\"].json.backgrounds_dir_name,\n  },\n}];"
+      },
+      "id": "631ef0d9-f4dd-4ce8-b5ad-80d07c219a35",
+      "name": "Summarize Fragment Conversion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.api_base_url + \"/preprocess/xml-to-yolo\"}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  dataset_dir: $json.dataset_dir,\n  images_dir_name: $json.images_dir_name,\n  xmls_dir_name: $json.xmls_dir_name,\n  labels_dir_name: $json.labels_dir_name,\n  recursive: true,\n  include_difficult: $json.include_difficult,\n  write_classes_file: true,\n  overwrite: $json.overwrite\n} }}",
+        "options": {}
+      },
+      "id": "6ebd089a-1841-49d3-9f25-d8a6373ef6a7",
+      "name": "XML To YOLO",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1840,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cleanResp = $input.first().json;\nconst config = $node[\"Set Config\"].json;\nconst details = Array.isArray(cleanResp.details) ? cleanResp.details : [];\n\nif (details.length === 0) {\n  throw new Error('clean-nested-dataset 未返回任何可转换目录');\n}\n\nreturn details\n  .filter((detail) => detail.labeled_images > 0)\n  .map((detail) => ({\n    json: {\n      api_base_url: config.api_base_url,\n      dataset_dir: detail.output_dir,\n      source_dir: detail.source_dir,\n      labeled_images: detail.labeled_images,\n      clean_output_dir: config.clean_output_dir,\n      aggregated_output_dir: config.aggregated_output_dir,\n      images_dir_name: config.images_dir_name,\n      xmls_dir_name: config.xmls_dir_name,\n      labels_dir_name: config.labels_dir_name,\n      include_difficult: config.include_difficult,\n      overwrite: config.overwrite,\n    },\n  }));"
+      },
+      "id": "a52ed736-860a-4b7f-ade4-4a840b8e35a6",
+      "name": "Build XML To YOLO Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$node[\"Set Config\"].json.api_base_url + \"/preprocess/clean-nested-dataset\"}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  input_dir: $node[\"Set Config\"].json.input_dir,\n  output_dir: $node[\"Set Config\"].json.clean_output_dir,\n  images_dir_name: $node[\"Set Config\"].json.images_dir_name,\n  xmls_dir_name: $node[\"Set Config\"].json.xmls_dir_name,\n  backgrounds_dir_name: $node[\"Set Config\"].json.backgrounds_dir_name,\n  include_difficult: $node[\"Set Config\"].json.include_difficult,\n  copy_files: $node[\"Set Config\"].json.copy_files,\n  overwrite: $node[\"Set Config\"].json.overwrite\n} }}",
+        "options": {}
+      },
+      "id": "63462cc2-29c5-484d-a9cc-68ea1874180c",
+      "name": "Clean Nested Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nif (!data.total_leaf_dirs || data.total_leaf_dirs <= 0) {\n  throw new Error(`未发现可处理的叶子目录: ${$node[\"Set Config\"].json.input_dir}`);\n}\nreturn [{\n  json: {\n    total_leaf_dirs: data.total_leaf_dirs,\n    leaf_dirs: data.leaf_dirs,\n  },\n}];"
+      },
+      "id": "c12f6c7e-c9dc-4010-8631-046b060f3a57",
+      "name": "Validate Leaf Dirs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$node[\"Set Config\"].json.api_base_url + \"/preprocess/discover-leaf-dirs\"}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  input_dir: $node[\"Set Config\"].json.input_dir,\n  recursive: true\n} }}",
+        "options": {}
+      },
+      "id": "1a524832-add2-4b47-8686-9ed67509e94d",
+      "name": "Discover Leaf Dirs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    api_base_url: 'http://192.168.2.26:8666/api/v1',\n    input_dir: '/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/TEDS广州局正线_转向架漏油_负类标注_20260312-标注完成',\n    clean_output_dir: '/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/cleaned_dataset',\n    aggregated_output_dir: '/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/dataset',\n    images_dir_name: 'images',\n    xmls_dir_name: 'xmls',\n    labels_dir_name: 'labels',\n    backgrounds_dir_name: 'backgrounds',\n    include_difficult: false,\n    copy_files: true,\n    overwrite: true,\n  },\n}];"
+      },
+      "id": "7acc3bee-89b1-4957-a328-ec6243196457",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        -144
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "0d581e44-ef85-4f9b-bdde-51f5f1788e32",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        416,
+        -144
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Aggregate Nested Dataset": {
+      "main": [
+        [
+          {
+            "node": "Final Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Fragment Conversion": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Nested Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "XML To YOLO": {
+      "main": [
+        [
+          {
+            "node": "Summarize Fragment Conversion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build XML To YOLO Inputs": {
+      "main": [
+        [
+          {
+            "node": "XML To YOLO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Nested Dataset": {
+      "main": [
+        [
+          {
+            "node": "Build XML To YOLO Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Leaf Dirs": {
+      "main": [
+        [
+          {
+            "node": "Clean Nested Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discover Leaf Dirs": {
+      "main": [
+        [
+          {
+            "node": "Validate Leaf Dirs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Config": {
+      "main": [
+        [
+          {
+            "node": "Discover Leaf Dirs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "2a730131-cedb-4237-9937-6c9e492916ec",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1b3e6ee362a456055e06758c3fd4e960c3621b1a8e2c51a10220c369f5f16c17"
+  },
+  "id": "NKWO7OD7EwSu3CEq",
+  "tags": []
+}

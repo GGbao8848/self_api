@@ -210,7 +210,113 @@ curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/split-yolo-dataset/as
   }'
 ```
 
-## 5. 目录打包为 ZIP
+## 5. 多层目录叶子数据目录发现
+
+- `POST /api/v1/preprocess/discover-leaf-dirs`
+- `POST /api/v1/preprocess/discover-leaf-dirs/async`
+
+```bash
+# 同步
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/discover-leaf-dirs" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/TEDS广州局正线_转向架漏油_负类标注_20260312-标注完成",
+    "recursive": true
+  }'
+
+# 异步
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/discover-leaf-dirs/async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/TEDS广州局正线_转向架漏油_负类标注_20260312-标注完成",
+    "recursive": true,
+    "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
+    "callback_timeout_seconds": 10
+  }'
+```
+
+## 6. 多层目录数据清洗
+
+- `POST /api/v1/preprocess/clean-nested-dataset`
+- `POST /api/v1/preprocess/clean-nested-dataset/async`
+
+```bash
+# 同步
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/clean-nested-dataset" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/TEDS广州局正线_转向架漏油_负类标注_20260312-标注完成",
+    "output_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/cleaned_dataset",
+    "images_dir_name": "images",
+    "xmls_dir_name": "xmls",
+    "backgrounds_dir_name": "backgrounds",
+    "include_difficult": false,
+    "copy_files": true,
+    "overwrite": true
+  }'
+
+# 异步
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/clean-nested-dataset/async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/TEDS广州局正线_转向架漏油_负类标注_20260312-标注完成",
+    "output_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/cleaned_dataset",
+    "images_dir_name": "images",
+    "xmls_dir_name": "xmls",
+    "backgrounds_dir_name": "backgrounds",
+    "include_difficult": false,
+    "copy_files": true,
+    "overwrite": true,
+    "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
+    "callback_timeout_seconds": 10
+  }'
+```
+
+## 7. 多层目录数据集汇总
+
+- `POST /api/v1/preprocess/aggregate-nested-dataset`
+- `POST /api/v1/preprocess/aggregate-nested-dataset/async`
+
+```bash
+# 同步
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/aggregate-nested-dataset" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/cleaned_dataset",
+    "output_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/dataset",
+    "images_dir_name": "images",
+    "labels_dir_name": "labels",
+    "backgrounds_dir_name": "backgrounds",
+    "classes_file_name": "classes.txt",
+    "require_non_empty_labels": true,
+    "overwrite": true
+  }'
+
+# 异步
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/aggregate-nested-dataset/async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/cleaned_dataset",
+    "output_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/dataset",
+    "images_dir_name": "images",
+    "labels_dir_name": "labels",
+    "backgrounds_dir_name": "backgrounds",
+    "classes_file_name": "classes.txt",
+    "require_non_empty_labels": true,
+    "overwrite": true,
+    "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
+    "callback_timeout_seconds": 10
+  }'
+```
+
+推荐的处理链路是：
+
+1. `discover-leaf-dirs`：确认最底层叶子目录
+2. `clean-nested-dataset`：把原始图片/XML清洗为 `images/xmls/backgrounds`
+3. `xml-to-yolo`：在每个清洗后的碎片目录中生成 `labels`
+4. `aggregate-nested-dataset`：汇总为统一 `dataset`
+
+## 8. 目录打包为 ZIP
 
 - `POST /api/v1/preprocess/zip-folder`
 - `POST /api/v1/preprocess/zip-folder/async`
@@ -239,7 +345,7 @@ curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/zip-folder/async" \
   }'
 ```
 
-## 6. ZIP 解压
+## 9. ZIP 解压
 
 - `POST /api/v1/preprocess/unzip-archive`
 - `POST /api/v1/preprocess/unzip-archive/async`
@@ -266,7 +372,7 @@ curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/unzip-archive/async" 
   }'
 ```
 
-## 7. 文件或目录移动
+## 10. 文件或目录移动
 
 - `POST /api/v1/preprocess/move-path`
 - `POST /api/v1/preprocess/move-path/async`
@@ -293,7 +399,7 @@ curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/move-path/async" \
   }'
 ```
 
-## 8. 文件或目录复制
+## 11. 文件或目录复制
 
 - `POST /api/v1/preprocess/copy-path`
 - `POST /api/v1/preprocess/copy-path/async`
@@ -320,7 +426,7 @@ curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/copy-path/async" \
   }'
 ```
 
-## 9. YOLO 大图滑窗裁剪为小图数据集
+## 12. YOLO 大图滑窗裁剪为小图数据集
 
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 - `POST /api/v1/preprocess/yolo-sliding-window-crop/async`
