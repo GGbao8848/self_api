@@ -268,6 +268,7 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 
 - `docs/langgraph_min_prod.md`
 - `docs/architecture/langgraph_production_roadmap.md`
+- `docs/architecture/self_orchestrator_bootstrap.md`
 
 ## 6. 开发命令
 
