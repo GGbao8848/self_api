@@ -87,6 +87,7 @@ make run
 - `make run` 默认绑定 `0.0.0.0:8666`，可被同一局域网设备访问
 - 如需自定义端口/地址：`make run HOST=0.0.0.0 PORT=9000`
 - 若内网仍不可达，请检查系统防火墙是否允许该端口入站访问
+- 生产环境建议先复制 `.env.example`，显式配置鉴权、共享存储路径和 `SELF_API_PUBLIC_BASE_URL`
 
 ### 3.2 Docker
 
@@ -252,7 +253,23 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `keep_empty_labels`: 是否保留无目标窗口
 - `min_box_area_ratio`: 目标框与窗口相交面积占原框面积的最小阈值
 
-## 5. 开发命令
+## 5. 一期最小生产版
+
+当前仓库已落地一期最小生产版，用于支持 LangGraph 的跨机器接入。
+
+关键约定：
+
+- 长任务优先调用 `/async` 接口
+- `SELF_API_PUBLIC_BASE_URL` 用于生成对外可访问的 `status_url`
+- 生产环境必须显式配置 `SELF_API_FILE_ACCESS_ROOTS`
+- 当前跨机器模式依赖共享文件系统，不直接解决任务恢复
+
+相关文档：
+
+- `docs/langgraph_min_prod.md`
+- `docs/architecture/langgraph_production_roadmap.md`
+
+## 6. 开发命令
 
 ```bash
 make run      # 启动服务
@@ -260,7 +277,7 @@ make test     # 运行测试
 make lint     # 基础语法检查
 ```
 
-## 6. 后续扩展建议
+## 7. 后续扩展建议
 
 1. 增加异步任务队列（如 Celery/RQ）处理大规模数据集
 2. 增加任务状态持久化（数据库 + task id）

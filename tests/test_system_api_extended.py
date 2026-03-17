@@ -11,6 +11,9 @@ def test_system_info_and_readiness(isolated_runtime) -> None:
         info_resp = client.get("/api/v1/info")
         assert info_resp.status_code == 200
         assert info_resp.json()["storage_root"].endswith("tmp_datasets/test_storage")
+        assert info_resp.json()["public_base_url"] is None
+        assert info_resp.json()["restrict_file_access"] is True
+        assert info_resp.json()["explicit_file_access_roots"] is False
 
         readiness_resp = client.get("/api/v1/readiness")
         assert readiness_resp.status_code == 200
@@ -26,3 +29,24 @@ def test_readiness_degraded_when_auth_enabled_without_password(monkeypatch, isol
         readiness_resp = client.get("/api/v1/readiness")
         assert readiness_resp.status_code == 503
         assert readiness_resp.json()["status"] == "degraded"
+
+
+def test_readiness_degraded_in_production_without_public_base_url(
+    monkeypatch,
+    isolated_runtime,
+) -> None:
+    monkeypatch.setenv("SELF_API_APP_ENV", "prod")
+    monkeypatch.setenv("SELF_API_AUTH_ENABLED", "true")
+    monkeypatch.setenv("SELF_API_AUTH_ADMIN_PASSWORD", "secret-pass")
+    monkeypatch.setenv("SELF_API_AUTH_SECRET_KEY", "unit-test-secret")
+    monkeypatch.setenv("SELF_API_FILE_ACCESS_ROOTS", "./tmp_datasets")
+    get_settings.cache_clear()
+
+    with TestClient(app) as client:
+        readiness_resp = client.get("/api/v1/readiness")
+        assert readiness_resp.status_code == 503
+        payload = readiness_resp.json()
+        assert payload["status"] == "degraded"
+        component_by_name = {item["name"]: item for item in payload["components"]}
+        assert component_by_name["public_base_url"]["status"] == "degraded"
+        assert "SELF_API_PUBLIC_BASE_URL" in component_by_name["public_base_url"]["detail"]

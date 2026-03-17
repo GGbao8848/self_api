@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     app_env: str = "dev"
     api_v1_prefix: str = "/api/v1"
+    public_base_url: str | None = None
     log_level: str = "INFO"
     restrict_file_access: bool = True
     file_access_roots: str | None = None
@@ -31,6 +32,24 @@ class Settings(BaseSettings):
     @property
     def project_root(self) -> Path:
         return Path(__file__).resolve().parents[2]
+
+    @property
+    def is_production_env(self) -> bool:
+        return self.app_env.strip().lower() in {"prod", "production"}
+
+    @property
+    def normalized_public_base_url(self) -> str | None:
+        raw = (self.public_base_url or "").strip()
+        if not raw:
+            return None
+        return raw.rstrip("/")
+
+    @property
+    def has_explicit_file_access_roots(self) -> bool:
+        raw = self.file_access_roots
+        if not raw:
+            return False
+        return any(item.strip() for item in raw.split(","))
 
     @property
     def resolved_storage_root(self) -> Path:

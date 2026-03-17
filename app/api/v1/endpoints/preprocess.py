@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.api.url_builder import build_route_url
 from app.core.security import require_api_auth
 from app.schemas.preprocess import (
     AggregateNestedDatasetAsyncRequest,
@@ -62,6 +63,25 @@ router = APIRouter(
 )
 
 
+def _build_async_submit_response(
+    request: Request,
+    *,
+    task_id: str,
+    task_type: str,
+    callback_url: str | None,
+) -> AsyncTaskSubmitResponse:
+    return AsyncTaskSubmitResponse(
+        task_id=task_id,
+        task_type=task_type,
+        status_url=build_route_url(
+            request,
+            "get_preprocess_task_status",
+            task_id=task_id,
+        ),
+        callback_url=callback_url,
+    )
+
+
 @router.post("/sliding-window-crop", response_model=SlidingWindowCropResponse)
 def sliding_window_crop(payload: SlidingWindowCropRequest) -> SlidingWindowCropResponse:
     try:
@@ -80,21 +100,21 @@ def sliding_window_crop_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "sliding_window_crop"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = SlidingWindowCropRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_sliding_window_crop(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )
 
 
@@ -128,21 +148,21 @@ def discover_leaf_dirs_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "discover_leaf_dirs"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = DiscoverLeafDirsRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_discover_leaf_dirs(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )
 
 
@@ -164,21 +184,21 @@ def clean_nested_dataset_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "clean_nested_dataset"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = CleanNestedDatasetRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_clean_nested_dataset(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )
 
 
@@ -202,21 +222,21 @@ def aggregate_nested_dataset_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "aggregate_nested_dataset"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = AggregateNestedDatasetRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_aggregate_nested_dataset(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )
 
 
@@ -238,21 +258,21 @@ def xml_to_yolo_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "xml_to_yolo"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = XmlToYoloRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_xml_to_yolo(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )
 
 
@@ -274,21 +294,21 @@ def split_yolo_dataset_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "split_yolo_dataset"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = SplitYoloDatasetRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_split_yolo_dataset(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )
 
 
@@ -310,21 +330,21 @@ def zip_folder_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "zip_folder"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = ZipFolderRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_zip_folder(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )
 
 
@@ -346,21 +366,21 @@ def unzip_archive_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "unzip_archive"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = UnzipArchiveRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_unzip_archive(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )
 
 
@@ -382,21 +402,21 @@ def move_path_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "move_path"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = MovePathRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_move_path(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )
 
 
@@ -418,21 +438,21 @@ def copy_path_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "copy_path"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = CopyPathRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_copy_path(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )
 
 
@@ -456,19 +476,19 @@ def yolo_sliding_window_crop_async(
     request: Request,
 ) -> AsyncTaskSubmitResponse:
     task_type = "yolo_sliding_window_crop"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
     sync_payload = YoloSlidingWindowCropRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_yolo_sliding_window_crop(sync_payload).model_dump(),
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
-    status_url = str(request.url_for("get_preprocess_task_status", task_id=task_id))
-    return AsyncTaskSubmitResponse(
+    return _build_async_submit_response(
+        request,
         task_id=task_id,
         task_type=task_type,
-        status_url=status_url,
-        callback_url=str(payload.callback_url) if payload.callback_url else None,
+        callback_url=callback_url,
     )

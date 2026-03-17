@@ -20,6 +20,23 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def default_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SELF_API_APP_ENV", "dev")
+    monkeypatch.setenv("SELF_API_PUBLIC_BASE_URL", "")
+    monkeypatch.setenv("SELF_API_FILE_ACCESS_ROOTS", "")
+    monkeypatch.setenv("SELF_API_AUTH_ENABLED", "false")
+    monkeypatch.setenv("SELF_API_AUTH_ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("SELF_API_AUTH_ADMIN_PASSWORD", "")
+    monkeypatch.setenv("SELF_API_AUTH_SECRET_KEY", "change-me-in-production")
+    monkeypatch.setenv("SELF_API_SESSION_COOKIE_SECURE", "false")
+    get_settings.cache_clear()
+
+    yield
+
+    get_settings.cache_clear()
+
+
 @pytest.fixture(scope="session")
 def tmp_datasets_root() -> Path:
     data_root = ROOT_DIR / "tmp_datasets" / "pytest_data"

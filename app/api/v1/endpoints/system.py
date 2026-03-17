@@ -26,7 +26,8 @@ def _check_storage() -> SystemComponentStatus:
 def _check_auth() -> SystemComponentStatus:
     settings = get_settings()
     if not settings.auth_enabled:
-        return SystemComponentStatus(name="auth", status="not_configured", detail="auth disabled")
+        status_name = "degraded" if settings.is_production_env else "not_configured"
+        return SystemComponentStatus(name="auth", status=status_name, detail="auth disabled")
     if not settings.auth_admin_password:
         return SystemComponentStatus(
             name="auth",
@@ -40,6 +41,61 @@ def _check_auth() -> SystemComponentStatus:
             detail="SELF_API_AUTH_SECRET_KEY is using the default value",
         )
     return SystemComponentStatus(name="auth", status="ok", detail="configured")
+
+
+def _check_public_base_url() -> SystemComponentStatus:
+    settings = get_settings()
+    public_base_url = settings.normalized_public_base_url
+    if not public_base_url:
+        status_name = "degraded" if settings.is_production_env else "not_configured"
+        return SystemComponentStatus(
+            name="public_base_url",
+            status=status_name,
+            detail="SELF_API_PUBLIC_BASE_URL is not configured",
+        )
+
+    parsed = urlparse(public_base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return SystemComponentStatus(
+            name="public_base_url",
+            status="degraded",
+            detail=f"invalid public base url: {public_base_url}",
+        )
+    return SystemComponentStatus(name="public_base_url", status="ok", detail=public_base_url)
+
+
+def _check_file_access() -> SystemComponentStatus:
+    settings = get_settings()
+    if not settings.restrict_file_access:
+        status_name = "degraded" if settings.is_production_env else "not_configured"
+        return SystemComponentStatus(
+            name="file_access",
+            status=status_name,
+            detail="file access restriction disabled",
+        )
+
+    if not settings.has_explicit_file_access_roots:
+        status_name = "degraded" if settings.is_production_env else "not_configured"
+        return SystemComponentStatus(
+            name="file_access",
+            status=status_name,
+            detail="SELF_API_FILE_ACCESS_ROOTS is not explicitly configured",
+        )
+
+    missing_roots = [
+        str(path) for path in settings.resolved_file_access_roots if not path.exists()
+    ]
+    if missing_roots:
+        return SystemComponentStatus(
+            name="file_access",
+            status="degraded",
+            detail=f"configured roots do not exist: {', '.join(missing_roots)}",
+        )
+    return SystemComponentStatus(
+        name="file_access",
+        status="ok",
+        detail=", ".join(str(path) for path in settings.resolved_file_access_roots),
+    )
 
 
 def _check_socket_target(name: str, raw_url: str | None, default_port: int) -> SystemComponentStatus:
@@ -76,6 +132,8 @@ def readiness() -> SystemStatusResponse | JSONResponse:
     components = [
         _check_storage(),
         _check_auth(),
+        _check_public_base_url(),
+        _check_file_access(),
         _check_socket_target("postgres", settings.postgres_dsn, 5432),
         _check_socket_target("redis", settings.redis_url, 6379),
         _check_socket_target("s3", settings.s3_endpoint_url, 9000),
@@ -98,7 +156,12 @@ def info() -> SystemInfoResponse:
         app_version=settings.app_version,
         app_env=settings.app_env,
         api_v1_prefix=settings.api_v1_prefix,
+        public_base_url=settings.normalized_public_base_url,
         auth_enabled=settings.auth_enabled,
+        session_cookie_secure=settings.session_cookie_secure,
+        restrict_file_access=settings.restrict_file_access,
+        explicit_file_access_roots=settings.has_explicit_file_access_roots,
         storage_root=str(settings.resolved_storage_root),
         file_access_roots=[str(path) for path in settings.resolved_file_access_roots],
+        cors_allow_origins=settings.cors_allow_origin_list,
     )

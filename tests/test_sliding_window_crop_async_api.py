@@ -104,6 +104,44 @@ def test_sliding_window_crop_async_failed_task(client: TestClient, case_dir: Pat
     assert task_data["result"] is None
 
 
+def test_sliding_window_crop_async_uses_public_base_url(
+    case_dir: Path,
+    monkeypatch,
+    isolated_runtime,
+) -> None:
+    from app.core.config import get_settings
+    from app.main import app
+
+    monkeypatch.setenv("SELF_API_PUBLIC_BASE_URL", "https://self-api.example.com")
+    get_settings.cache_clear()
+
+    input_dir = case_dir / "input"
+    output_dir = case_dir / "output"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    create_image(input_dir / "sample.png", color=(255, 0, 0), size=(10, 10))
+
+    payload = {
+        "input_dir": str(input_dir),
+        "output_dir": str(output_dir),
+        "window_width": 4,
+        "window_height": 4,
+        "stride_x": 4,
+        "stride_y": 4,
+        "include_partial_edges": False,
+        "recursive": True,
+        "keep_subdirs": True,
+        "output_format": "png",
+    }
+
+    with TestClient(app) as client:
+        submit_resp = client.post("/api/v1/preprocess/sliding-window-crop/async", json=payload)
+
+    assert submit_resp.status_code == 202
+    assert submit_resp.json()["status_url"].startswith(
+        "https://self-api.example.com/api/v1/preprocess/tasks/"
+    )
+
+
 def test_get_preprocess_task_status_not_found(client: TestClient) -> None:
     response = client.get("/api/v1/preprocess/tasks/not_found")
     assert response.status_code == 404
