@@ -44,7 +44,7 @@ venv/
 env/
 ENV/
 .env
-.env.*
+# .env.*
 .python-version
 
 # IDE / editor
