@@ -316,14 +316,15 @@ def test_yolo_sliding_window_crop_async_endpoint(
     client: TestClient,
     case_dir: Path,
 ) -> None:
-    dataset_dir = case_dir / "yolo_large"
-    images_dir = dataset_dir / "images"
-    labels_dir = dataset_dir / "labels"
-    output_dir = case_dir / "yolo_small"
+    images_dir = case_dir / "images"
+    labels_dir = case_dir / "labels"
+    output_dir = case_dir / "data_crops"
 
-    create_image(images_dir / "big.png", color=(200, 10, 10), size=(8, 8))
-    (labels_dir / "big.txt").parent.mkdir(parents=True, exist_ok=True)
-    (labels_dir / "big.txt").write_text(
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+
+    create_image(images_dir / "wide.png", color=(200, 10, 10), size=(16, 8))
+    (labels_dir / "wide.txt").write_text(
         "0 0.250000 0.250000 0.250000 0.250000\n",
         encoding="utf-8",
     )
@@ -331,14 +332,13 @@ def test_yolo_sliding_window_crop_async_endpoint(
     submit_resp = client.post(
         "/api/v1/preprocess/yolo-sliding-window-crop/async",
         json={
-            "dataset_dir": str(dataset_dir),
+            "images_dir": str(images_dir),
+            "labels_dir": str(labels_dir),
             "output_dir": str(output_dir),
-            "window_width": 4,
-            "window_height": 4,
-            "stride_x": 4,
-            "stride_y": 4,
-            "keep_empty_labels": False,
-            "include_partial_edges": False,
+            "min_vis_ratio": 0.5,
+            "stride_ratio": 0.25,
+            "ignore_vis_ratio": 0.05,
+            "only_wide": True,
         },
     )
     assert submit_resp.status_code == 202
@@ -347,4 +347,4 @@ def test_yolo_sliding_window_crop_async_endpoint(
 
     task_data = _wait_task_done(client, submit_data["task_id"])
     assert task_data["state"] == "succeeded"
-    assert task_data["result"]["generated_crops"] == 1
+    assert task_data["result"]["generated_crops"] >= 1

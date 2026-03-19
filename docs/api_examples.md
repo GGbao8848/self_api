@@ -426,39 +426,52 @@ curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/copy-path/async" \
   }'
 ```
 
-## 12. YOLO 大图滑窗裁剪为小图数据集
+## 12. YOLO 大图正方形滑窗裁剪为小图数据集
 
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 - `POST /api/v1/preprocess/yolo-sliding-window-crop/async`
+
+正方形滑窗（边长=图片高度），仅水平滑动。适用于宽图（如整车图）的裁剪。
 
 ```bash
 # 同步
 curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/yolo-sliding-window-crop" \
   -H "Content-Type: application/json" \
   -d '{
-    "dataset_dir": "./data/yolo_large",
-    "output_dir": "./data/yolo_small",
-    "window_width": 1024,
-    "window_height": 1024,
-    "stride_x": 512,
-    "stride_y": 512,
-    "keep_empty_labels": false,
-    "min_box_area_ratio": 0.2
+    "images_dir": "/path/to/dataset/images",
+    "labels_dir": "/path/to/dataset/labels",
+    "output_dir": "/path/to/dataset/data_crops",
+    "min_vis_ratio": 0.5,
+    "stride_ratio": 0.2,
+    "ignore_vis_ratio": 0.05,
+    "only_wide": true
   }'
 
 # 异步
 curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/yolo-sliding-window-crop/async" \
   -H "Content-Type: application/json" \
   -d '{
-    "dataset_dir": "./data/yolo_large",
-    "output_dir": "./data/yolo_small",
-    "window_width": 1024,
-    "window_height": 1024,
-    "stride_x": 512,
-    "stride_y": 512,
-    "keep_empty_labels": false,
-    "min_box_area_ratio": 0.2,
+    "images_dir": "/path/to/dataset/images",
+    "labels_dir": "/path/to/dataset/labels",
+    "output_dir": "/path/to/dataset/data_crops",
+    "min_vis_ratio": 0.5,
+    "stride_ratio": 0.2,
+    "ignore_vis_ratio": 0.05,
+    "only_wide": true,
     "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
     "callback_timeout_seconds": 10
   }'
+```
+
+命令行等价示例：
+
+```bash
+python yolo_square_sliding_crop.py \
+  --images /path/to/dataset/images \
+  --labels /path/to/dataset/labels \
+  --out /path/to/dataset/data_crops \
+  --min_vis_ratio 0.5 \
+  --stride_ratio 0.2 \
+  --ignore_vis_ratio 0.05 \
+  --only_wide
 ```

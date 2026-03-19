@@ -9,7 +9,7 @@
 5. 指定 zip 压缩包解压到目标目录
 6. 文件或文件夹整体移动到目标目录
 7. 文件或文件夹整体复制到目标目录
-8. YOLO 大图数据集滑窗裁剪为小图数据集（标签同步裁剪）
+8. YOLO 大图正方形滑窗裁剪为小图数据集（标签同步裁剪，仅宽图水平滑动）
 9. 递归发现多层目录中的最底层叶子数据目录
 10. 递归清洗多层目录中的图像/XML数据并归类为 `images/xmls/backgrounds`
 11. 汇总多个子目录处理结果为统一 `dataset/images`、`dataset/labels`、`dataset/backgrounds`
@@ -238,20 +238,21 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `target_dir`: 目标目录
 - `overwrite`: 目标同名已存在时是否覆盖
 
-### 4.12 YOLO 大图滑窗裁剪为小图数据集
+### 4.12 YOLO 大图正方形滑窗裁剪为小图数据集
 
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 
-输入为 YOLO 数据集目录（`images/` + `labels/`），输出为新的小图数据集（`images/` + `labels/`），标签会按窗口裁剪并重新归一化。
+输入为 YOLO 图像目录和标签目录，输出为新的小图数据集（`images/` + `labels/`）。窗口为正方形（边长=图片高度），仅水平滑动，标签按窗口裁剪并重新归一化。
 
 关键参数：
 
-- `dataset_dir`: YOLO 数据集根目录
-- `output_dir`: 输出目录（默认 `dataset_dir/yolo_crops`）
-- `window_width/window_height`: 窗口大小
-- `stride_x/stride_y`: 滑窗步长
-- `keep_empty_labels`: 是否保留无目标窗口
-- `min_box_area_ratio`: 目标框与窗口相交面积占原框面积的最小阈值
+- `images_dir`: 输入图像目录
+- `labels_dir`: 输入 YOLO 标签目录（txt）
+- `output_dir`: 输出目录（会创建 `images/` 和 `labels/` 子目录）
+- `min_vis_ratio`: 目标在窗口内可见比例阈值，默认 0.5
+- `stride_ratio`: 步长占图片高度的比例，默认 0.3
+- `ignore_vis_ratio`: 可见比例低于此值视为可忽略，默认 0.05
+- `only_wide`: 仅处理宽图（W>H），默认 true
 
 ## 5. 一期最小生产版
 

@@ -1,3 +1,5 @@
+"""YOLO 正方形滑窗裁剪：窗口边长=图片高度，仅水平滑动。"""
+
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
@@ -11,142 +13,212 @@ from app.schemas.preprocess import (
 from app.services.task_manager import ensure_current_task_active
 from app.utils.images import list_image_paths
 
+_IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 _SAVE_FORMAT_MAP = {
     ".jpg": "JPEG",
     ".jpeg": "JPEG",
     ".png": "PNG",
+    ".bmp": "BMP",
+    ".tif": "TIFF",
+    ".tiff": "TIFF",
     ".webp": "WEBP",
 }
 
 
-def _resolve_output_extension(requested: str, source_suffix: str) -> str:
-    if requested == "keep":
-        suffix = source_suffix.lower()
-        return suffix if suffix in _SAVE_FORMAT_MAP else ".png"
-    if requested in {"jpg", "jpeg"}:
-        return ".jpg"
-    return f".{requested}"
+def _yolo_to_xyxy(xc: float, yc: float, w: float, h: float, W: int, H: int) -> tuple[float, float, float, float]:
+    """YOLO normalized -> absolute xyxy."""
+    x1 = (xc - w / 2) * W
+    y1 = (yc - h / 2) * H
+    x2 = (xc + w / 2) * W
+    y2 = (yc + h / 2) * H
+    return x1, y1, x2, y2
 
 
-def _save_crop(crop: Image.Image, output_path: Path, output_ext: str) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    save_format = _SAVE_FORMAT_MAP.get(output_ext, "PNG")
-    if save_format == "JPEG" and crop.mode not in {"RGB", "L"}:
-        crop = crop.convert("RGB")
-    crop.save(output_path, format=save_format)
+def _xyxy_to_yolo(x1: float, y1: float, x2: float, y2: float, W: int, H: int) -> tuple[float, float, float, float]:
+    """Absolute xyxy -> YOLO normalized"""
+    bw = max(0.0, x2 - x1)
+    bh = max(0.0, y2 - y1)
+    xc = x1 + bw / 2
+    yc = y1 + bh / 2
+    return xc / W, yc / H, bw / W, bh / H
 
 
-def _read_yolo_boxes(label_path: Path, image_width: int, image_height: int) -> list[tuple[str, float, float, float, float]]:
+def _clip_box_to_crop(
+    bx1: float, by1: float, bx2: float, by2: float,
+    cx1: float, cy1: float, cx2: float, cy2: float,
+) -> tuple[float, float, float, float] | None:
+    """Intersection of bbox with crop rect in absolute coords."""
+    ix1 = max(bx1, cx1)
+    iy1 = max(by1, cy1)
+    ix2 = min(bx2, cx2)
+    iy2 = min(by2, cy2)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return None
+    return ix1, iy1, ix2, iy2
+
+
+def _area_xyxy(x1: float, y1: float, x2: float, y2: float) -> float:
+    return max(0.0, x2 - x1) * max(0.0, y2 - y1)
+
+
+def _read_yolo_labels(label_path: Path) -> list[tuple[int, float, float, float, float]]:
+    """Returns list of (cls, xc, yc, w, h) as floats (YOLO normalized)."""
     if not label_path.exists():
         return []
-
-    boxes: list[tuple[str, float, float, float, float]] = []
-    lines = label_path.read_text(encoding="utf-8").splitlines()
-    for line in lines:
-        text = line.strip()
-        if not text:
+    items: list[tuple[int, float, float, float, float]] = []
+    for line in label_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
             continue
-        parts = text.split()
-        if len(parts) < 5:
+        parts = line.split()
+        if len(parts) != 5:
             continue
-        class_id = parts[0]
         try:
-            x_center = float(parts[1]) * image_width
-            y_center = float(parts[2]) * image_height
-            box_width = float(parts[3]) * image_width
-            box_height = float(parts[4]) * image_height
-        except ValueError:
+            cls = int(float(parts[0]))
+            xc, yc, w, h = map(float, parts[1:])
+            items.append((cls, xc, yc, w, h))
+        except (ValueError, TypeError):
             continue
-        if box_width <= 0 or box_height <= 0:
+    return items
+
+
+def _sliding_square_crop(
+    image_path: Path,
+    label_path: Path,
+    out_img_dir: Path,
+    out_lbl_dir: Path,
+    min_vis_ratio: float,
+    stride_ratio: float,
+    only_wide: bool,
+    ignore_vis_ratio: float,
+) -> tuple[int, int]:
+    """Process single image; returns (saved_crops, total_label_lines)."""
+    try:
+        with Image.open(image_path) as img:
+            img_arr = img.convert("RGB")
+    except (UnidentifiedImageError, OSError):
+        return 0, 0
+
+    W, H = img_arr.size
+    if only_wide and W <= H:
+        return 0, 0
+
+    win = H  # square side = image height
+    step = max(1, int(round(stride_ratio * H)))
+
+    labels = _read_yolo_labels(label_path)
+    abs_boxes: list[tuple[int, float, float, float, float, float]] = []
+    for cls, xc, yc, bw, bh in labels:
+        bx1, by1, bx2, by2 = _yolo_to_xyxy(xc, yc, bw, bh, W, H)
+        bx1, by1 = max(0.0, bx1), max(0.0, by1)
+        bx2, by2 = min(float(W), bx2), min(float(H), by2)
+        a0 = _area_xyxy(bx1, by1, bx2, by2)
+        if a0 > 0:
+            abs_boxes.append((cls, bx1, by1, bx2, by2, a0))
+
+    if not abs_boxes:
+        return 0, 0
+
+    saved = 0
+    total_label_lines = 0
+
+    if W <= win:
+        xs = [0]
+    else:
+        xs = list(range(0, W - win + 1, step))
+        if xs[-1] != W - win:
+            xs.append(W - win)
+
+    for i, x0 in enumerate(xs):
+        ensure_current_task_active()
+        y0 = 0
+        cx1, cy1 = float(x0), float(y0)
+        cx2, cy2 = float(x0 + win), float(y0 + win)
+
+        crop = img_arr.crop((x0, y0, x0 + win, y0 + win))
+        if crop.size[0] == 0 or crop.size[1] == 0:
             continue
 
-        x_min = x_center - box_width / 2.0
-        y_min = y_center - box_height / 2.0
-        x_max = x_center + box_width / 2.0
-        y_max = y_center + box_height / 2.0
-        if x_max <= x_min or y_max <= y_min:
+        kept_lines: list[str] = []
+        has_keep = False
+        has_danger = False
+
+        for cls, bx1, by1, bx2, by2, a0 in abs_boxes:
+            inter = _clip_box_to_crop(bx1, by1, bx2, by2, cx1, cy1, cx2, cy2)
+            if inter is None:
+                continue
+
+            ix1, iy1, ix2, iy2 = inter
+            ai = _area_xyxy(ix1, iy1, ix2, iy2)
+            r = ai / a0
+
+            if ignore_vis_ratio < r < min_vis_ratio:
+                has_danger = True
+                break
+
+            if r >= min_vis_ratio:
+                has_keep = True
+                lx1 = ix1 - cx1
+                ly1 = iy1 - cy1
+                lx2 = ix2 - cx1
+                ly2 = iy2 - cy1
+                nxc, nyc, nw, nh = _xyxy_to_yolo(lx1, ly1, lx2, ly2, win, win)
+                if nw <= 0 or nh <= 0:
+                    continue
+                kept_lines.append(f"{cls} {nxc:.6f} {nyc:.6f} {nw:.6f} {nh:.6f}")
+
+        if has_danger:
             continue
-        boxes.append((class_id, x_min, y_min, x_max, y_max))
-    return boxes
-
-
-def _clip_boxes_to_window(
-    boxes: list[tuple[str, float, float, float, float]],
-    x: int,
-    y: int,
-    right: int,
-    bottom: int,
-    min_box_area_ratio: float,
-) -> list[str]:
-    lines: list[str] = []
-    window_width = right - x
-    window_height = bottom - y
-    if window_width <= 0 or window_height <= 0:
-        return lines
-
-    for class_id, box_x_min, box_y_min, box_x_max, box_y_max in boxes:
-        inter_x_min = max(box_x_min, x)
-        inter_y_min = max(box_y_min, y)
-        inter_x_max = min(box_x_max, right)
-        inter_y_max = min(box_y_max, bottom)
-        if inter_x_max <= inter_x_min or inter_y_max <= inter_y_min:
-            continue
-
-        original_area = (box_x_max - box_x_min) * (box_y_max - box_y_min)
-        inter_area = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min)
-        if original_area <= 0:
-            continue
-        if (inter_area / original_area) < min_box_area_ratio:
+        if not has_keep or not kept_lines:
             continue
 
-        clipped_x_center = ((inter_x_min + inter_x_max) / 2.0 - x) / window_width
-        clipped_y_center = ((inter_y_min + inter_y_max) / 2.0 - y) / window_height
-        clipped_width = (inter_x_max - inter_x_min) / window_width
-        clipped_height = (inter_y_max - inter_y_min) / window_height
+        stem = image_path.stem
+        out_name = f"{stem}_sqH_{win}_x{x0:06d}_{i:03d}"
+        ext = image_path.suffix.lower()
+        if ext not in _SAVE_FORMAT_MAP:
+            ext = ".png"
 
-        if clipped_width <= 0 or clipped_height <= 0:
-            continue
+        out_img_path = out_img_dir / f"{out_name}{ext}"
+        out_lbl_path = out_lbl_dir / f"{out_name}.txt"
 
-        clipped_x_center = min(max(clipped_x_center, 0.0), 1.0)
-        clipped_y_center = min(max(clipped_y_center, 0.0), 1.0)
-        clipped_width = min(max(clipped_width, 0.0), 1.0)
-        clipped_height = min(max(clipped_height, 0.0), 1.0)
+        save_format = _SAVE_FORMAT_MAP.get(ext, "PNG")
+        if save_format == "JPEG" and crop.mode != "RGB":
+            crop = crop.convert("RGB")
+        out_img_path.parent.mkdir(parents=True, exist_ok=True)
+        crop.save(out_img_path, format=save_format)
 
-        lines.append(
-            f"{class_id} "
-            f"{clipped_x_center:.6f} {clipped_y_center:.6f} "
-            f"{clipped_width:.6f} {clipped_height:.6f}"
-        )
-    return lines
+        out_lbl_path.parent.mkdir(parents=True, exist_ok=True)
+        out_lbl_path.write_text("\n".join(kept_lines) + "\n", encoding="utf-8")
+        saved += 1
+        total_label_lines += len(kept_lines)
+
+    return saved, total_label_lines
 
 
 def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloSlidingWindowCropResponse:
-    dataset_dir = resolve_safe_path(
-        request.dataset_dir,
-        field_name="dataset_dir",
+    images_dir = resolve_safe_path(
+        request.images_dir,
+        field_name="images_dir",
         must_exist=True,
         expect_directory=True,
     )
-
-    images_dir = dataset_dir / request.images_dir_name
-    labels_dir = dataset_dir / request.labels_dir_name
-    if not images_dir.exists() or not images_dir.is_dir():
-        raise ValueError(f"images_dir does not exist or is not a directory: {images_dir}")
-    if not labels_dir.exists() or not labels_dir.is_dir():
-        raise ValueError(f"labels_dir does not exist or is not a directory: {labels_dir}")
-
-    output_dir = (
-        resolve_safe_path(request.output_dir, field_name="output_dir")
-        if request.output_dir
-        else (dataset_dir / "yolo_crops").resolve()
+    labels_dir = resolve_safe_path(
+        request.labels_dir,
+        field_name="labels_dir",
+        must_exist=True,
+        expect_directory=True,
     )
-    output_images_dir = output_dir / request.images_dir_name
-    output_labels_dir = output_dir / request.labels_dir_name
+    output_dir = resolve_safe_path(request.output_dir, field_name="output_dir")
+
+    out_img_dir = output_dir / "images"
+    out_lbl_dir = output_dir / "labels"
+    out_img_dir.mkdir(parents=True, exist_ok=True)
+    out_lbl_dir.mkdir(parents=True, exist_ok=True)
 
     image_paths = list_image_paths(
         images_dir,
-        recursive=request.recursive,
-        extensions=request.extensions,
+        recursive=True,
+        extensions=list(_IMG_EXTS),
     )
 
     details: list[YoloSlidingWindowCropDetail] = []
@@ -159,7 +231,8 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
         ensure_current_task_active()
         rel_image = image_path.relative_to(images_dir)
         label_path = (labels_dir / rel_image).with_suffix(".txt")
-        if request.require_label and not label_path.exists():
+
+        if not label_path.exists():
             skipped_images += 1
             details.append(
                 YoloSlidingWindowCropDetail(
@@ -171,118 +244,51 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
             continue
 
         try:
-            with Image.open(image_path) as image:
-                image_width, image_height = image.size
-                boxes = _read_yolo_boxes(label_path, image_width, image_height)
+            saved, label_lines = _sliding_square_crop(
+                image_path=image_path,
+                label_path=label_path,
+                out_img_dir=out_img_dir,
+                out_lbl_dir=out_lbl_dir,
+                min_vis_ratio=request.min_vis_ratio,
+                stride_ratio=request.stride_ratio,
+                only_wide=request.only_wide,
+                ignore_vis_ratio=request.ignore_vis_ratio,
+            )
 
-                x_values = (
-                    range(0, image_width, request.stride_x)
-                    if request.include_partial_edges
-                    else range(
-                        0,
-                        max(image_width - request.window_width + 1, 0),
-                        request.stride_x,
+            if saved > 0:
+                processed_images += 1
+                generated_crops += saved
+                generated_labels += label_lines
+                details.append(
+                    YoloSlidingWindowCropDetail(
+                        source_image=str(image_path),
+                        source_label=str(label_path),
+                        crop_count=saved,
+                        label_count=label_lines,
                     )
                 )
-                y_values = (
-                    range(0, image_height, request.stride_y)
-                    if request.include_partial_edges
-                    else range(
-                        0,
-                        max(image_height - request.window_height + 1, 0),
-                        request.stride_y,
+            else:
+                skipped_images += 1
+                details.append(
+                    YoloSlidingWindowCropDetail(
+                        source_image=str(image_path),
+                        source_label=str(label_path),
+                        skipped_reason="no valid windows or only_wide skipped",
                     )
                 )
-
-                crop_count = 0
-                label_count = 0
-
-                for y in y_values:
-                    ensure_current_task_active()
-                    for x in x_values:
-                        right = min(x + request.window_width, image_width)
-                        bottom = min(y + request.window_height, image_height)
-                        if right <= x or bottom <= y:
-                            continue
-
-                        crop_width = right - x
-                        crop_height = bottom - y
-                        if (
-                            not request.include_partial_edges
-                            and (
-                                crop_width < request.window_width
-                                or crop_height < request.window_height
-                            )
-                        ):
-                            continue
-
-                        lines = _clip_boxes_to_window(
-                            boxes=boxes,
-                            x=x,
-                            y=y,
-                            right=right,
-                            bottom=bottom,
-                            min_box_area_ratio=request.min_box_area_ratio,
-                        )
-
-                        if not lines and not request.keep_empty_labels:
-                            continue
-
-                        rel_parent = rel_image.parent if request.keep_subdirs else Path(".")
-                        output_ext = _resolve_output_extension(request.output_format, image_path.suffix)
-                        output_stem = f"{image_path.stem}_x{x}_y{y}_w{crop_width}_h{crop_height}"
-                        output_image_path = output_images_dir / rel_parent / f"{output_stem}{output_ext}"
-                        output_label_path = output_labels_dir / rel_parent / f"{output_stem}.txt"
-
-                        if (output_image_path.exists() or output_label_path.exists()) and not request.overwrite:
-                            continue
-                        if request.overwrite:
-                            if output_image_path.exists() and output_image_path.is_file():
-                                output_image_path.unlink()
-                            if output_label_path.exists() and output_label_path.is_file():
-                                output_label_path.unlink()
-
-                        crop = image.crop((x, y, right, bottom))
-                        _save_crop(crop, output_image_path, output_ext)
-                        output_label_path.parent.mkdir(parents=True, exist_ok=True)
-                        output_label_path.write_text("\n".join(lines), encoding="utf-8")
-
-                        crop_count += 1
-                        label_count += len(lines)
-
-                if crop_count > 0:
-                    processed_images += 1
-                    generated_crops += crop_count
-                    generated_labels += label_count
-                    details.append(
-                        YoloSlidingWindowCropDetail(
-                            source_image=str(image_path),
-                            source_label=str(label_path) if label_path.exists() else None,
-                            crop_count=crop_count,
-                            label_count=label_count,
-                        )
-                    )
-                else:
-                    skipped_images += 1
-                    details.append(
-                        YoloSlidingWindowCropDetail(
-                            source_image=str(image_path),
-                            source_label=str(label_path) if label_path.exists() else None,
-                            skipped_reason="no valid windows or no boxes in windows",
-                        )
-                    )
         except (UnidentifiedImageError, OSError) as exc:
             skipped_images += 1
             details.append(
                 YoloSlidingWindowCropDetail(
                     source_image=str(image_path),
-                    source_label=str(label_path) if label_path.exists() else None,
-                    skipped_reason=f"failed to open/process image: {exc}",
+                    source_label=str(label_path),
+                    skipped_reason=f"failed to open/process: {exc}",
                 )
             )
 
     return YoloSlidingWindowCropResponse(
-        dataset_dir=str(dataset_dir),
+        images_dir=str(images_dir),
+        labels_dir=str(labels_dir),
         output_dir=str(output_dir),
         input_images=len(image_paths),
         processed_images=processed_images,
