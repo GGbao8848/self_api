@@ -426,7 +426,70 @@ curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/copy-path/async" \
   }'
 ```
 
-## 12. YOLO 大图正方形滑窗裁剪为小图数据集
+## 12. 跨机器 SFTP 远程传输
+
+- `POST /api/v1/preprocess/remote-transfer`
+- `POST /api/v1/preprocess/remote-transfer/async`
+
+将本地文件或目录通过 SFTP 上传到远程服务器。支持 `sftp://` URL 或 `user@host:path` 格式。
+
+```bash
+# 同步（密码认证）
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/remote-transfer" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_path": "./data/dataset",
+    "target": "sftp://172.31.1.9/mnt/usrhome/sk/ndata/",
+    "username": "sk",
+    "password": "your_password",
+    "overwrite": true
+  }'
+
+# 同步（私钥认证）
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/remote-transfer" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_path": "./data/dataset",
+    "target": "sftp://172.31.1.9/mnt/usrhome/sk/ndata/",
+    "username": "sk",
+    "private_key_path": "~/.ssh/id_rsa",
+    "overwrite": true
+  }'
+
+# 异步
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/remote-transfer/async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_path": "./data/dataset",
+    "target": "sftp://172.31.1.9/mnt/usrhome/sk/ndata/",
+    "username": "sk",
+    "password": "your_password",
+    "overwrite": true,
+    "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
+    "callback_timeout_seconds": 10
+  }'
+```
+
+**target 格式**：
+
+- `sftp://host/path` 或 `sftp://user@host/path`
+- `sftp://host:port/path`
+- `user@host:path`（scp 风格）
+
+**响应示例**：
+
+```json
+{
+  "status": "ok",
+  "source_path": "/path/to/local/dataset",
+  "target_path": "/mnt/usrhome/sk/ndata/dataset",
+  "transferred_type": "directory",
+  "transferred_files": 42,
+  "total_bytes": 1048576
+}
+```
+
+## 13. YOLO 大图正方形滑窗裁剪为小图数据集
 
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 - `POST /api/v1/preprocess/yolo-sliding-window-crop/async`

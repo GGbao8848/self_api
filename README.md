@@ -1,6 +1,6 @@
 # self_api - 图像/数据集预处理 API
 
-用于图像与图像数据集预处理的最小可交付 API 服务，当前提供 11 个核心能力：
+用于图像与图像数据集预处理的最小可交付 API 服务，当前提供 12 个核心能力：
 
 1. 指定目录图像按滑窗规则裁剪并保存
 2. Pascal VOC XML 标注转换为 YOLO 标注
@@ -9,10 +9,11 @@
 5. 指定 zip 压缩包解压到目标目录
 6. 文件或文件夹整体移动到目标目录
 7. 文件或文件夹整体复制到目标目录
-8. YOLO 大图正方形滑窗裁剪为小图数据集（标签同步裁剪，仅宽图水平滑动）
-9. 递归发现多层目录中的最底层叶子数据目录
-10. 递归清洗多层目录中的图像/XML数据并归类为 `images/xmls/backgrounds`
-11. 汇总多个子目录处理结果为统一 `dataset/images`、`dataset/labels`、`dataset/backgrounds`
+8. **跨机器 SFTP 远程传输**（文件/目录上传到远程 SFTP 服务器）
+9. YOLO 大图正方形滑窗裁剪为小图数据集（标签同步裁剪，仅宽图水平滑动）
+10. 递归发现多层目录中的最底层叶子数据目录
+11. 递归清洗多层目录中的图像/XML数据并归类为 `images/xmls/backgrounds`
+12. 汇总多个子目录处理结果为统一 `dataset/images`、`dataset/labels`、`dataset/backgrounds`
 
 ## 1. 最小可交付范围
 
@@ -238,7 +239,23 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `target_dir`: 目标目录
 - `overwrite`: 目标同名已存在时是否覆盖
 
-### 4.12 YOLO 大图正方形滑窗裁剪为小图数据集
+### 4.12 跨机器 SFTP 远程传输
+
+- `POST /api/v1/preprocess/remote-transfer`
+- `POST /api/v1/preprocess/remote-transfer/async`
+
+将本地文件或目录通过 SFTP 上传到远程服务器（基于 paramiko）。
+
+关键参数：
+
+- `source_path`: 本地源文件或目录
+- `target`: 远程目标，支持 `sftp://host/path`、`sftp://user@host/path`、`user@host:path`
+- `username`: SSH 用户名（若 target 中未包含则必填）
+- `password` 或 `private_key_path`: 二选一
+- `port`: SSH 端口，默认 22
+- `overwrite`: 目标已存在时是否覆盖
+
+### 4.13 YOLO 大图正方形滑窗裁剪为小图数据集
 
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 

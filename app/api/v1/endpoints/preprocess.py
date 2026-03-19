@@ -20,6 +20,9 @@ from app.schemas.preprocess import (
     MovePathAsyncRequest,
     MovePathRequest,
     MovePathResponse,
+    RemoteTransferAsyncRequest,
+    RemoteTransferRequest,
+    RemoteTransferResponse,
     SplitYoloDatasetAsyncRequest,
     SplitYoloDatasetRequest,
     SplitYoloDatasetResponse,
@@ -45,6 +48,7 @@ from app.services.file_operations import (
     run_unzip_archive,
     run_zip_folder,
 )
+from app.services.remote_transfer import run_remote_transfer
 from app.services.nested_dataset import (
     run_aggregate_nested_dataset,
     run_clean_nested_dataset,
@@ -426,6 +430,42 @@ def copy_path(payload: CopyPathRequest) -> CopyPathResponse:
         return run_copy_path(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/remote-transfer", response_model=RemoteTransferResponse)
+def remote_transfer(payload: RemoteTransferRequest) -> RemoteTransferResponse:
+    try:
+        return run_remote_transfer(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/remote-transfer/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def remote_transfer_async(
+    payload: RemoteTransferAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "remote_transfer"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = RemoteTransferRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_remote_transfer(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
 
 
 @router.post(

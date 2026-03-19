@@ -291,6 +291,46 @@ class CopyPathResponse(BaseModel):
     copied_type: Literal["file", "directory"]
 
 
+class RemoteTransferRequest(BaseModel):
+    """跨机器 SFTP 传输：将本地文件/目录上传到远程 SFTP 服务器。"""
+
+    source_path: str = Field(description="本地源文件或目录路径")
+    target: str = Field(
+        description="远程目标，支持 sftp://host/path 或 sftp://user@host/path 或 user@host:path",
+    )
+    overwrite: bool = Field(
+        default=False,
+        description="目标已存在时是否覆盖",
+    )
+    username: str | None = Field(
+        default=None,
+        description="SSH 用户名，若 target 中未包含则必填",
+    )
+    password: str | None = Field(
+        default=None,
+        description="SSH 密码（与 private_key_path 二选一）",
+    )
+    private_key_path: str | None = Field(
+        default=None,
+        description="SSH 私钥路径（与 password 二选一）",
+    )
+    port: int = Field(
+        default=22,
+        ge=1,
+        le=65535,
+        description="SSH 端口",
+    )
+
+
+class RemoteTransferResponse(BaseModel):
+    status: str = "ok"
+    source_path: str
+    target_path: str
+    transferred_type: Literal["file", "directory"]
+    transferred_files: int
+    total_bytes: int
+
+
 class YoloSlidingWindowCropRequest(BaseModel):
     """YOLO 正方形滑窗裁剪：窗口边长=图片高度，仅水平滑动。"""
 
@@ -555,6 +595,19 @@ class MovePathAsyncRequest(MovePathRequest):
 
 
 class CopyPathAsyncRequest(CopyPathRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class RemoteTransferAsyncRequest(RemoteTransferRequest):
     callback_url: AnyHttpUrl | None = Field(
         default=None,
         description="Optional webhook URL that receives task result when finished",
