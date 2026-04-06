@@ -271,6 +271,12 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `ignore_vis_ratio`: 可见比例低于此值视为可忽略，默认 0.05
 - `only_wide`: 仅处理宽图（W>H），默认 true
 
+### 4.14 生成 YOLO `data.yaml`
+
+- `POST /api/v1/preprocess/build-yolo-yaml`（及 `/async`）
+
+根据数据集根目录与各划分下的 `images` 路径、`classes.txt` 生成 Ultralytics 风格 YAML。字段约定见 `docs/api_examples.md` 第 0 节与第 14 节。
+
 ## 5. 一期最小生产版
 
 当前仓库已落地一期最小生产版，用于支持 LangGraph 的跨机器接入。

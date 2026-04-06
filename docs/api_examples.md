@@ -2,6 +2,24 @@
 
 本文档从 `README.md` 中拆分，集中放置各接口的示例请求。
 
+## 0. preprocess 请求体字段约定（权威）
+
+以下名称与 `app/schemas/preprocess.py` 一致。异步接口在同步字段基础上增加 `callback_url`、`callback_timeout_seconds`（可选）。
+
+| 端点 | 主要字段 |
+|------|----------|
+| `xml-to-yolo` | `dataset_dir`（兼容别名 `input_dir`） |
+| `split-yolo-dataset` | `dataset_dir`（兼容 `input_dir`）、`output_dir`（可选） |
+| `yolo-sliding-window-crop` | `images_dir`、`labels_dir`、`output_dir`、`min_vis_ratio`、`stride_ratio`、`ignore_vis_ratio`、`only_wide` |
+| `zip-folder` | `input_dir`、`output_zip_path`（兼容 `output_dir`）、`include_root_dir`、`overwrite` |
+| `unzip-archive` | `archive_path`（兼容 `input_dir`）、`output_dir`、`overwrite` |
+| `move-path` / `copy-path` | `source_path`（兼容 `input_dir`）、`target_dir`（兼容 `output_dir`）、`overwrite` |
+| `build-yolo-yaml` | `input_dir`（可传数据集**上级目录**，服务会依次尝试 `<input_dir>/dataset`、`input_dir` 自身、`<input_dir>/yolo_split`，并自动匹配 **train/images** 或 **images/train**）、`classes_file`（可选；默认同目录或 `yolo_split`/`dataset` 下 `classes.txt`）、`split_names`（可选）、`images_subdir_name`、`path_prefix_replace_from` / `path_prefix_replace_to`（成对）、`output_yaml_path` |
+
+**异步任务轮询**：`GET /api/v1/preprocess/tasks/{task_id}` 返回体中，业务结果在 **`result`** 对象内（例如 `result.output_dir`、`result.output_zip_path`），勿与顶层字段混淆。
+
+**n8n HTTP Request**：服务端要求 **`Content-Type: application/json`**。在节点里用「Body Parameters / 字段列表」维护时，请将 **Body Content Type** 设为 **JSON**，**Specify Body** 设为 **Using Fields Below（keypair）**，不要用整段 `JSON.stringify` 表达式，以便与下表字段一一对应、方便修改。
+
 ## 1. 健康检查
 
 - `GET /api/v1/healthz`
@@ -538,3 +556,24 @@ python yolo_square_sliding_crop.py \
   --ignore_vis_ratio 0.05 \
   --only_wide
 ```
+
+## 14. 生成 YOLO `data.yaml`（Ultralytics）
+
+- `POST /api/v1/preprocess/build-yolo-yaml`
+- `POST /api/v1/preprocess/build-yolo-yaml/async`
+
+在 `input_dir` 下自动匹配数据集根（见 §0），扫描 `train` / `val` / `test` 等划分；各划分下需存在 `images` 子目录且含至少一张图片。生成的 YAML 中 **`train` / `val` / `test` 的值为各划分 `images` 目录的绝对路径**（POSIX），例如 `train: /Users/.../dataset1/dataset/train/images`，不再使用单独的 `path:` 与相对子路径。`path_prefix_replace_from` / `path_prefix_replace_to` 若成对填写，则对**每一条**上述绝对路径做前缀替换（例如把本机 `original_dataset` 前缀换成 `project_root/detector` 下的目标根路径）。
+
+```bash
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/build-yolo-yaml" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/path/to/temp_dataset",
+    "classes_file": "/path/to/temp_dataset/classes.txt",
+    "output_yaml_path": "/path/to/temp_dataset/dataset.yaml",
+    "path_prefix_replace_from": "/Users/me/tmp_datasets/dataset1",
+    "path_prefix_replace_to": "/mnt/training/TVDS/dog_cat_pig"
+  }'
+```
+
+`classes_file` 可省略，按 §0 在 `dataset` / `yolo_split` 等位置自动查找 `classes.txt`。`path_prefix_replace_*` 可省略；若填写则须成对出现，且每条划分路径须以 `path_prefix_replace_from` 为前缀。

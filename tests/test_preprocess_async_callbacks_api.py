@@ -65,7 +65,7 @@ def test_zip_folder_async_task_success(client: TestClient, case_dir: Path) -> No
     assert task_data["error"] is None
     assert task_data["callback_state"] == "succeeded"
     assert task_data["result"]["packed_files"] == 2
-    assert Path(task_data["result"]["output_dir"]).exists()
+    assert Path(task_data["result"]["output_zip_path"]).exists()
 
 
 def test_zip_folder_async_task_failed_missing_input(client: TestClient, case_dir: Path) -> None:

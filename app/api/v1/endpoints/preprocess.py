@@ -35,6 +35,9 @@ from app.schemas.preprocess import (
     XmlToYoloAsyncRequest,
     XmlToYoloRequest,
     XmlToYoloResponse,
+    BuildYoloYamlAsyncRequest,
+    BuildYoloYamlRequest,
+    BuildYoloYamlResponse,
     YoloSlidingWindowCropAsyncRequest,
     YoloSlidingWindowCropRequest,
     YoloSlidingWindowCropResponse,
@@ -57,6 +60,7 @@ from app.services.nested_dataset import (
 from app.services.sliding_window import run_sliding_window_crop
 from app.services.split_yolo_dataset import run_split_yolo_dataset
 from app.services.task_manager import get_task, submit_task
+from app.services.build_yolo_yaml import run_build_yolo_yaml
 from app.services.xml_to_yolo import run_xml_to_yolo
 from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
 
@@ -523,6 +527,42 @@ def yolo_sliding_window_crop_async(
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_yolo_sliding_window_crop(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/build-yolo-yaml", response_model=BuildYoloYamlResponse)
+def build_yolo_yaml(payload: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
+    try:
+        return run_build_yolo_yaml(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/build-yolo-yaml/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def build_yolo_yaml_async(
+    payload: BuildYoloYamlAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "build_yolo_yaml"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = BuildYoloYamlRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_build_yolo_yaml(sync_payload).model_dump(),
         callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )

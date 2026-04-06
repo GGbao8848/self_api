@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, Field
+from pydantic import AliasChoices, AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from app.schemas.artifacts import ArtifactSummary
 
@@ -98,8 +98,11 @@ class AsyncTaskStatusResponse(BaseModel):
 
 
 class XmlToYoloRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     dataset_dir: str = Field(
         description="Dataset root directory containing images and xmls folders",
+        validation_alias=AliasChoices("dataset_dir", "input_dir"),
     )
     images_dir_name: str = Field(default="images", description="Image folder name")
     xmls_dir_name: str = Field(default="xmls", description="Pascal VOC XML folder name")
@@ -149,8 +152,11 @@ class XmlToYoloResponse(BaseModel):
 
 
 class SplitYoloDatasetRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     dataset_dir: str = Field(
         description="Dataset root directory containing images and labels folders",
+        validation_alias=AliasChoices("dataset_dir", "input_dir"),
     )
     output_dir: str | None = Field(
         default=None,
@@ -216,10 +222,13 @@ class SplitYoloDatasetResponse(BaseModel):
 
 
 class ZipFolderRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     input_dir: str = Field(description="Input folder path to package")
     output_zip_path: str | None = Field(
         default=None,
         description="Output zip path; defaults to <input_dir_parent>/<input_dir_name>.zip",
+        validation_alias=AliasChoices("output_zip_path", "output_dir"),
     )
     include_root_dir: bool = Field(
         default=True,
@@ -240,7 +249,12 @@ class ZipFolderResponse(BaseModel):
 
 
 class UnzipArchiveRequest(BaseModel):
-    archive_path: str = Field(description="Zip archive path to extract")
+    model_config = ConfigDict(populate_by_name=True)
+
+    archive_path: str = Field(
+        description="Zip archive path to extract",
+        validation_alias=AliasChoices("archive_path", "input_dir"),
+    )
     output_dir: str | None = Field(
         default=None,
         description="Output directory; defaults to <archive_parent>/<archive_stem>",
@@ -260,8 +274,16 @@ class UnzipArchiveResponse(BaseModel):
 
 
 class MovePathRequest(BaseModel):
-    source_path: str = Field(description="Source file or directory path")
-    target_dir: str = Field(description="Target directory path")
+    model_config = ConfigDict(populate_by_name=True)
+
+    source_path: str = Field(
+        description="Source file or directory path",
+        validation_alias=AliasChoices("source_path", "input_dir"),
+    )
+    target_dir: str = Field(
+        description="Target directory path",
+        validation_alias=AliasChoices("target_dir", "output_dir"),
+    )
     overwrite: bool = Field(
         default=False,
         description="Whether to overwrite target when name conflicts",
@@ -276,8 +298,16 @@ class MovePathResponse(BaseModel):
 
 
 class CopyPathRequest(BaseModel):
-    source_path: str = Field(description="Source file or directory path")
-    target_dir: str = Field(description="Target directory path")
+    model_config = ConfigDict(populate_by_name=True)
+
+    source_path: str = Field(
+        description="Source file or directory path",
+        validation_alias=AliasChoices("source_path", "input_dir"),
+    )
+    target_dir: str = Field(
+        description="Target directory path",
+        validation_alias=AliasChoices("target_dir", "output_dir"),
+    )
     overwrite: bool = Field(
         default=False,
         description="Whether to overwrite target when name conflicts",
@@ -652,3 +682,64 @@ class YoloSlidingWindowCropResponse(BaseModel):
     generated_crops: int
     generated_labels: int
     details: list[YoloSlidingWindowCropDetail]
+
+
+class BuildYoloYamlRequest(BaseModel):
+    input_dir: str = Field(
+        ...,
+        description=(
+            "Dataset root to scan. Auto-resolves common layouts: "
+            "<input_dir>/dataset (cropped output), <input_dir>/yolo_split (split output), "
+            "or <input_dir> itself. Supports train/images (split_first) or images/train (images_first)."
+        ),
+    )
+    classes_file: str | None = Field(
+        default=None,
+        description="Path to classes.txt. Defaults to <input_dir>/classes.txt",
+    )
+    split_names: list[str] | None = Field(
+        default=None,
+        description="Split folder names to check in order (default: train, val, test)",
+    )
+    images_subdir_name: str = Field(
+        default="images",
+        description="Subfolder under each split that holds images (YAML paths are <split>/<this>)",
+    )
+    path_prefix_replace_from: str | None = Field(
+        default=None,
+        description="If set with path_prefix_replace_to, replace this prefix on each split's absolute images path in YAML",
+    )
+    path_prefix_replace_to: str | None = Field(
+        default=None,
+        description="Replacement prefix for train/val/test absolute paths (e.g. project root + detector)",
+    )
+    output_yaml_path: str = Field(
+        ...,
+        description="Full path for the generated data.yaml (parent dirs are created if needed)",
+    )
+
+
+class BuildYoloYamlAsyncRequest(BuildYoloYamlRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class BuildYoloYamlResponse(BaseModel):
+    status: str = "ok"
+    output_yaml_path: str
+    path_in_yaml: str = Field(
+        description="First split's images directory path as written in YAML (absolute, after prefix replace)",
+    )
+    dataset_root: str = Field(
+        description="Resolved dataset root on disk used to locate splits (before prefix replace)",
+    )
+    splits_included: list[str]
+    classes_count: int
