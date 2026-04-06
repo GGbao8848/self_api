@@ -69,3 +69,4 @@ Thumbs.db
 .ipynb_checkpoints/
 tmp_datasets/
 tmp_generate_datasets.py
+data/
