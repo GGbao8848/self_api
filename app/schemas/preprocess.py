@@ -743,3 +743,45 @@ class BuildYoloYamlResponse(BaseModel):
     )
     splits_included: list[str]
     classes_count: int
+
+
+class YoloTrainRequest(BaseModel):
+    yaml_path: str = Field(
+        ...,
+        description="Absolute path to Ultralytics data YAML (must contain a /dataset/ segment)",
+    )
+    project_root_dir: str = Field(
+        ...,
+        description="Working directory for the training subprocess (shell cwd)",
+    )
+    yolo_train_env: str = Field(
+        ...,
+        description="Conda environment name (e.g. yolo_pose)",
+    )
+    model: str = Field(default="yolo11s.pt", description="Ultralytics model argument")
+    epochs: int = Field(default=100, ge=1)
+    imgsz: int = Field(default=640, ge=1)
+
+
+class YoloTrainAsyncRequest(YoloTrainRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class YoloTrainResponse(BaseModel):
+    status: Literal["ok", "failed"]
+    command: str
+    cwd: str
+    project: str
+    name: str
+    exit_code: int
+    stdout: str
+    stderr: str

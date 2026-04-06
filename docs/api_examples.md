@@ -15,6 +15,7 @@
 | `unzip-archive` | `archive_path`（兼容 `input_dir`）、`output_dir`、`overwrite` |
 | `move-path` / `copy-path` | `source_path`（兼容 `input_dir`）、`target_dir`（兼容 `output_dir`）、`overwrite` |
 | `build-yolo-yaml` | `input_dir`（可传数据集**上级目录**，服务会依次尝试 `<input_dir>/dataset`、`input_dir` 自身、`<input_dir>/yolo_split`，并自动匹配 **train/images** 或 **images/train**）、`classes_file`（可选；默认同目录或 `yolo_split`/`dataset` 下 `classes.txt`）、`split_names`（可选）、`images_subdir_name`、`path_prefix_replace_from` / `path_prefix_replace_to`（成对）、`output_yaml_path` |
+| `yolo-train` | `yaml_path`（须含 `/dataset/` 段）、`project_root_dir`（子进程 `cwd`）、`yolo_train_env`（conda 环境名）、`model`、`epochs`、`imgsz`（后三项有默认值） |
 
 **异步任务轮询**：`GET /api/v1/preprocess/tasks/{task_id}` 返回体中，业务结果在 **`result`** 对象内（例如 `result.output_dir`、`result.output_zip_path`），勿与顶层字段混淆。
 
@@ -577,3 +578,25 @@ curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/build-yolo-yaml" \
 ```
 
 `classes_file` 可省略，按 §0 在 `dataset` / `yolo_split` 等位置自动查找 `classes.txt`。`path_prefix_replace_*` 可省略；若填写则须成对出现，且每条划分路径须以 `path_prefix_replace_from` 为前缀。
+
+## 15. YOLO 训练（conda + `yolo train`）
+
+- `POST /api/v1/preprocess/yolo-train`
+- `POST /api/v1/preprocess/yolo-train/async`
+
+根据 `yaml_path` 在 **包含 `/dataset/` 段** 的前提下自动推导 Ultralytics 的 `project` 与 `name`：`project` 为「`/dataset/` 之前路径」+ `/runs/train`；`name` 为 yaml 文件名（不含扩展名）。在 `project_root_dir` 下启动子进程，使用 `conda run -n <yolo_train_env> -- yolo train ...`。
+
+```bash
+curl -X POST "http://192.168.210.73:8666/api/v1/preprocess/yolo-train" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "yaml_path": "/Users/me/self_api/TVDS/dog_cat_pig/dataset/dataset.yaml",
+    "project_root_dir": "/Users/me/self_api/TVDS",
+    "yolo_train_env": "yolo_pose",
+    "model": "yolo11s.pt",
+    "epochs": 100,
+    "imgsz": 640
+  }'
+```
+
+响应含 `command`（拼接后的命令行）、`cwd`、`project`、`name`、`exit_code`、`stdout`、`stderr`。训练失败时 `exit_code` 非零且 `status` 为 `failed`。

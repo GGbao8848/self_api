@@ -6,10 +6,10 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        2864,
-        6064
+        1104,
+        6768
       ],
-      "id": "6ce9f8be-0179-4b9a-b34f-1d79370dc212",
+      "id": "018292dd-6c31-4418-96b9-ada57bc8ee5e",
       "name": "When clicking ‘Execute workflow’"
     },
     {
@@ -20,10 +20,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3312,
-        6064
+        1552,
+        6768
       ],
-      "id": "82995f51-a0bc-4711-86af-d12e28b89497",
+      "id": "7816de3d-2006-46ba-b081-a7daa991ef6b",
       "name": "HTTP Request"
     },
     {
@@ -76,10 +76,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3536,
-        6064
+        1776,
+        6768
       ],
-      "id": "7708c79f-8c4b-4aba-9144-dfcba023312f",
+      "id": "4939bf56-ccf9-49b3-9dcf-f64cf171b541",
       "name": "xml-to-yolo"
     },
     {
@@ -115,6 +115,30 @@
               "name": "detector_name",
               "value": "dog_cat_pig",
               "type": "string"
+            },
+            {
+              "id": "b4c5d6e7-f8a9-4012-b345-6789abcdef01",
+              "name": "yolo_train_env",
+              "value": "yolo_pose",
+              "type": "string"
+            },
+            {
+              "id": "c5d6e7f8-a9b0-4123-c456-789abcdef012",
+              "name": "yolo_train_model",
+              "value": "yolo11s.pt",
+              "type": "string"
+            },
+            {
+              "id": "d6e7f8a9-b0c1-4234-d567-89abcdef0123",
+              "name": "yolo_train_epochs",
+              "value": "100",
+              "type": "string"
+            },
+            {
+              "id": "e7f8a9b0-c1d2-4345-e678-9abcdef01234",
+              "name": "yolo_train_imgsz",
+              "value": "640",
+              "type": "string"
             }
           ]
         },
@@ -124,10 +148,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        3088,
-        6064
+        1328,
+        6768
       ],
-      "id": "130dcaa4-38f5-41e4-8386-93541f664409",
+      "id": "51c693f8-c22a-4e16-90ef-4b3a1c11e3cd",
       "name": "base_config"
     },
     {
@@ -188,10 +212,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        4432,
-        5952
+        2672,
+        6656
       ],
-      "id": "fc1dea41-dd2f-4f28-8cfb-bbb152944fe8",
+      "id": "45fab7ad-8f60-4a04-af82-74af98105cb1",
       "name": "split-yolo-dataset"
     },
     {
@@ -221,10 +245,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        4208,
-        6000
+        2448,
+        6704
       ],
-      "id": "fff6f409-ca49-4465-9f84-0c07d9609e0a",
+      "id": "d21844ad-17ea-4f8c-b830-8c28a6ab0d00",
       "name": "If"
     },
     {
@@ -232,10 +256,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        4432,
-        6160
+        2672,
+        6864
       ],
-      "id": "c6cac312-82e6-4e46-b9b2-966ecac1df54",
+      "id": "ac7438ec-9351-491c-bf35-9f53e52e26a6",
       "name": "Wait",
       "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
     },
@@ -244,10 +268,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        3760,
-        6064
+        2000,
+        6768
       ],
-      "id": "c4a8b1b7-d939-4bf8-8395-79187db80e63",
+      "id": "d997bca5-9497-4603-ad19-b2f75a896606",
       "name": "Wait1",
       "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
     },
@@ -278,10 +302,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        5104,
-        5856
+        3344,
+        6560
       ],
-      "id": "0a0bf1a2-eb2d-4a1e-9019-929810472958",
+      "id": "bd7aabc4-c132-46e5-88ee-8d5bc8609d4f",
       "name": "If1"
     },
     {
@@ -289,10 +313,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        5328,
-        6208
+        3568,
+        6912
       ],
-      "id": "2824aae4-c3a6-462c-959b-e2f1a0ae9c89",
+      "id": "56737009-3bfc-462e-939b-04c9701e4fec",
       "name": "Wait2",
       "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
     },
@@ -301,10 +325,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        4656,
-        5952
+        2896,
+        6656
       ],
-      "id": "e1c35c6a-153a-4a8b-9b49-ed21db3ca09c",
+      "id": "af67d5c6-bc3a-4dc3-8480-5e1ef9caa2da",
       "name": "Wait3",
       "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
     },
@@ -358,10 +382,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        5328,
-        5216
+        3568,
+        5920
       ],
-      "id": "82c53aa0-3780-4d8e-bfe5-bbced8567ce3",
+      "id": "834fc052-b0a1-44b8-a4cd-2c4d88501f1a",
       "name": "train_crop"
     },
     {
@@ -414,10 +438,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        5328,
-        5600
+        3568,
+        6304
       ],
-      "id": "9ad37bd8-061a-4d22-8176-99f0c89ad99b",
+      "id": "acbc4636-7874-4092-8a55-06fa53a54daf",
       "name": "val_crop"
     },
     {
@@ -470,10 +494,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        5328,
-        6016
+        3568,
+        6720
       ],
-      "id": "2d3e65e5-9ff3-420b-94f7-60bcad251b9c",
+      "id": "72a01e29-1624-45f5-8cdd-b5f7066838f4",
       "name": "test_crop"
     },
     {
@@ -484,10 +508,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3984,
-        6064
+        2224,
+        6768
       ],
-      "id": "d106c0e7-5a9a-4d10-a634-be947324d6cf",
+      "id": "58f33b9c-70be-45fd-be23-08b8547c5910",
       "name": "状态判断_xml-to-yolo"
     },
     {
@@ -517,10 +541,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        6000,
-        5920
+        4240,
+        6624
       ],
-      "id": "c34f830e-778b-4aed-9859-878f4d205e12",
+      "id": "92d4de7f-2fe1-4e5b-9ed0-e4999576f059",
       "name": "If2"
     },
     {
@@ -528,10 +552,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        6224,
-        6064
+        4464,
+        6768
       ],
-      "id": "d11a3cde-73b7-431f-bd05-4d75e690d61b",
+      "id": "aa3075e9-a512-462c-bc62-394dfa35ae4b",
       "name": "Wait4",
       "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
     },
@@ -540,10 +564,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        5552,
-        6016
+        3792,
+        6720
       ],
-      "id": "2e19c148-12d9-4279-a38b-f6644ece80e1",
+      "id": "888093fd-920b-42d3-ae82-e5338ee916e0",
       "name": "Wait5",
       "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
     },
@@ -574,10 +598,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        6000,
-        5536
+        4240,
+        6240
       ],
-      "id": "7a9b25ea-dcba-4c4c-863c-2136384bf704",
+      "id": "af60463a-9179-4e12-995b-9ec0667b54e1",
       "name": "If3"
     },
     {
@@ -585,10 +609,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        6224,
-        5808
+        4464,
+        6512
       ],
-      "id": "5ebcdc91-5222-40c4-85d8-20a81aae5a41",
+      "id": "ebd4d997-378d-4c27-8d10-92e3f9a6c04f",
       "name": "Wait6",
       "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
     },
@@ -597,10 +621,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        5552,
-        5600
+        3792,
+        6304
       ],
-      "id": "4906ca6f-1eb0-4fbf-9edf-b863182a6190",
+      "id": "929a2903-b1a8-4e2a-bb86-05ead8c8128f",
       "name": "Wait7",
       "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
     },
@@ -631,10 +655,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        6000,
-        5136
+        4240,
+        5840
       ],
-      "id": "c6785477-9f77-431e-ac33-f322560e091a",
+      "id": "c3085f59-5845-4816-9307-2a2c17f19f46",
       "name": "If4"
     },
     {
@@ -642,10 +666,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        6224,
-        5216
+        4464,
+        5920
       ],
-      "id": "cf7fb5da-ab11-40af-8ac4-d68514e3b1d2",
+      "id": "e7ba6120-db98-4255-a64b-eabcc2b189bc",
       "name": "Wait8",
       "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
     },
@@ -654,24 +678,25 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        5552,
-        5216
+        3792,
+        5920
       ],
-      "id": "2b14fbbb-0707-4a70-96b3-961c3767f8ca",
+      "id": "db5c3e15-fcae-4b2f-8608-3e7d7c90a3b3",
       "name": "Wait9",
       "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
     },
     {
       "parameters": {
+        "mode": "chooseBranch",
         "numberInputs": 3
       },
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        6224,
-        5520
+        4464,
+        6224
       ],
-      "id": "b5f4f662-10f5-4983-99b4-b2272ab94d6e",
+      "id": "b14be9b6-6316-491b-af06-a0a65c54ea39",
       "name": "Merge",
       "executeOnce": true
     },
@@ -709,11 +734,55 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        6448,
-        5536
+        4688,
+        6240
       ],
-      "id": "67252135-21aa-49f4-ac92-9ce055937b33",
+      "id": "30d8b444-25af-4857-85f0-3be46ba95bff",
       "name": "build-yolo-yaml"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').first().json.self_api }}/api/v1/preprocess/yolo-train",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "yaml_path",
+              "value": "={{ $json.result.output_dir }}/{{ $('build-yolo-yaml').item.json.output_yaml_path.split('/').pop().split('.')[0]}}/{{ $('build-yolo-yaml').item.json.output_yaml_path.split('/').pop() }}"
+            },
+            {
+              "name": "project_root_dir",
+              "value": "={{ $('base_config').first().json.project_root_dir }}"
+            },
+            {
+              "name": "yolo_train_env",
+              "value": "={{ $('base_config').first().json.yolo_train_env }}"
+            },
+            {
+              "name": "model",
+              "value": "={{ $('base_config').first().json.yolo_train_model }}"
+            },
+            {
+              "name": "epochs",
+              "value": "=1"
+            },
+            {
+              "name": "imgsz",
+              "value": "={{ $('base_config').first().json.yolo_train_imgsz }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        7600,
+        6480
+      ],
+      "id": "27815876-6264-41c7-bb02-5f2ffb4c2b11",
+      "name": "yolo-train"
     },
     {
       "parameters": {
@@ -723,10 +792,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        4880,
-        5952
+        3120,
+        6656
       ],
-      "id": "3eab3e85-60b5-4d07-8cd8-c120987dd974",
+      "id": "c94c8b49-0083-4acc-a383-a6e7328605d4",
       "name": "状态判断_split-yolo-dataset"
     },
     {
@@ -737,10 +806,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        5776,
-        5216
+        4016,
+        5920
       ],
-      "id": "6ee33eaf-ffda-47d0-84ae-38dda524733f",
+      "id": "fe93c75b-b490-4679-9b44-15f09a6feb59",
       "name": "状态判断_train_crop",
       "retryOnFail": true
     },
@@ -752,10 +821,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        5776,
-        5600
+        4016,
+        6304
       ],
-      "id": "7f982fef-212b-4bc7-9d43-744d63a05654",
+      "id": "b0213b7e-9702-4fa3-b86a-25d5ff6ab386",
       "name": "状态判断_val_crop"
     },
     {
@@ -766,10 +835,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        5776,
-        6016
+        4016,
+        6720
       ],
-      "id": "fb5f1c38-52bc-450d-bfbe-23b5265e29ad",
+      "id": "dd39cdf8-2b71-4199-8bd5-e7c83ec07e2c",
       "name": "状态判断_test_crop"
     },
     {
@@ -799,10 +868,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        7344,
-        5456
+        5584,
+        6160
       ],
-      "id": "cfc998e4-1b12-42ed-9071-f787f0b8ab77",
+      "id": "c60985ea-0b04-42a9-9ca7-05f037de26ff",
       "name": "If5"
     },
     {
@@ -810,10 +879,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        7568,
-        5632
+        5808,
+        6336
       ],
-      "id": "26210e33-e8f3-41bb-b0e5-06355cca8cfd",
+      "id": "2934e3b0-a4f7-4c54-9e5a-40e947cfd4cf",
       "name": "Wait10",
       "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
     },
@@ -822,10 +891,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        6896,
-        5536
+        5136,
+        6240
       ],
-      "id": "5bb73621-ac4b-4362-8117-7f0fbd5a3fe3",
+      "id": "e890badf-03e7-4f27-9a9d-9b4a81d0e74f",
       "name": "Wait11",
       "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
     },
@@ -837,10 +906,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        7120,
-        5536
+        5360,
+        6240
       ],
-      "id": "e2bbf0d9-bb08-46c5-a9fa-4c3924d355a7",
+      "id": "2ea3e090-f56b-407b-bc08-d8009c6913c3",
       "name": "状态判断_zip-folder"
     },
     {
@@ -881,10 +950,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        6672,
-        5536
+        4912,
+        6240
       ],
-      "id": "d42ee405-69c8-4ab6-a094-4ad876fb5955",
+      "id": "cee41e5b-b316-47b9-9651-a71cb8a593db",
       "name": "zip-folder",
       "executeOnce": true
     },
@@ -915,10 +984,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        8240,
-        5344
+        6480,
+        6048
       ],
-      "id": "ac6451ef-ae53-480a-a4a1-7940191b5997",
+      "id": "8d4d3a5a-4b28-44f8-ba5a-7c28547ae1de",
       "name": "If6"
     },
     {
@@ -926,10 +995,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        8464,
-        5408
+        6704,
+        6112
       ],
-      "id": "bde438cf-351e-4aae-906d-9a10581c3dc1",
+      "id": "b45c0e19-6651-434b-b957-6a7eb56c0691",
       "name": "Wait12",
       "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
     },
@@ -938,10 +1007,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        7792,
-        5408
+        6032,
+        6112
       ],
-      "id": "f7ef9873-8c3c-4e1f-be2e-df2c671b092d",
+      "id": "9cde15ee-f111-4ec5-93a0-79fa6c0419c5",
       "name": "Wait13",
       "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
     },
@@ -979,10 +1048,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        7568,
-        5408
+        5808,
+        6112
       ],
-      "id": "a4aacf66-54af-4ca1-9c24-5c6d99fcaf14",
+      "id": "29a085c2-f465-4e36-9b1a-2ea44cd6a8dd",
       "name": "move-path"
     },
     {
@@ -993,10 +1062,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        8016,
-        5408
+        6256,
+        6112
       ],
-      "id": "ca7a458d-2783-4450-a681-c7df3939ddca",
+      "id": "33ee654f-b87a-4283-bc02-266fe2af46fc",
       "name": "状态判断_move-path"
     },
     {
@@ -1026,10 +1095,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        9136,
-        5776
+        7376,
+        6480
       ],
-      "id": "90c6470f-3c67-475a-8869-27127736d03f",
+      "id": "e7ea4e32-1e4e-4acc-a00c-e324acd6f5b9",
       "name": "If7"
     },
     {
@@ -1037,10 +1106,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        9360,
-        5776
+        7600,
+        6672
       ],
-      "id": "0424d271-0159-4631-866d-47d2876c3aeb",
+      "id": "e55048c1-f928-4ec9-9e47-23e2c87928e7",
       "name": "Wait14",
       "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
     },
@@ -1049,10 +1118,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        8688,
-        5776
+        6928,
+        6480
       ],
-      "id": "25656b28-9ff3-4e57-881d-45f8686d9624",
+      "id": "8bee1aea-033c-47d4-8ffc-d34488fc9ed3",
       "name": "Wait15",
       "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
     },
@@ -1090,10 +1159,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        8464,
-        5776
+        6704,
+        6480
       ],
-      "id": "f5041af5-4427-422d-806a-d5dcff30628a",
+      "id": "fd1dcf94-7e2d-4d45-b91a-2a486a44eb8e",
       "name": "unzip-archive"
     },
     {
@@ -1104,10 +1173,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        8912,
-        5776
+        7152,
+        6480
       ],
-      "id": "079637ca-bddd-40cc-813c-7cd4cded9bac",
+      "id": "51264980-417f-4e57-b65d-61353325c674",
       "name": "状态判断_unzip-archive"
     }
   ],
@@ -1488,6 +1557,11 @@
         ]
       ]
     },
+    "yolo-train": {
+      "main": [
+        []
+      ]
+    },
     "If5": {
       "main": [
         [
@@ -1614,7 +1688,13 @@
     },
     "If7": {
       "main": [
-        [],
+        [
+          {
+            "node": "yolo-train",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Wait14",
@@ -1674,7 +1754,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "5df5a4d1-68b0-4e2a-8f14-39c9b0ee2e0e",
+  "versionId": "5fd95bcd-edfe-4c0d-b0bf-3f11bc518d3c",
   "meta": {
     "instanceId": "c4b7aa9096bc87944216bba48ef2687b8e22851666781e0193f26f348f4651ec"
   },
