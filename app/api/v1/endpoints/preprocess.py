@@ -3,6 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from app.api.url_builder import build_route_url
 from app.core.security import require_api_auth
 from app.schemas.preprocess import (
+    AnnotateVisualizeAsyncRequest,
+    AnnotateVisualizeRequest,
+    AnnotateVisualizeResponse,
     AggregateNestedDatasetAsyncRequest,
     AggregateNestedDatasetRequest,
     AggregateNestedDatasetResponse,
@@ -65,6 +68,7 @@ from app.services.split_yolo_dataset import run_split_yolo_dataset
 from app.services.task_manager import get_task, submit_task
 from app.services.build_yolo_yaml import run_build_yolo_yaml
 from app.services.yolo_train import run_yolo_train
+from app.services.annotation_visualize import run_annotate_visualize
 from app.services.xml_to_yolo import run_xml_to_yolo
 from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
 
@@ -241,6 +245,42 @@ def aggregate_nested_dataset_async(
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_aggregate_nested_dataset(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/annotate-visualize", response_model=AnnotateVisualizeResponse)
+def annotate_visualize(payload: AnnotateVisualizeRequest) -> AnnotateVisualizeResponse:
+    try:
+        return run_annotate_visualize(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/annotate-visualize/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def annotate_visualize_async(
+    payload: AnnotateVisualizeAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "annotate_visualize"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = AnnotateVisualizeRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_annotate_visualize(sync_payload).model_dump(),
         callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )

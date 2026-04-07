@@ -89,7 +89,7 @@
             {
               "id": "f54590ca-7856-4eaf-85ec-58236b4abe3e",
               "name": "self_api",
-              "value": "=http://192.168.71.73:8666",
+              "value": "=http://192.168.2.26:8666",
               "type": "string"
             },
             {

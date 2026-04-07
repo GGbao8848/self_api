@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import AliasChoices, AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.artifacts import ArtifactSummary
 
@@ -95,6 +95,98 @@ class AsyncTaskStatusResponse(BaseModel):
     callback_error: str | None = None
     callback_events: list[AsyncTaskCallbackEvent] = Field(default_factory=list)
     artifacts: list[ArtifactSummary] = Field(default_factory=list)
+
+
+class AnnotateVisualizeRequest(BaseModel):
+    """在图像上绘制标注框：YOLO txt 与 Pascal VOC XML 二选一（另一目录字段留空）。"""
+
+    images_dir: str = Field(description="图像目录")
+    labels_dir: str | None = Field(
+        default=None,
+        description="YOLO 格式 .txt 标注目录（与 xmls_dir 二选一，另一项留空）",
+    )
+    xmls_dir: str | None = Field(
+        default=None,
+        description="Pascal VOC XML 标注目录（与 labels_dir 二选一，另一项留空）",
+    )
+    output_dir: str = Field(description="可视化结果输出目录（保持与 images_dir 相同的相对路径结构）")
+    recursive: bool = Field(default=True, description="是否递归扫描图像")
+    extensions: list[str] | None = Field(
+        default=None,
+        description="允许的图像扩展名，默认常见图片格式",
+    )
+    include_difficult: bool = Field(
+        default=False,
+        description="XML 模式：是否绘制 difficult=1 的目标",
+    )
+    line_width: int = Field(default=2, ge=1, le=20, description="框线宽度（像素）")
+    overwrite: bool = Field(default=True, description="是否覆盖已存在的输出图像")
+    classes: list[str] | None = Field(
+        default=None,
+        description=(
+            "YOLO 模式：按类别 id 顺序的类别名列表；与 classes_file 二选一。"
+            "若与 classes_file 均未提供或 classes_file 为空，则框上文字显示类别 id（数字索引）。"
+        ),
+    )
+    classes_file: str | None = Field(
+        default=None,
+        description=(
+            "YOLO 模式：classes.txt 路径（每行一个类别名）；与 classes 二选一。"
+            "可省略或传空字符串，此时框上文字显示类别 id（数字索引）。"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _labels_or_xmls_exclusive(self) -> "AnnotateVisualizeRequest":
+        labels = (self.labels_dir or "").strip()
+        xmls = (self.xmls_dir or "").strip()
+        if labels and xmls:
+            raise ValueError("labels_dir 与 xmls_dir 只能填其一，另一项留空")
+        if not labels and not xmls:
+            raise ValueError("labels_dir 与 xmls_dir 必须填其一，另一项留空")
+        classes_inline = self.classes
+        classes_path = (self.classes_file or "").strip()
+        if classes_inline and classes_path:
+            raise ValueError("classes 与 classes_file 只能填其一")
+        return self.model_copy(
+            update={
+                "labels_dir": labels or None,
+                "xmls_dir": xmls or None,
+                "classes_file": classes_path or None,
+            }
+        )
+
+
+class AnnotateVisualizeDetail(BaseModel):
+    source_image: str
+    output_image: str | None = None
+    boxes_drawn: int = 0
+    skipped_reason: str | None = None
+
+
+class AnnotateVisualizeResponse(BaseModel):
+    status: str = "ok"
+    mode: Literal["yolo", "xml"]
+    images_dir: str
+    annotation_dir: str
+    output_dir: str
+    total_images: int
+    written_images: int
+    skipped_images: int
+    details: list[AnnotateVisualizeDetail]
+
+
+class AnnotateVisualizeAsyncRequest(AnnotateVisualizeRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
 
 
 class XmlToYoloRequest(BaseModel):
