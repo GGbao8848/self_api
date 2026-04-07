@@ -63,6 +63,32 @@ def test_build_yolo_yaml_path_prefix_replace(client: TestClient, case_dir: Path)
     assert f"train: {expected_train}" in out.read_text(encoding="utf-8")
 
 
+def test_build_yolo_yaml_path_prefix_replace_no_double_slash(
+    client: TestClient, case_dir: Path
+) -> None:
+    """path_prefix_replace_to 带尾部 / 时不应出现 n8n_workspace//dataset 式双斜杠。"""
+    ds = case_dir / "dataset2b"
+    _make_yolo_splits(ds, ("train", "val", "test"))
+    out = ds / "remote2.yaml"
+    resolved = ds.resolve().as_posix()
+    train_abs = (ds / "train" / "images").resolve().as_posix()
+    r = client.post(
+        "/api/v1/preprocess/build-yolo-yaml",
+        json={
+            "input_dir": str(ds),
+            "path_prefix_replace_from": resolved,
+            "path_prefix_replace_to": "/mnt/training/dataset2b/",
+            "output_yaml_path": str(out),
+        },
+    )
+    assert r.status_code == 200
+    expected_train = (Path("/mnt/training/dataset2b") / "train" / "images").as_posix()
+    assert r.json()["path_in_yaml"] == expected_train
+    text = out.read_text(encoding="utf-8")
+    assert f"train: {expected_train}" in text
+    assert "//" not in text.split("train:", 1)[1].split("\n", 1)[0]
+
+
 def test_build_yolo_yaml_train_only(client: TestClient, case_dir: Path) -> None:
     ds = case_dir / "dataset3"
     _make_yolo_splits(ds, ("train",))

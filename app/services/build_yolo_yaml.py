@@ -50,13 +50,17 @@ def _yaml_quote_scalar(value: str) -> str:
 
 
 def _apply_prefix_abs(path_str: str, from_p: str, to_p: str) -> str:
+    """Replace absolute prefix from_p with to_p; join with Path to avoid // from trailing-slash + leading-slash."""
     from_norm = from_p.replace("\\", "/")
     to_norm = to_p.replace("\\", "/")
     if not path_str.startswith(from_norm):
         raise ValueError(
             f"path {path_str!r} does not start with path_prefix_replace_from {from_norm!r}"
         )
-    return to_norm + path_str[len(from_norm) :]
+    suffix = path_str[len(from_norm) :].lstrip("/")
+    if not suffix:
+        return str(Path(to_norm))
+    return (Path(to_norm) / suffix).as_posix()
 
 
 def _build_yaml_lines(

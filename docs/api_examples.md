@@ -205,10 +205,10 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/xml-to-yolo/async" \
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/annotate-visualize" \
   -H "Content-Type: application/json" \
   -d '{
-    "images_dir": "./data/yolo_raw/images",
-    "labels_dir": "./data/yolo_raw/labels",
+    "images_dir": "",
+    "labels_dir": "/media/qzq/16T/TEDS/langgraph_workspace/download-2026-04-07_10-32-30/teds/整车图/正线/labels",
     "xmls_dir": "",
-    "output_dir": "./data/yolo_raw/visualized",
+    "output_dir": "/media/qzq/16T/TEDS/langgraph_workspace/download-2026-04-07_10-32-30/teds/整车图/正线/visualized",
     "recursive": true,
     "line_width": 2,
     "overwrite": true,
@@ -223,10 +223,10 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/annotate-visualize" \
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/annotate-visualize" \
   -H "Content-Type: application/json" \
   -d '{
-    "images_dir": "./data/voc_like/images",
+    "images_dir": "/media/qzq/16T/TEDS/langgraph_workspace/download-2026-04-07_10-32-30/teds/整车图/正线/images",
     "labels_dir": "",
-    "xmls_dir": "./data/voc_like/xmls",
-    "output_dir": "./data/voc_like/visualized",
+    "xmls_dir": "/media/qzq/16T/TEDS/langgraph_workspace/download-2026-04-07_10-32-30/teds/整车图/正线/xmls",
+    "output_dir": "/media/qzq/16T/TEDS/langgraph_workspace/download-2026-04-07_10-32-30/teds/整车图/正线/visualized",
     "recursive": true,
     "include_difficult": false,
     "overwrite": true
