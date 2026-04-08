@@ -145,13 +145,26 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
         for source_image, source_label, rel_path in split_assignments[split_name]:
             ensure_current_task_active()
             target_rel = rel_path if request.keep_subdirs else Path(rel_path.name)
-            target_image = output_dir / request.images_dir_name / split_name / target_rel
-            target_label = (
-                output_dir
-                / request.labels_dir_name
-                / split_name
-                / target_rel.with_suffix(".txt")
-            )
+            if request.output_layout == "split_first":
+                target_image = (
+                    output_dir / split_name / request.images_dir_name / target_rel
+                )
+                target_label = (
+                    output_dir
+                    / split_name
+                    / request.labels_dir_name
+                    / target_rel.with_suffix(".txt")
+                )
+            else:
+                target_image = (
+                    output_dir / request.images_dir_name / split_name / target_rel
+                )
+                target_label = (
+                    output_dir
+                    / request.labels_dir_name
+                    / split_name
+                    / target_rel.with_suffix(".txt")
+                )
 
             if (target_image.exists() or target_label.exists()) and not request.overwrite:
                 skipped_images += 1

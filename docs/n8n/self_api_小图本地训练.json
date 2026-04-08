@@ -1,0 +1,1641 @@
+{
+  "name": "self_api — dataset1（拖拉拽·无 Code）",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2464,
+        528
+      ],
+      "id": "7e8cb2d7-16dd-472a-9856-92921c602b53",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.self_api }}/api/v1/healthz",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2016,
+        528
+      ],
+      "id": "7e77ddc1-1f13-44a0-aa2d-a8f21310a82c",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/xml-to-yolo/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "dataset_dir",
+              "value": "={{ $('base_config').item.json.original_dataset }}"
+            },
+            {
+              "name": "images_dir_name",
+              "value": "images"
+            },
+            {
+              "name": "xmls_dir_name",
+              "value": "xmls"
+            },
+            {
+              "name": "labels_dir_name",
+              "value": "labels"
+            },
+            {
+              "name": "recursive",
+              "value": "true"
+            },
+            {
+              "name": "include_difficult",
+              "value": "false"
+            },
+            {
+              "name": "write_classes_file",
+              "value": "true"
+            },
+            {
+              "name": "callback_url",
+              "value": "http://127.0.0.1:9000/webhooks/preprocess-finished"
+            },
+            {
+              "name": "callback_timeout_seconds",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1792,
+        528
+      ],
+      "id": "47452c27-c25e-480a-bfaa-824a951e5a1b",
+      "name": "xml-to-yolo"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f54590ca-7856-4eaf-85ec-58236b4abe3e",
+              "name": "self_api",
+              "value": "=http://192.168.2.26:8666",
+              "type": "string"
+            },
+            {
+              "id": "ab2f8629-80d2-4888-a430-5746f0f23496",
+              "name": "original_dataset",
+              "value": "/media/qzq/16T/TEDS/langgraph_workspace/download-2026-04-07_10-32-30/teds/整车图/正线/20260407_非转数据拟合/Annotations/",
+              "type": "string"
+            },
+            {
+              "id": "f5d76981-1d2b-4cfa-80bf-6aa5573f1cca",
+              "name": "temp_dataset",
+              "value": "/media/qzq/16T/TEDS/langgraph_workspace/download-2026-04-07_10-32-30/teds/整车图/正线/20260407_非转数据拟合/Annotations/dataset",
+              "type": "string"
+            },
+            {
+              "id": "3145aa9b-ac14-4328-8e57-924b85b46aba",
+              "name": "project_root_dir",
+              "value": "/media/qzq/16T/n8n_workspace/",
+              "type": "string"
+            },
+            {
+              "id": "a386ad76-63b9-411e-83db-7ca1c952bc16",
+              "name": "detector_name",
+              "value": "dog_cat_pig",
+              "type": "string"
+            },
+            {
+              "id": "b4c5d6e7-f8a9-4012-b345-6789abcdef01",
+              "name": "yolo_train_env",
+              "value": "v11_sk",
+              "type": "string"
+            },
+            {
+              "id": "c5d6e7f8-a9b0-4123-c456-789abcdef012",
+              "name": "yolo_train_model",
+              "value": "yolo11s.pt",
+              "type": "string"
+            },
+            {
+              "id": "d6e7f8a9-b0c1-4234-d567-89abcdef0123",
+              "name": "yolo_train_epochs",
+              "value": "200",
+              "type": "string"
+            },
+            {
+              "id": "e7f8a9b0-c1d2-4345-e678-9abcdef01234",
+              "name": "yolo_train_imgsz",
+              "value": "640",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2240,
+        528
+      ],
+      "id": "9f3608ef-5ee0-4987-bfd5-b453ec99732e",
+      "name": "base_config"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/split-yolo-dataset/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "dataset_dir",
+              "value": "={{ $('base_config').item.json.original_dataset }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $('base_config').item.json.original_dataset }}/yolo_split"
+            },
+            {
+              "name": "mode",
+              "value": "train_val_test"
+            },
+            {
+              "name": "train_ratio",
+              "value": "0.8"
+            },
+            {
+              "name": "val_ratio",
+              "value": "0.1"
+            },
+            {
+              "name": "test_ratio",
+              "value": "0.1"
+            },
+            {
+              "name": "shuffle",
+              "value": "true"
+            },
+            {
+              "name": "seed",
+              "value": "42"
+            },
+            {
+              "name": "copy_files",
+              "value": "true"
+            },
+            {
+              "name": "output_layout",
+              "value": "split_first"
+            },
+            {
+              "name": "callback_url",
+              "value": "http://127.0.0.1:9000/webhooks/preprocess-finished"
+            },
+            {
+              "name": "callback_timeout_seconds",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -896,
+        416
+      ],
+      "id": "00ddc20f-09aa-4b89-9037-1ac0fd1a2b0f",
+      "name": "split-yolo-dataset"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c44075fd-40b5-47d0-b60b-af42fbc4bfef",
+              "leftValue": "={{ $('状态判断_xml-to-yolo').item.json.state }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1120,
+        464
+      ],
+      "id": "ac207456-af9e-4a80-8588-28495d24bab1",
+      "name": "If"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -896,
+        624
+      ],
+      "id": "fe703577-9d05-4094-971e-389ec9fd6ca5",
+      "name": "Wait",
+      "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1568,
+        528
+      ],
+      "id": "11b2e931-b6de-441f-b344-d6288d0141f0",
+      "name": "Wait1",
+      "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c44075fd-40b5-47d0-b60b-af42fbc4bfef",
+              "leftValue": "={{ $('状态判断_split-yolo-dataset').item.json.state }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -224,
+        320
+      ],
+      "id": "5cd17eea-1d49-4900-88e5-dac44d555e4e",
+      "name": "If1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        672
+      ],
+      "id": "7da3c30d-2add-4c1a-aac8-025856bcf571",
+      "name": "Wait2",
+      "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -672,
+        416
+      ],
+      "id": "4945d645-b07d-4ed2-87c9-0fe6a935e2a2",
+      "name": "Wait3",
+      "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/yolo-sliding-window-crop/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "images_dir",
+              "value": "={{ $json.result.output_dir + '/images/val' }}"
+            },
+            {
+              "name": "labels_dir",
+              "value": "={{ $json.result.output_dir + '/labels/val' }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $('base_config').item.json.temp_dataset }}/val"
+            },
+            {
+              "name": "min_vis_ratio",
+              "value": "0.5"
+            },
+            {
+              "name": "stride_ratio",
+              "value": "0.2"
+            },
+            {
+              "name": "ignore_vis_ratio",
+              "value": "0.05"
+            },
+            {
+              "name": "only_wide",
+              "value": "true"
+            },
+            {
+              "name": "callback_url",
+              "value": "http://127.0.0.1:9000/webhooks/preprocess-finished"
+            },
+            {
+              "name": "callback_timeout_seconds",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        0,
+        64
+      ],
+      "id": "2a362d76-47c1-4b6e-97dc-c195399c6bba",
+      "name": "val_crop"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/yolo-sliding-window-crop/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "images_dir",
+              "value": "={{ $json.result.output_dir + '/images/test' }}"
+            },
+            {
+              "name": "labels_dir",
+              "value": "={{ $json.result.output_dir + '/labels/test' }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $('base_config').item.json.temp_dataset }}/test"
+            },
+            {
+              "name": "min_vis_ratio",
+              "value": "0.5"
+            },
+            {
+              "name": "stride_ratio",
+              "value": "0.2"
+            },
+            {
+              "name": "ignore_vis_ratio",
+              "value": "0.05"
+            },
+            {
+              "name": "only_wide",
+              "value": "true"
+            },
+            {
+              "name": "callback_url",
+              "value": "http://127.0.0.1:9000/webhooks/preprocess-finished"
+            },
+            {
+              "name": "callback_timeout_seconds",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        0,
+        480
+      ],
+      "id": "2df42b84-98c1-4788-92cd-7aef84c3597d",
+      "name": "test_crop"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/tasks/{{ $('xml-to-yolo').item.json.task_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1344,
+        528
+      ],
+      "id": "948f2f93-a1ab-470e-8b51-73145fdb17d6",
+      "name": "状态判断_xml-to-yolo"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c44075fd-40b5-47d0-b60b-af42fbc4bfef",
+              "leftValue": "={{ $('状态判断_test_crop').item.json.state }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        384
+      ],
+      "id": "f7740a8b-a83d-4380-bf24-3f031571bb66",
+      "name": "If2"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        528
+      ],
+      "id": "7aa4dad2-a496-49eb-aa13-9a0ce800050a",
+      "name": "Wait4",
+      "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        480
+      ],
+      "id": "d0f517ce-0bdb-49d7-952e-a123cfb3e61e",
+      "name": "Wait5",
+      "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c44075fd-40b5-47d0-b60b-af42fbc4bfef",
+              "leftValue": "={{ $('状态判断_val_crop').item.json.state }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        0
+      ],
+      "id": "2a3bdea1-8928-4f90-b70b-98f2a8ae45aa",
+      "name": "If3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        272
+      ],
+      "id": "7a9ead6f-e1db-44ed-8fbc-c11e5a1a42ba",
+      "name": "Wait6",
+      "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        64
+      ],
+      "id": "59d12c64-6119-4b94-852d-2cf10595cd49",
+      "name": "Wait7",
+      "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c44075fd-40b5-47d0-b60b-af42fbc4bfef",
+              "leftValue": "={{ $('状态判断_train_crop').item.json.state }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        -400
+      ],
+      "id": "3c653ede-4204-44a0-baee-4202e6bfedd0",
+      "name": "If4"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        -336
+      ],
+      "id": "13391944-8cdb-4efe-9c31-0f94dbdbed9e",
+      "name": "Wait8",
+      "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        -336
+      ],
+      "id": "5e91388b-ed70-41d9-a799-48eafe0cce44",
+      "name": "Wait9",
+      "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').first().json.self_api }}/api/v1/preprocess/build-yolo-yaml",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $('base_config').first().json.original_dataset + '/yolo_split' }}"
+            },
+            {
+              "name": "output_yaml_path",
+              "value": "={{ $('base_config').first().json.original_dataset + '/yolo_split/' + 'yolo_split.yaml' }}"
+            },
+            {
+              "name": "path_prefix_replace_from",
+              "value": "={{ $('base_config').first().json.original_dataset + '/yolo_split' }}"
+            },
+            {
+              "name": "path_prefix_replace_to",
+              "value": "={{ $('base_config').first().json.project_root_dir }}{{ $('base_config').first().json.project_root_dir.endsWith('/') ? '' : '/' }}{{ $('base_config').first().json.detector_name }}"
+            },
+            {
+              "name": "classes_file",
+              "value": "={{ $('base_config').first().json.original_dataset+'/'+'classes.txt' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "85b2613b-0bd3-4663-9fad-5227b222563c",
+      "name": "build-yolo-yaml"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').first().json.self_api }}/api/v1/preprocess/yolo-train",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "yaml_path",
+              "value": "={{ $json.result.output_dir }}/{{ $('build-yolo-yaml').item.json.output_yaml_path.split('/').pop().split('.')[0]}}/{{ $('build-yolo-yaml').item.json.output_yaml_path.split('/').pop() }}"
+            },
+            {
+              "name": "project_root_dir",
+              "value": "={{ $('base_config').first().json.project_root_dir }}"
+            },
+            {
+              "name": "yolo_train_env",
+              "value": "={{ $('base_config').first().json.yolo_train_env }}"
+            },
+            {
+              "name": "model",
+              "value": "={{ $('base_config').first().json.yolo_train_model }}"
+            },
+            {
+              "name": "epochs",
+              "value": "={{ $('base_config').first().json.yolo_train_epochs }}"
+            },
+            {
+              "name": "imgsz",
+              "value": "={{ $('base_config').first().json.yolo_train_imgsz }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4032,
+        240
+      ],
+      "id": "428360d8-f4ab-4bf3-b258-733275ff31bb",
+      "name": "yolo-train"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/tasks/{{ $('split-yolo-dataset').item.json.task_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -448,
+        416
+      ],
+      "id": "f7e616ea-6174-4a3e-af82-00b0a2aa0323",
+      "name": "状态判断_split-yolo-dataset"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/tasks/{{ $('train_crop').item.json.task_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        -336
+      ],
+      "id": "3f548543-94e6-41dc-a347-80a83f26d1b2",
+      "name": "状态判断_train_crop",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/tasks/{{ $('val_crop').item.json.task_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        64
+      ],
+      "id": "63ecc11b-ed06-4a51-b59f-6a9ec5711cad",
+      "name": "状态判断_val_crop"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/tasks/{{ $('test_crop').item.json.task_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        480
+      ],
+      "id": "09eec722-e971-4ae0-b3d1-19457d45a94b",
+      "name": "状态判断_test_crop"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c44075fd-40b5-47d0-b60b-af42fbc4bfef",
+              "leftValue": "={{ $('状态判断_zip-folder').item.json.state }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2016,
+        -80
+      ],
+      "id": "e144fcf3-f06f-489f-927e-bfbaf5b4a04f",
+      "name": "If5"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2240,
+        96
+      ],
+      "id": "390a71ef-1bb7-487f-a629-967d3bba62ea",
+      "name": "Wait10",
+      "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        0
+      ],
+      "id": "74cc2470-132a-47d8-a4af-53f7bcb09e5f",
+      "name": "Wait11",
+      "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/tasks/{{ $('zip-folder').item.json.task_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1792,
+        0
+      ],
+      "id": "547851ef-768d-4f24-9a82-5465cc2740b4",
+      "name": "状态判断_zip-folder"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/zip-folder/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $('base_config').item.json.temp_dataset }}"
+            },
+            {
+              "name": "output_zip_path",
+              "value": "={{ $('base_config').item.json.original_dataset }}/dataset.zip"
+            },
+            {
+              "name": "include_root_dir",
+              "value": "true"
+            },
+            {
+              "name": "overwrite",
+              "value": "true"
+            },
+            {
+              "name": "callback_url",
+              "value": "http://127.0.0.1:9000/webhooks/preprocess-finished"
+            },
+            {
+              "name": "callback_timeout_seconds",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1344,
+        0
+      ],
+      "id": "d169e938-6841-4174-9b81-e4e4bf1da4f2",
+      "name": "zip-folder",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c44075fd-40b5-47d0-b60b-af42fbc4bfef",
+              "leftValue": "={{ $('状态判断_move-path').item.json.state }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2912,
+        -208
+      ],
+      "id": "994904f0-adf1-4959-a214-828da72b5113",
+      "name": "If6"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3136,
+        -128
+      ],
+      "id": "1155aee1-0fc8-4cfb-921a-27d54cdccf77",
+      "name": "Wait12",
+      "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2464,
+        -128
+      ],
+      "id": "532c8db6-3258-459f-88e8-b4c521fcd6ae",
+      "name": "Wait13",
+      "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/move-path/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "source_path",
+              "value": "={{ $json.result.input_dir }}"
+            },
+            {
+              "name": "target_dir",
+              "value": "={{ $('base_config').item.json.project_root_dir}}/{{ $('base_config').item.json.detector_name}}"
+            },
+            {
+              "name": "overwrite",
+              "value": "true"
+            },
+            {
+              "name": "callback_url",
+              "value": "http://127.0.0.1:9000/webhooks/preprocess-finished"
+            },
+            {
+              "name": "callback_timeout_seconds",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2240,
+        -128
+      ],
+      "id": "e8f9adb5-a022-4ca2-8e48-7d854bbebd32",
+      "name": "move-path"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/tasks/{{ $('move-path').item.json.task_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2688,
+        -128
+      ],
+      "id": "61596847-0ec2-4e6c-abed-e6885fdc64e4",
+      "name": "状态判断_move-path"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c44075fd-40b5-47d0-b60b-af42fbc4bfef",
+              "leftValue": "={{ $('状态判断_unzip-archive').item.json.state }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3808,
+        240
+      ],
+      "id": "aef7e929-cabb-4786-b130-4d1c8f8bf4af",
+      "name": "If7"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4032,
+        432
+      ],
+      "id": "5a15fbdb-2b6c-4497-a896-a2f16e4da568",
+      "name": "Wait14",
+      "webhookId": "5828b4d1-9a80-46ed-94ac-a17bbefd38c3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        240
+      ],
+      "id": "54cd45d2-3a74-4e8c-a036-d4072592d148",
+      "name": "Wait15",
+      "webhookId": "076227e9-5a3f-4056-980e-db8a67d846cd"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/unzip-archive/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "archive_path",
+              "value": "={{ $('base_config').item.json.original_dataset }}/dataset.zip"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $('base_config').item.json.project_root_dir }}/{{ $('base_config').item.json.detector_name }}"
+            },
+            {
+              "name": "overwrite",
+              "value": "true"
+            },
+            {
+              "name": "callback_url",
+              "value": "http://127.0.0.1:9000/webhooks/preprocess-finished"
+            },
+            {
+              "name": "callback_timeout_seconds",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3136,
+        240
+      ],
+      "id": "03da2603-b927-4964-867e-719656b02b63",
+      "name": "unzip-archive"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/tasks/{{ $('unzip-archive').item.json.task_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3584,
+        240
+      ],
+      "id": "75fd5e9c-8794-4581-b2d7-84e193363c86",
+      "name": "状态判断_unzip-archive"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "base_config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "xml-to-yolo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "xml-to-yolo": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "base_config": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "split-yolo-dataset": {
+      "main": [
+        [
+          {
+            "node": "Wait3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "split-yolo-dataset",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "状态判断_xml-to-yolo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "状态判断_xml-to-yolo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "build-yolo-yaml",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "状态判断_split-yolo-dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait3": {
+      "main": [
+        [
+          {
+            "node": "状态判断_split-yolo-dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "val_crop": {
+      "main": [
+        [
+          {
+            "node": "Wait7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "状态判断_xml-to-yolo": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait4": {
+      "main": [
+        [
+          {
+            "node": "状态判断_test_crop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait5": {
+      "main": [
+        [
+          {
+            "node": "状态判断_test_crop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "test_crop": {
+      "main": [
+        [
+          {
+            "node": "Wait5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If3": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait6": {
+      "main": [
+        [
+          {
+            "node": "状态判断_val_crop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait7": {
+      "main": [
+        [
+          {
+            "node": "状态判断_val_crop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If4": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait8": {
+      "main": [
+        [
+          {
+            "node": "状态判断_train_crop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait9": {
+      "main": [
+        [
+          {
+            "node": "状态判断_train_crop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "状态判断_split-yolo-dataset": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "状态判断_train_crop": {
+      "main": [
+        [
+          {
+            "node": "If4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "状态判断_val_crop": {
+      "main": [
+        [
+          {
+            "node": "If3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "状态判断_test_crop": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "build-yolo-yaml": {
+      "main": [
+        [
+          {
+            "node": "zip-folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If5": {
+      "main": [
+        [
+          {
+            "node": "move-path",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait10": {
+      "main": [
+        [
+          {
+            "node": "状态判断_zip-folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait11": {
+      "main": [
+        [
+          {
+            "node": "状态判断_zip-folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "状态判断_zip-folder": {
+      "main": [
+        [
+          {
+            "node": "If5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "zip-folder": {
+      "main": [
+        [
+          {
+            "node": "Wait11",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If6": {
+      "main": [
+        [
+          {
+            "node": "unzip-archive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait12",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait12": {
+      "main": [
+        [
+          {
+            "node": "状态判断_move-path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait13": {
+      "main": [
+        [
+          {
+            "node": "状态判断_move-path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "move-path": {
+      "main": [
+        [
+          {
+            "node": "Wait13",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "状态判断_move-path": {
+      "main": [
+        [
+          {
+            "node": "If6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If7": {
+      "main": [
+        [
+          {
+            "node": "yolo-train",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait14",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait14": {
+      "main": [
+        [
+          {
+            "node": "状态判断_unzip-archive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait15": {
+      "main": [
+        [
+          {
+            "node": "状态判断_unzip-archive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "unzip-archive": {
+      "main": [
+        [
+          {
+            "node": "Wait15",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "状态判断_unzip-archive": {
+      "main": [
+        [
+          {
+            "node": "If7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "fa09df9e-a4a0-4bf0-ae2c-33c4988e0cf0",
+  "meta": {
+    "instanceId": "1b3e6ee362a456055e06758c3fd4e960c3621b1a8e2c51a10220c369f5f16c17"
+  },
+  "id": "yn8r9fy0197C9PNf",
+  "tags": []
+}

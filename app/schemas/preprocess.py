@@ -275,6 +275,13 @@ class SplitYoloDatasetRequest(BaseModel):
         default=True,
         description="Keep source folder structure under split folders",
     )
+    output_layout: Literal["images_first", "split_first"] = Field(
+        default="split_first",
+        description=(
+            "Output directory layout: images_first => images/<split>, labels/<split>; "
+            "split_first => <split>/images, <split>/labels"
+        ),
+    )
     require_label: bool = Field(
         default=True,
         description="Skip images when paired label txt file is missing",
