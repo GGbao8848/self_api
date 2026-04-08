@@ -877,3 +877,92 @@ class YoloTrainResponse(BaseModel):
     exit_code: int
     stdout: str
     stderr: str
+
+
+class VocBarCropRequest(BaseModel):
+    """横向条带 VOC 目标：以框高为边长裁正方形，目标居中；输出小图与对应 XML。"""
+
+    images_dir: str = Field(description="图像目录（与 xmls 按相对路径 stem 配对）")
+    xmls_dir: str = Field(description="Pascal VOC XML 目录")
+    output_dir: str = Field(description="输出根目录，将创建 images/ 与 xmls/ 子目录")
+    recursive: bool = Field(default=True, description="是否递归扫描 xml")
+
+
+class VocBarCropDetail(BaseModel):
+    source_image: str
+    source_xml: str
+    crop_image: str | None = None
+    crop_xml: str | None = None
+    window_left: int | None = None
+    window_top: int | None = None
+    window_size: int | None = None
+    skipped_reason: str | None = None
+
+
+class VocBarCropResponse(BaseModel):
+    status: str = "ok"
+    images_dir: str
+    xmls_dir: str
+    output_dir: str
+    processed_xml_files: int
+    skipped_xml_files: int
+    generated_crops: int
+    details: list[VocBarCropDetail]
+
+
+class VocBarCropAsyncRequest(VocBarCropRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class RestoreVocCropsBatchRequest(BaseModel):
+    """按 voc-bar 文件名规则，将 crop 目录下所有编辑后小图一次性贴回对应原图并合并 VOC 标注。"""
+
+    original_images_dir: str = Field(description="原始数据集 images 目录")
+    original_xmls_dir: str = Field(description="原始数据集 xmls 目录")
+    edited_crops_images_dir: str = Field(description="编辑后裁剪图目录（文件名含 _cx_cy_S_）")
+    edited_crops_xmls_dir: str = Field(description="编辑后裁剪 VOC XML 目录（与裁剪图同名 .xml）")
+    output_dir: str = Field(description="输出根目录，将创建 images/ 与 xmls/")
+    recursive: bool = Field(default=False, description="是否在裁剪图目录递归扫描")
+    skip_unparsed_names: bool = Field(
+        default=True,
+        description="跳过不符合 voc-bar 命名（无 _cx_cy_S_）的文件；false 时遇到则报错",
+    )
+
+
+class RestoreVocCropsBatchStemDetail(BaseModel):
+    original_stem: str
+    output_image: str | None = None
+    output_xml: str | None = None
+    crops_applied: int = 0
+    status: str = "ok"
+    message: str | None = None
+
+
+class RestoreVocCropsBatchResponse(BaseModel):
+    status: str = "ok"
+    output_dir: str
+    originals_processed: int = Field(description="成功写出的大图数量（按原图 stem 计）")
+    total_crop_files: int
+    details: list[RestoreVocCropsBatchStemDetail]
+
+
+class RestoreVocCropsBatchAsyncRequest(RestoreVocCropsBatchRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )

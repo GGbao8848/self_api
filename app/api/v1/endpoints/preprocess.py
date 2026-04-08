@@ -47,6 +47,12 @@ from app.schemas.preprocess import (
     YoloSlidingWindowCropAsyncRequest,
     YoloSlidingWindowCropRequest,
     YoloSlidingWindowCropResponse,
+    VocBarCropAsyncRequest,
+    VocBarCropRequest,
+    VocBarCropResponse,
+    RestoreVocCropsBatchAsyncRequest,
+    RestoreVocCropsBatchRequest,
+    RestoreVocCropsBatchResponse,
     ZipFolderAsyncRequest,
     ZipFolderRequest,
     ZipFolderResponse,
@@ -71,6 +77,8 @@ from app.services.yolo_train import run_yolo_train
 from app.services.annotation_visualize import run_annotate_visualize
 from app.services.xml_to_yolo import run_xml_to_yolo
 from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
+from app.services.voc_bar_crop import run_voc_bar_crop
+from app.services.restore_voc_crops_batch import run_restore_voc_crops_batch
 
 router = APIRouter(
     prefix="/preprocess",
@@ -533,6 +541,78 @@ def copy_path_async(
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_copy_path(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/voc-bar-crop", response_model=VocBarCropResponse)
+def voc_bar_crop(payload: VocBarCropRequest) -> VocBarCropResponse:
+    try:
+        return run_voc_bar_crop(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/voc-bar-crop/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def voc_bar_crop_async(
+    payload: VocBarCropAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "voc_bar_crop"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = VocBarCropRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_voc_bar_crop(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/restore-voc-crops-batch", response_model=RestoreVocCropsBatchResponse)
+def restore_voc_crops_batch(payload: RestoreVocCropsBatchRequest) -> RestoreVocCropsBatchResponse:
+    try:
+        return run_restore_voc_crops_batch(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/restore-voc-crops-batch/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def restore_voc_crops_batch_async(
+    payload: RestoreVocCropsBatchAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "restore_voc_crops_batch"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = RestoreVocCropsBatchRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_restore_voc_crops_batch(sync_payload).model_dump(),
         callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )

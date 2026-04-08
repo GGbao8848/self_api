@@ -17,6 +17,8 @@
 | `move-path` / `copy-path` | `source_path`（兼容 `input_dir`）、`target_dir`（兼容 `output_dir`）、`overwrite` |
 | `build-yolo-yaml` | `input_dir`（可传数据集**上级目录**，服务会依次尝试 `<input_dir>/dataset`、`input_dir` 自身、`<input_dir>/yolo_split`，并自动匹配 **train/images** 或 **images/train**）、`classes_file`（可选；默认同目录或 `yolo_split`/`dataset` 下 `classes.txt`）、`split_names`（可选）、`images_subdir_name`、`path_prefix_replace_from` / `path_prefix_replace_to`（成对）、`output_yaml_path` |
 | `yolo-train` | `yaml_path`（须含 `/dataset/` 段）、`project_root_dir`（子进程 `cwd`）、`yolo_train_env`（conda 环境名）、`model`、`epochs`、`imgsz`（后三项有默认值） |
+| `voc-bar-crop` | `images_dir`、`xmls_dir`、`output_dir`；可选 `recursive`（默认 `true`）；裁剪正方形边长为**源图高度**（§17） |
+| `restore-voc-crops-batch` | `original_images_dir`、`original_xmls_dir`、`edited_crops_images_dir`、`edited_crops_xmls_dir`、`output_dir`；可选 `recursive`、`skip_unparsed_names`（§18） |
 
 **异步任务轮询**：`GET /api/v1/preprocess/tasks/{task_id}` 返回体中，业务结果在 **`result`** 对象内（例如 `result.output_dir`、`result.output_zip_path`），勿与顶层字段混淆。
 
@@ -657,3 +659,70 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-train" \
 ```
 
 响应含 `command`（拼接后的命令行）、`cwd`、`project`、`name`、`exit_code`、`stdout`、`stderr`。训练失败时 `exit_code` 非零且 `status` 为 `failed`。
+
+## 17. VOC 横向条带正方形裁剪（`voc-bar-crop`）
+
+对 `xmls_dir` 中每个 Pascal VOC XML：对每个 **宽不小于高** 的目标框触发一次裁剪。正方形 **边长 = 源图像高度**（宽≥高的横向长条图：`top=0`，水平方向以该框中心居中，左右越界则在图内平移；窄高图则 `left=0`、垂直居中）。与 `yolo-sliding-window-crop` 的「边长=图片高度」一致，**不是**标注框高度。小图文件名含裁剪中心与边长，例如 `stem_cx512_cy409_S819.jpg`，同 stem 的 XML 写入 `output_dir/xmls/`。裁剪图内保留 **与窗口相交** 的所有物体框（坐标换算到小图）。
+
+- `POST /api/v1/preprocess/voc-bar-crop`
+- `POST /api/v1/preprocess/voc-bar-crop/async`
+
+```bash
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/voc-bar-crop" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "images_dir": "/path/to/dataset/images",
+    "xmls_dir": "/path/to/dataset/xmls",
+    "output_dir": "/path/to/dataset/bar_crops",
+    "recursive": true
+  }'
+```
+
+异步（`202 Accepted`，避免大批量同步请求超时；结果在 `GET /api/v1/preprocess/tasks/{task_id}` 的 `result` 中，亦可通过 `callback_url` 回调）：
+
+```bash
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/voc-bar-crop/async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "images_dir": "/path/to/dataset/images",
+    "xmls_dir": "/path/to/dataset/xmls",
+    "output_dir": "/path/to/dataset/bar_crops",
+    "recursive": true,
+    "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
+    "callback_timeout_seconds": 10
+  }'
+```
+
+**响应要点**：`generated_crops` 为生成的小图数量；`details` 中含 `crop_image`、`crop_xml`、`window_left`、`window_top`、`window_size`（大图上的裁剪窗口）。
+
+编辑后把裁剪贴回整图并合并 VOC，请使用 **`restore-voc-crops-batch`**（§18）。裁剪文件名 `{stem}_cx{cx}_cy{cy}_S{S}` 与窗口对应关系为：`x = cx - S//2`，`y = cy - S//2`，`width = height = S`（与 `details` 中 `window_*` 一致；贴边 clamp 时以 `details` 为准）。
+
+## 18. 批量还原 voc 裁剪到原图（`restore-voc-crops-batch`）
+
+适用于目录结构形如：
+
+- 原始：`.../SHIJIAZHUANG.../images/*.jpg`、`.../xmls/*.xml`
+- 编辑后裁剪：`.../crop/images/1_5_cx5767_cy563_S1126.jpg`、`.../crop/xmls/1_5_cx5767_cy563_S1126.xml`（文件名须为 voc-bar-crop 规则 `{stem}_cx{cx}_cy{cy}_S{S}`）
+
+按 **原图 stem**（如 `1_5`）分组，将该 stem 下**所有**裁剪顺序贴回对应原图，合并 VOC 标注（每个裁剪区域先删与 `region` 相交的旧框，再追加该裁剪 XML 中的框）。**输出** `output_dir/images/`、`output_dir/xmls/` 下与原数据集相同的相对文件名。
+
+- `POST /api/v1/preprocess/restore-voc-crops-batch`
+- `POST /api/v1/preprocess/restore-voc-crops-batch/async`
+
+```bash
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/restore-voc-crops-batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "original_images_dir": "/media/qzq/16T/test/SHIJIAZHUANGSHANGXING_20260317165711_49_CR400BF-A-5156_1_HUITIES/images",
+    "original_xmls_dir": "/media/qzq/16T/test/SHIJIAZHUANGSHANGXING_20260317165711_49_CR400BF-A-5156_1_HUITIES/xmls",
+    "edited_crops_images_dir": "/media/qzq/16T/test/crop/images",
+    "edited_crops_xmls_dir": "/media/qzq/16T/test/crop/xmls",
+    "output_dir": "/media/qzq/16T/test/merged_dataset",
+    "recursive": false,
+    "skip_unparsed_names": true
+  }'
+```
+
+**响应要点**：`originals_processed` 为成功处理的原图数量；`details` 每项含 `original_stem`、`output_image`、`output_xml`、`crops_applied`、`status`；`total_crop_files` 为裁剪目录中扫描到的图片文件数（含无法解析的文件名，若 `skip_unparsed_names` 为 true 则仅忽略不报错）。
+
+异步示例在同步 body 上增加 `callback_url`、`callback_timeout_seconds` 即可（同 §2）。
