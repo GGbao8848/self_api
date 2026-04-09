@@ -1,0 +1,61 @@
+#!/bin/bash
+# 限制机器仅支持环境变量：nodelist、exclude，与 sbatch 一致
+
+# 检查是否有cache 参数，如果没有提示未设置cache（支持 cache=xxx 或 cache = xxx）
+
+
+entrypoint_bakyaml=/shared/apps/bin/bakyaml
+entrypoint_yolotrain=/shared/apps/bin/yolotrain.sh
+
+for a in "$@"; do
+  if [[ $a =~ ^cache[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+    cache="${BASH_REMATCH[1]}"
+    # 去除首尾空格
+    cache="${cache#"${cache%%[![:space:]]*}"}"
+    cache="${cache%"${cache##*[![:space:]]}"}"
+  fi
+done
+if [ -z "$cache" ]; then
+    echo "未设置cache参数，没能正常训练"
+    exit 1
+else
+    echo "cache参数设置为: $cache"
+    if [[ "$cache" == "False" || "$cache" == "false" ]]; then
+        echo "cache=False 参数不允许，没能正常训练"
+        exit 1
+    fi
+fi
+
+# 检查 data 参数（支持 data=xxx 或 data = xxx）
+for a in "$@"; do
+  if [[ $a =~ ^data[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+    data="${BASH_REMATCH[1]}"
+    data="${data#"${data%%[![:space:]]*}"}"
+    data="${data%"${data##*[![:space:]]}"}"
+  fi
+done
+if [ -z "$data" ]; then
+    echo "未设置data参数，没能正常训练"
+    exit 1
+else
+    echo "data参数设置为: $data ，提交到备份服务器"
+    $entrypoint_bakyaml $data
+fi
+
+# 限制机器：仅通过环境变量 nodelist、exclude
+SBATCH_EXTRA=()
+[[ -n "${nodelist:-}" ]] && SBATCH_EXTRA+=(--nodelist="$nodelist")
+[[ -n "${exclude:-}" ]] && SBATCH_EXTRA+=(--exclude="$exclude")
+
+
+
+
+sbatch \
+  --job-name=subyolo \
+  --nodes=1 \
+  --ntasks=1 \
+  --partition=gpu \
+  --exclusive \
+  --requeue \
+  "${SBATCH_EXTRA[@]}" \
+  $entrypoint_yolotrain "$@"

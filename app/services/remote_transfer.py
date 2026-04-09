@@ -123,17 +123,28 @@ def run_remote_transfer(request: RemoteTransferRequest) -> RemoteTransferRespons
     try:
         sftp = client.open_sftp()
 
-        # 远程路径：若为目录上传，目标应为 remote_path/源名
+        def _mkdir_p(sftp_client: paramiko.SFTPClient, path: str) -> None:
+            """在远端递归创建目录（类似 mkdir -p）。"""
+            parts = path.split("/")
+            current = ""
+            for p in parts:
+                if not p:
+                    continue
+                current = f"{current}/{p}" if current else f"/{p}"
+                try:
+                    sftp_client.stat(current)
+                except FileNotFoundError:
+                    sftp_client.mkdir(current)
+
+        # 统一语义：target 始终视为“目录路径”。
+        # source_path 无论是文件还是目录，都复制到 target 下并保留源名。
         if source_path.is_file():
             ensure_current_task_active()
-            remote_file = remote_path.rstrip("/")
-            if not remote_file or remote_file == "/":
+            target_dir = remote_path.rstrip("/")
+            if target_dir in ("", "/"):
                 remote_file = f"/{source_path.name}"
-            elif not remote_path.endswith("/") and "/" in remote_path:
-                # remote_path 可能是完整文件路径
-                pass
             else:
-                remote_file = f"{remote_path.rstrip('/')}/{source_path.name}"
+                remote_file = f"{target_dir}/{source_path.name}"
 
             try:
                 stat = sftp.stat(remote_file)
@@ -141,6 +152,11 @@ def run_remote_transfer(request: RemoteTransferRequest) -> RemoteTransferRespons
                     raise ValueError(f"remote file exists and overwrite=false: {remote_file}")
             except FileNotFoundError:
                 pass
+
+            # 文件上传前确保 target 目录存在，避免 [Errno 2] No such file。
+            remote_parent = str(Path(remote_file).parent).replace("\\", "/")
+            if remote_parent and remote_parent not in (".", "/"):
+                _mkdir_p(sftp, remote_parent)
 
             sftp.put(str(source_path), remote_file)
             transferred_files = 1
@@ -155,18 +171,6 @@ def run_remote_transfer(request: RemoteTransferRequest) -> RemoteTransferRespons
                 remote_dir = f"/{base_name}"
             else:
                 remote_dir = f"{remote_dir}/{base_name}"
-
-            def _mkdir_p(sftp_client: paramiko.SFTPClient, path: str) -> None:
-                parts = path.split("/")
-                current = ""
-                for p in parts:
-                    if not p:
-                        continue
-                    current = f"{current}/{p}" if current else f"/{p}"
-                    try:
-                        sftp_client.stat(current)
-                    except FileNotFoundError:
-                        sftp_client.mkdir(current)
 
             _mkdir_p(sftp, remote_dir)
 
@@ -195,6 +199,9 @@ def run_remote_transfer(request: RemoteTransferRequest) -> RemoteTransferRespons
 
         return RemoteTransferResponse(
             source_path=str(source_path),
+            target=request.target,
+            target_host=host,
+            target_port=port,
             target_path=final_remote,
             transferred_type=transferred_type,
             transferred_files=transferred_files,

@@ -454,10 +454,109 @@ class RemoteTransferRequest(BaseModel):
 class RemoteTransferResponse(BaseModel):
     status: str = "ok"
     source_path: str
+    target: str
+    target_host: str
+    target_port: int
     target_path: str
     transferred_type: Literal["file", "directory"]
     transferred_files: int
     total_bytes: int
+
+
+class RemoteUnzipRequest(BaseModel):
+    """跨机器远程解压：在远端主机执行 unzip。"""
+
+    archive_path: str = Field(
+        description="远程压缩包路径，支持 sftp://host/path 或 sftp://user@host/path 或 user@host:path",
+    )
+    output_dir: str | None = Field(
+        default=None,
+        description="远程输出目录；默认 <archive_parent>/<archive_stem>",
+    )
+    overwrite: bool = Field(
+        default=False,
+        description="是否覆盖已存在文件（true 对应 unzip -o）",
+    )
+    username: str | None = Field(
+        default=None,
+        description="SSH 用户名，若路径中未包含则必填",
+    )
+    password: str | None = Field(
+        default=None,
+        description="SSH 密码（与 private_key_path 二选一）",
+    )
+    private_key_path: str | None = Field(
+        default=None,
+        description="SSH 私钥路径（与 password 二选一）",
+    )
+    port: int = Field(
+        default=22,
+        ge=1,
+        le=65535,
+        description="SSH 端口",
+    )
+
+
+class RemoteUnzipResponse(BaseModel):
+    status: str = "ok"
+    archive_path: str
+    output_dir: str
+    target_host: str
+    target_port: int
+    command: str
+
+
+class RemoteSlurmYoloTrainRequest(BaseModel):
+    """跨机器远程训练：通过 SSH 在远端执行 subyolo train。"""
+
+    yaml_path: str = Field(
+        description="远端数据 yaml 路径，支持 sftp://host/path 或 sftp://user@host/path 或 user@host:path",
+    )
+    project_root_dir: str = Field(
+        description="远端工作目录，支持 sftp://host/path 或 sftp://user@host/path 或 user@host:path",
+    )
+    model: str = Field(default="yolo11s.pt", description="YOLO model")
+    epochs: int = Field(default=100, ge=1, description="Training epochs")
+    imgsz: int = Field(default=640, ge=1, description="Training image size")
+    batch: int | None = Field(default=None, ge=1, description="Base batch size；若未显式设置 device，将按 GPU 数自动扩增")
+    workers: int | None = Field(default=None, ge=0, description="DataLoader workers")
+    cache: bool | None = Field(default=True, description="YOLO cache 参数（不允许 False）")
+    device: str | None = Field(default=None, description="显式设备，如 0,1；不填则自动探测并设置")
+    project: str | None = Field(default=None, description="YOLO project 输出目录；不填则按 yaml 自动推导")
+    name: str | None = Field(default=None, description="YOLO run 名称；不填则取 yaml 文件名")
+    partition: str | None = Field(default="gpu", description="SLURM 分区")
+    nodelist: str | None = Field(default=None, description="可选：要求使用的节点列表（逗号分隔）")
+    exclude: str | None = Field(default=None, description="可选：排除的节点列表（逗号分隔）")
+    username: str | None = Field(
+        default=None,
+        description="Slurm 用户名（用于签发 token）",
+    )
+    password: str | None = Field(
+        default=None,
+        description="兼容保留字段（当前模式不使用）",
+    )
+    private_key_path: str | None = Field(
+        default=None,
+        description="兼容保留字段（当前模式不使用）",
+    )
+    port: int = Field(
+        default=22,
+        ge=1,
+        le=65535,
+        description="兼容保留字段（当前模式不使用）",
+    )
+
+
+class RemoteSlurmYoloTrainResponse(BaseModel):
+    status: str = "ok"
+    yaml_path: str
+    project_root_dir: str
+    target_host: str
+    target_port: int
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
 
 
 class YoloSlidingWindowCropRequest(BaseModel):
@@ -737,6 +836,32 @@ class CopyPathAsyncRequest(CopyPathRequest):
 
 
 class RemoteTransferAsyncRequest(RemoteTransferRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class RemoteUnzipAsyncRequest(RemoteUnzipRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class RemoteSlurmYoloTrainAsyncRequest(RemoteSlurmYoloTrainRequest):
     callback_url: AnyHttpUrl | None = Field(
         default=None,
         description="Optional webhook URL that receives task result when finished",

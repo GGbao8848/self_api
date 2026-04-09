@@ -26,6 +26,12 @@ from app.schemas.preprocess import (
     RemoteTransferAsyncRequest,
     RemoteTransferRequest,
     RemoteTransferResponse,
+    RemoteSlurmYoloTrainAsyncRequest,
+    RemoteSlurmYoloTrainRequest,
+    RemoteSlurmYoloTrainResponse,
+    RemoteUnzipAsyncRequest,
+    RemoteUnzipRequest,
+    RemoteUnzipResponse,
     SplitYoloDatasetAsyncRequest,
     SplitYoloDatasetRequest,
     SplitYoloDatasetResponse,
@@ -64,6 +70,8 @@ from app.services.file_operations import (
     run_zip_folder,
 )
 from app.services.remote_transfer import run_remote_transfer
+from app.services.remote_unzip import run_remote_unzip
+from app.services.remote_slurm_yolo_train import run_remote_slurm_yolo_train
 from app.services.nested_dataset import (
     run_aggregate_nested_dataset,
     run_clean_nested_dataset,
@@ -74,6 +82,7 @@ from app.services.split_yolo_dataset import run_split_yolo_dataset
 from app.services.task_manager import get_task, submit_task
 from app.services.build_yolo_yaml import run_build_yolo_yaml
 from app.services.yolo_train import run_yolo_train
+from app.services.slurm_yolo_train import run_slurm_yolo_train
 from app.services.annotation_visualize import run_annotate_visualize
 from app.services.xml_to_yolo import run_xml_to_yolo
 from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
@@ -524,6 +533,80 @@ def remote_transfer_async(
     )
 
 
+@router.post("/remote-unzip", response_model=RemoteUnzipResponse)
+def remote_unzip(payload: RemoteUnzipRequest) -> RemoteUnzipResponse:
+    try:
+        return run_remote_unzip(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/remote-unzip/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def remote_unzip_async(
+    payload: RemoteUnzipAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "remote_unzip"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = RemoteUnzipRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_remote_unzip(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/remote-slurm-yolo-train", response_model=RemoteSlurmYoloTrainResponse)
+def remote_slurm_yolo_train(
+    payload: RemoteSlurmYoloTrainRequest,
+) -> RemoteSlurmYoloTrainResponse:
+    try:
+        return run_remote_slurm_yolo_train(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/remote-slurm-yolo-train/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def remote_slurm_yolo_train_async(
+    payload: RemoteSlurmYoloTrainAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "remote_slurm_yolo_train"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = RemoteSlurmYoloTrainRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_remote_slurm_yolo_train(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
 @router.post(
     "/copy-path/async",
     response_model=AsyncTaskSubmitResponse,
@@ -723,6 +806,42 @@ def yolo_train_async(
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_yolo_train(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/slurm-yolo-train", response_model=YoloTrainResponse)
+def slurm_yolo_train(payload: YoloTrainRequest) -> YoloTrainResponse:
+    try:
+        return run_slurm_yolo_train(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/slurm-yolo-train/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def slurm_yolo_train_async(
+    payload: YoloTrainAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "slurm_yolo_train"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = YoloTrainRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_slurm_yolo_train(sync_payload).model_dump(),
         callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )
