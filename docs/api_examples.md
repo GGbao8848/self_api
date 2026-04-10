@@ -17,7 +17,6 @@
 | `move-path` / `copy-path` | `source_path`（兼容 `input_dir`）、`target_dir`（兼容 `output_dir`）、`overwrite` |
 | `build-yolo-yaml` | `input_dir`（可传数据集**上级目录**，服务会依次尝试 `<input_dir>/dataset`、`input_dir` 自身、`<input_dir>/yolo_split`，并自动匹配 **train/images** 或 **images/train**）、`classes_file`（可选；默认同目录或 `yolo_split`/`dataset` 下 `classes.txt`）、`split_names`（可选）、`images_subdir_name`、`path_prefix_replace_from` / `path_prefix_replace_to`（成对）、`output_yaml_path` |
 | `yolo-train` | `yaml_path`（须含 `/dataset/` 段）、`project_root_dir`（子进程 `cwd`）、`yolo_train_env`（conda 环境名）、`model`、`epochs`、`imgsz`（后三项有默认值） |
-| `slurm-yolo-train` | `yaml_path`（须含 `/dataset/` 段）、`project_root_dir`（子进程 `cwd`）、`model`、`epochs`、`imgsz`（后三项有默认值）；直接执行 `subyolo train`（不使用 conda） |
 | `voc-bar-crop` | `images_dir`、`xmls_dir`、`output_dir`；可选 `recursive`（默认 `true`）；裁剪正方形边长为**源图高度**（§17） |
 | `restore-voc-crops-batch` | `original_images_dir`、`original_xmls_dir`、`edited_crops_images_dir`、`edited_crops_xmls_dir`、`output_dir`；可选 `recursive`、`skip_unparsed_names`（§18） |
 
@@ -697,37 +696,18 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-train" \
 
 响应含 `command`（拼接后的命令行）、`cwd`、`project`、`name`、`exit_code`、`stdout`、`stderr`。训练失败时 `exit_code` 非零且 `status` 为 `failed`。
 
-## 16.1 SLURM YOLO 训练（`subyolo train`）
-
-- `POST /api/v1/preprocess/slurm-yolo-train`
-- `POST /api/v1/preprocess/slurm-yolo-train/async`
-
-与 §16 的参数含义一致，但训练命令改为直接执行 `subyolo train`（不通过 `conda run`）。
-
-```bash
-curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/slurm-yolo-train" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "yaml_path": "/Users/me/self_api/TVDS/dog_cat_pig/dataset/dataset.yaml",
-    "project_root_dir": "/Users/me/self_api/TVDS",
-    "model": "yolo11s.pt",
-    "epochs": 100,
-    "imgsz": 640
-  }'
-```
-
-异步示例在同步 body 上增加 `callback_url`、`callback_timeout_seconds` 即可（同 §2）。
-
-## 16.2 远程 SLURM YOLO 训练（自动获取 token + 提交 Slurm 任务）
+## 16.1 远程 SLURM YOLO 训练（自动获取 token + 提交 Slurm 任务）
 
 - `POST /api/v1/preprocess/remote-slurm-yolo-train`
 - `POST /api/v1/preprocess/remote-slurm-yolo-train/async`
 
-该接口会自动调用 token 服务获取用户 JWT，并向 Slurm REST (`/slurm/v0.0.42/job/submit`) 提交训练任务。训练脚本在集群侧执行原生 `yolo train`，并自动处理 GPU 与 batch：
+该接口由本地 `self_api` 作为客户端，自动调用 token 服务获取用户 JWT，并向远程 Slurm REST (`/slurm/v0.0.42/job/submit`) 提交训练任务。训练脚本在集群侧执行原生 `yolo train`，并自动处理 GPU 与 batch：
 
 - 自动探测 GPU 列表并设置 `CUDA_VISIBLE_DEVICES`
 - 若请求未显式设置 `device`，自动补 `device=<gpu_list>`
 - 若请求未显式设置 `device`，`batch` 会按 GPU 数量自动扩增
+- Slurm stdout/stderr 默认写入 `project_root_dir/logs/` 下的 `slurm-%j.out`、`slurm-%j.err`
+- 不再依赖 `micromamba`；若 `SELF_API_YOLO_CONDA_ENV` 是绝对路径，则直接执行 `<env>/bin/yolo`；若是环境名，则尝试 `conda activate <env>`
 - 任务名固定为 `self_api_train`
 
 `yaml_path` 与 `project_root_dir` 支持绝对路径，或 `sftp://...` / `user@host:path`（路径部分会被提取为远端路径）。
@@ -737,7 +717,7 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/remote-slurm-yolo-train
   -H "Content-Type: application/json" \
   -d '{
     "yaml_path": "/mnt/usrhome/sk/ndata/TVDS_n8n/qianyindianji_louyou/dataset/qianyindianji_louyou_20260409_093939_/qianyindianji_louyou_20260409_093939_.yaml",
-    "project_root_dir": "/mnt/usrhome/sk/ndata/TVDS_n8n/qianyindianji_louyou",
+    "project_root_dir": "/mnt/usrhome/sk/ndata/TVDS_n8n",
     "username": "sk",
     "model": "yolo11m.pt",
     "epochs": 200,
@@ -763,7 +743,14 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/remote-slurm-yolo-train
 - `project` / `name`：可选；不填时按 `yaml_path` 自动推导
 - `partition`：可选，默认 `gpu`
 - `nodelist` / `exclude`：可选，分别映射到 Slurm `required_nodes` / `excluded_nodes`
+- `project_root_dir`：既是远端任务的 `current_working_directory`，默认日志会写到其下的 `logs/` 目录
 - `password` / `private_key_path` / `port`：兼容保留字段，当前 token+REST 模式不使用
+
+补充说明：
+
+- 若集群资源紧张，提交成功后任务也可能仍为 `PENDING`；例如 `state_reason=ReqNodeNotAvail`
+- 若要覆盖默认日志路径，可设置 `SELF_API_SLURM_STDOUT_TEMPLATE`、`SELF_API_SLURM_STDERR_TEMPLATE`
+- 远端训练环境由 `SELF_API_YOLO_CONDA_ENV` 控制
 
 异步示例在同步 body 上增加 `callback_url`、`callback_timeout_seconds` 即可（同 §2）。
 

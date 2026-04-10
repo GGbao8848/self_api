@@ -507,7 +507,7 @@ class RemoteUnzipResponse(BaseModel):
 
 
 class RemoteSlurmYoloTrainRequest(BaseModel):
-    """跨机器远程训练：通过 SSH 在远端执行 subyolo train。"""
+    """跨机器远程训练：本地 self_api 调远程 Slurm REST 提交训练任务。"""
 
     yaml_path: str = Field(
         description="远端数据 yaml 路径，支持 sftp://host/path 或 sftp://user@host/path 或 user@host:path",

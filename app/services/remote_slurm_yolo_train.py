@@ -1,4 +1,4 @@
-"""远程 SLURM YOLO 训练：自动获取 token 并提交 job/submit 任务。"""
+"""远程 SLURM YOLO 训练：本地 self_api 作为客户端提交到远程 Slurm REST。"""
 
 import json
 import os
@@ -60,6 +60,29 @@ def _project_and_name_from_yaml(yaml_remote_path: str) -> tuple[str, str]:
     project = str(Path(prefix) / "runs" / "train").replace("\\", "/")
     name = Path(normalized).stem
     return project, name
+
+
+def _resolve_slurm_log_path(
+    *,
+    root_remote_path: str,
+    env_key: str,
+    default_filename: str,
+) -> str:
+    template = os.getenv(env_key, "").strip()
+    if template:
+        return template
+    return str(Path(root_remote_path) / "logs" / default_filename).replace("\\", "/")
+
+
+def _build_yolo_command_prefix(env_value: str) -> str:
+    normalized = env_value.strip()
+    if not normalized:
+        raise ValueError("SELF_API_YOLO_CONDA_ENV is empty")
+    if "/" in normalized:
+        env_path = Path(normalized)
+        yolo_bin = env_path / "bin" / "yolo"
+        return shlex.quote(str(yolo_bin))
+    return "yolo"
 
 
 def _post_json(
@@ -134,12 +157,29 @@ def _build_submit_payload(
     # - 自动探测 GPU 列表并设置 CUDA_VISIBLE_DEVICES
     # - 若未显式提供 device，则按 GPU 数自动扩增 batch
     final_args_expr = " ".join(base_args)
+    conda_env = os.getenv(
+        "SELF_API_YOLO_CONDA_ENV",
+        "/mnt/usrhome/lsl/ndata/conda/envs/yolo",
+    )
+    yolo_command_prefix = _build_yolo_command_prefix(conda_env)
     shell_script = (
         "#!/bin/bash\n"
         "set -euo pipefail\n"
         "source ~/.bashrc >/dev/null 2>&1 || true\n"
-        "module load micromamba >/dev/null 2>&1 || true\n"
-        f"micromamba activate {shlex.quote(os.getenv('SELF_API_YOLO_CONDA_ENV', '/mnt/usrhome/lsl/ndata/conda/envs/yolo'))}\n"
+        f"YOLO_ENV={shlex.quote(conda_env)}\n"
+        "if [[ \"$YOLO_ENV\" != */* ]]; then\n"
+        "  if [ -f \"$HOME/miniconda3/etc/profile.d/conda.sh\" ]; then\n"
+        "    source \"$HOME/miniconda3/etc/profile.d/conda.sh\"\n"
+        "  elif [ -f \"$HOME/anaconda3/etc/profile.d/conda.sh\" ]; then\n"
+        "    source \"$HOME/anaconda3/etc/profile.d/conda.sh\"\n"
+        "  elif command -v conda >/dev/null 2>&1; then\n"
+        "    eval \"$(conda shell.bash hook)\"\n"
+        "  else\n"
+        "    echo \"conda not found for env: $YOLO_ENV\" >&2\n"
+        "    exit 127\n"
+        "  fi\n"
+        "  conda activate \"$YOLO_ENV\"\n"
+        "fi\n"
         "gpu_list=$(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | paste -sd, || true)\n"
         "if [ -z \"${gpu_list}\" ]; then gpu_list=\"0\"; fi\n"
         "export CUDA_VISIBLE_DEVICES=\"$gpu_list\"\n"
@@ -158,12 +198,21 @@ def _build_submit_payload(
         "  YOLO_ARGS=$(echo \"$YOLO_ARGS\" | sed -E \"s/batch=[0-9]+/batch=${batch}/\")\n"
         "fi\n"
         f"cd {shlex.quote(root_remote_path)}\n"
-        "echo \"Final command: yolo ${YOLO_ARGS}\"\n"
-        "eval yolo ${YOLO_ARGS}\n"
+        "mkdir -p logs\n"
+        f"echo \"Final command: {yolo_command_prefix} ${{YOLO_ARGS}}\"\n"
+        f"eval {yolo_command_prefix} ${{YOLO_ARGS}}\n"
     )
     partition = (request.partition or os.getenv("SELF_API_SLURM_PARTITION", "gpu")).strip() or "gpu"
-    stdout_template = os.getenv("SELF_API_SLURM_STDOUT_TEMPLATE", "/tmp/slurm-%j.out").strip()
-    stderr_template = os.getenv("SELF_API_SLURM_STDERR_TEMPLATE", "/tmp/slurm-%j.err").strip()
+    stdout_template = _resolve_slurm_log_path(
+        root_remote_path=root_remote_path,
+        env_key="SELF_API_SLURM_STDOUT_TEMPLATE",
+        default_filename="slurm-%j.out",
+    )
+    stderr_template = _resolve_slurm_log_path(
+        root_remote_path=root_remote_path,
+        env_key="SELF_API_SLURM_STDERR_TEMPLATE",
+        default_filename="slurm-%j.err",
+    )
     # Slurm REST 任务环境建议显式传 PATH，避免远端 batch 环境过于精简。
     env_list = [
         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -202,6 +251,11 @@ def run_remote_slurm_yolo_train(
         "SELF_API_SLURM_SUBMIT_API",
         "http://172.31.1.9:6820/slurm/v0.0.42/job/submit",
     ).strip()
+    parsed_submit_url = urlparse(slurm_submit_url)
+    target_host = parsed_submit_url.hostname or ""
+    target_port = parsed_submit_url.port or (
+        443 if parsed_submit_url.scheme == "https" else 80
+    )
     payload = _build_submit_payload(
         request=request,
         yaml_remote_path=yaml_remote_path,
@@ -224,8 +278,8 @@ def run_remote_slurm_yolo_train(
             status="failed",
             yaml_path=yaml_remote_path,
             project_root_dir=root_remote_path,
-            target_host="172.31.1.9",
-            target_port=6820,
+            target_host=target_host,
+            target_port=target_port,
             command=command,
             exit_code=1,
             stdout="",
@@ -236,8 +290,8 @@ def run_remote_slurm_yolo_train(
             status="failed",
             yaml_path=yaml_remote_path,
             project_root_dir=root_remote_path,
-            target_host="172.31.1.9",
-            target_port=6820,
+            target_host=target_host,
+            target_port=target_port,
             command=command,
             exit_code=1,
             stdout="",
@@ -250,8 +304,8 @@ def run_remote_slurm_yolo_train(
         status="ok" if exit_code == 0 else "failed",
         yaml_path=yaml_remote_path,
         project_root_dir=root_remote_path,
-        target_host="172.31.1.9",
-        target_port=6820,
+        target_host=target_host,
+        target_port=target_port,
         command=command,
         exit_code=exit_code,
         stdout=json.dumps(
