@@ -149,6 +149,39 @@ def test_build_yolo_yaml_auto_dataset_subfolder(
     assert f"train: {train_abs}" in out.read_text(encoding="utf-8")
 
 
+def test_build_yolo_yaml_multi_image_dirs_per_split(
+    client: TestClient, case_dir: Path
+) -> None:
+    ds = case_dir / "dataset_multi"
+    for split in ("train", "val"):
+        base_images = ds / split / "images"
+        aug_images = ds / split / "augment" / "images"
+        base_images.mkdir(parents=True)
+        aug_images.mkdir(parents=True)
+        create_image(base_images / "a.png", color=(1, 2, 3), size=(16, 16))
+        create_image(aug_images / "b.png", color=(4, 5, 6), size=(16, 16))
+    (ds / "classes.txt").write_text("dog\n", encoding="utf-8")
+    out = ds / "multi.yaml"
+
+    r = client.post(
+        "/api/v1/preprocess/build-yolo-yaml",
+        json={"input_dir": str(ds), "output_yaml_path": str(out)},
+    )
+    assert r.status_code == 200
+
+    text = out.read_text(encoding="utf-8")
+    train_main = (ds / "train" / "images").resolve().as_posix()
+    train_aug = (ds / "train" / "augment" / "images").resolve().as_posix()
+    val_main = (ds / "val" / "images").resolve().as_posix()
+    val_aug = (ds / "val" / "augment" / "images").resolve().as_posix()
+    assert "train:" in text
+    assert f"  - {train_main}" in text
+    assert f"  - {train_aug}" in text
+    assert "val:" in text
+    assert f"  - {val_main}" in text
+    assert f"  - {val_aug}" in text
+
+
 def test_build_yolo_yaml_async(client: TestClient, case_dir: Path) -> None:
     import time
 

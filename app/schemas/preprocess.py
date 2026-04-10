@@ -1011,6 +1011,57 @@ class YoloTrainResponse(BaseModel):
     stderr: str
 
 
+class YoloTxtAugmentRequest(BaseModel):
+    input_dir: str = Field(
+        description="输入数据集根目录，目录下需包含 images/ 与 labels/ 子目录",
+    )
+    output_dir: str | None = Field(
+        default=None,
+        description="输出根目录；默认写入 <input_dir>/augment，并创建 images/ 与 labels/ 子目录",
+    )
+    recursive: bool = Field(default=True, description="是否递归扫描 images/ 与 labels/")
+    overwrite: bool = Field(default=True, description="目标文件已存在时是否覆盖")
+    horizontal_flip: bool = Field(default=True, description="是否生成水平翻转增强")
+    vertical_flip: bool = Field(default=True, description="是否生成垂直翻转增强")
+    brightness_up: bool = Field(default=True, description="是否生成提高亮度增强")
+    brightness_down: bool = Field(default=True, description="是否生成降低亮度增强")
+    contrast_up: bool = Field(default=True, description="是否生成提高对比度增强")
+    contrast_down: bool = Field(default=True, description="是否生成降低对比度增强")
+    gaussian_blur: bool = Field(default=True, description="是否生成高斯模糊增强")
+
+
+class YoloTxtAugmentFileDetail(BaseModel):
+    source_image: str
+    source_label: str | None = None
+    generated_images: list[str] = Field(default_factory=list)
+    generated_labels: list[str] = Field(default_factory=list)
+    skipped_reason: str | None = None
+
+
+class YoloTxtAugmentResponse(BaseModel):
+    status: str = "ok"
+    input_dir: str
+    output_dir: str
+    processed_images: int
+    skipped_images: int
+    generated_images: int
+    generated_labels: int
+    details: list[YoloTxtAugmentFileDetail]
+
+
+class YoloTxtAugmentAsyncRequest(YoloTxtAugmentRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
 class VocBarCropRequest(BaseModel):
     """横向条带 VOC 目标：以框高为边长裁正方形，目标居中；输出小图与对应 XML。"""
 

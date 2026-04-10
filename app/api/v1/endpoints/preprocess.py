@@ -53,6 +53,9 @@ from app.schemas.preprocess import (
     YoloSlidingWindowCropAsyncRequest,
     YoloSlidingWindowCropRequest,
     YoloSlidingWindowCropResponse,
+    YoloTxtAugmentAsyncRequest,
+    YoloTxtAugmentRequest,
+    YoloTxtAugmentResponse,
     VocBarCropAsyncRequest,
     VocBarCropRequest,
     VocBarCropResponse,
@@ -82,6 +85,7 @@ from app.services.split_yolo_dataset import run_split_yolo_dataset
 from app.services.task_manager import get_task, submit_task
 from app.services.build_yolo_yaml import run_build_yolo_yaml
 from app.services.yolo_train import run_yolo_train
+from app.services.yolo_txt_augment import run_yolo_txt_augment
 from app.services.annotation_visualize import run_annotate_visualize
 from app.services.xml_to_yolo import run_xml_to_yolo
 from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
@@ -815,3 +819,38 @@ def yolo_train_async(
         callback_url=callback_url,
     )
 
+
+@router.post("/yolo-txt-augment", response_model=YoloTxtAugmentResponse)
+def yolo_txt_augment(payload: YoloTxtAugmentRequest) -> YoloTxtAugmentResponse:
+    try:
+        return run_yolo_txt_augment(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/yolo-txt-augment/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def yolo_txt_augment_async(
+    payload: YoloTxtAugmentAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "yolo_txt_augment"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = YoloTxtAugmentRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_yolo_txt_augment(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )

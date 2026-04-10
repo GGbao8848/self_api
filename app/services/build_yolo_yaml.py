@@ -65,14 +65,19 @@ def _apply_prefix_abs(path_str: str, from_p: str, to_p: str) -> str:
 
 def _build_yaml_lines(
     *,
-    split_abs_paths: dict[str, str],
+    split_abs_paths: dict[str, list[str]],
     included_order: list[str],
     class_names: list[str],
 ) -> str:
-    """Each split key maps to an absolute path to that split's images directory."""
     lines: list[str] = []
     for split in included_order:
-        lines.append(f"{split}: {_yaml_quote_scalar(split_abs_paths[split])}")
+        split_paths = split_abs_paths[split]
+        if len(split_paths) == 1:
+            lines.append(f"{split}: {_yaml_quote_scalar(split_paths[0])}")
+            continue
+        lines.append(f"{split}:")
+        for split_path in split_paths:
+            lines.append(f"  - {_yaml_quote_scalar(split_path)}")
 
     nc = len(class_names)
     lines.append(f"nc: {nc}")
@@ -92,6 +97,34 @@ def _dir_has_images(images_dir: Path, exts: set[str]) -> bool:
     )
 
 
+def _collect_images_dirs(
+    *,
+    split_root: Path,
+    images_subdir: str,
+    exts: set[str],
+) -> list[Path]:
+    found: list[Path] = []
+    seen: set[Path] = set()
+
+    def add_if_valid(path: Path) -> None:
+        resolved = path.resolve()
+        if resolved in seen:
+            return
+        if _dir_has_images(resolved, exts):
+            seen.add(resolved)
+            found.append(resolved)
+
+    add_if_valid(split_root)
+    candidates = sorted(
+        split_root.rglob(images_subdir),
+        key=lambda path: (len(path.relative_to(split_root).parts), path.as_posix()),
+    )
+    for candidate in candidates:
+        if candidate.is_dir():
+            add_if_valid(candidate)
+    return found
+
+
 def _scan_splits_for_layout(
     *,
     root: Path,
@@ -99,21 +132,25 @@ def _scan_splits_for_layout(
     images_subdir: str,
     layout: str,
     exts: set[str],
-) -> tuple[list[str], dict[str, str]]:
-    """layout: split_first -> <split>/<images_subdir>; images_first -> <images_subdir>/<split>."""
+) -> tuple[list[str], dict[str, list[Path]]]:
     included: list[str] = []
-    rel: dict[str, str] = {}
+    split_dirs: dict[str, list[Path]] = {}
     for sp in split_names:
         if layout == "split_first":
-            d = root / sp / images_subdir
-            rel_s = f"{sp}/{images_subdir}".replace("\\", "/")
+            split_root = root / sp
         else:
-            d = root / images_subdir / sp
-            rel_s = f"{images_subdir}/{sp}".replace("\\", "/")
-        if _dir_has_images(d, exts):
+            split_root = root / images_subdir / sp
+        if not split_root.is_dir():
+            continue
+        matched = _collect_images_dirs(
+            split_root=split_root,
+            images_subdir=images_subdir,
+            exts=exts,
+        )
+        if matched:
             included.append(sp)
-            rel[sp] = rel_s
-    return included, rel
+            split_dirs[sp] = matched
+    return included, split_dirs
 
 
 def _pick_effective_root_and_layout(
@@ -121,7 +158,7 @@ def _pick_effective_root_and_layout(
     split_names: list[str],
     images_subdir: str,
     exts: set[str],
-) -> tuple[Path, str, list[str], dict[str, str]]:
+) -> tuple[Path, str, list[str], dict[str, list[Path]]]:
     """
     Try, in order: <input>/dataset, <input>, <input>/yolo_split — each with split_first then images_first.
     Prefer more matched splits; ties favor earlier candidate (dataset before root before yolo_split),
@@ -133,13 +170,13 @@ def _pick_effective_root_and_layout(
         root_input / "yolo_split",
     ]
     best_key: tuple[int, int, int] | None = None
-    best: tuple[Path, str, list[str], dict[str, str]] | None = None
+    best: tuple[Path, str, list[str], dict[str, list[Path]]] | None = None
 
     for prio, cand in enumerate(candidates):
         if not cand.is_dir():
             continue
         for li, layout in enumerate(("split_first", "images_first")):
-            included, rel = _scan_splits_for_layout(
+            included, split_dirs = _scan_splits_for_layout(
                 root=cand,
                 split_names=split_names,
                 images_subdir=images_subdir,
@@ -152,7 +189,7 @@ def _pick_effective_root_and_layout(
             key = (score, -prio, -li)
             if best_key is None or key > best_key:
                 best_key = key
-                best = (cand, layout, included, rel)
+                best = (cand, layout, included, split_dirs)
 
     if best is None:
         raise ValueError(
@@ -160,17 +197,6 @@ def _pick_effective_root_and_layout(
             f"layout train/images or images/train under {images_subdir!r} (checked splits: {split_names})"
         )
     return best
-
-
-def _abs_images_dir(
-    effective_root: Path,
-    layout: str,
-    split: str,
-    images_subdir: str,
-) -> Path:
-    if layout == "split_first":
-        return (effective_root / split / images_subdir).resolve()
-    return (effective_root / images_subdir / split).resolve()
 
 
 def _resolve_classes_file(
@@ -213,7 +239,7 @@ def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
     images_subdir = request.images_subdir_name.strip() or "images"
     exts = normalize_extensions(None)
 
-    effective_root, layout_mode, included, _split_rel = _pick_effective_root_and_layout(
+    effective_root, _layout_mode, included, split_dirs = _pick_effective_root_and_layout(
         root_input,
         split_names,
         images_subdir,
@@ -237,13 +263,14 @@ def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
             "path_prefix_replace_from and path_prefix_replace_to must be both set or both omitted"
         )
 
-    split_abs_paths: dict[str, str] = {}
+    split_abs_paths: dict[str, list[str]] = {}
     for sp in included:
-        abs_dir = _abs_images_dir(effective_root, layout_mode, sp, images_subdir)
-        path_str = abs_dir.as_posix()
-        if from_prefix is not None and to_prefix is not None:
-            path_str = _apply_prefix_abs(path_str, from_prefix, to_prefix)
-        split_abs_paths[sp] = path_str
+        split_abs_paths[sp] = []
+        for abs_dir in split_dirs[sp]:
+            path_str = abs_dir.as_posix()
+            if from_prefix is not None and to_prefix is not None:
+                path_str = _apply_prefix_abs(path_str, from_prefix, to_prefix)
+            split_abs_paths[sp].append(path_str)
 
     output_yaml = resolve_safe_path(
         request.output_yaml_path,
@@ -258,7 +285,7 @@ def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
     )
     output_yaml.write_text(content, encoding="utf-8")
 
-    first_path = split_abs_paths[included[0]] if included else ""
+    first_path = split_abs_paths[included[0]][0] if included else ""
 
     return BuildYoloYamlResponse(
         output_yaml_path=str(output_yaml),

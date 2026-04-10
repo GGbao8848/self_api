@@ -17,6 +17,7 @@
 | `move-path` / `copy-path` | `source_path`（兼容 `input_dir`）、`target_dir`（兼容 `output_dir`）、`overwrite` |
 | `build-yolo-yaml` | `input_dir`（可传数据集**上级目录**，服务会依次尝试 `<input_dir>/dataset`、`input_dir` 自身、`<input_dir>/yolo_split`，并自动匹配 **train/images** 或 **images/train**）、`classes_file`（可选；默认同目录或 `yolo_split`/`dataset` 下 `classes.txt`）、`split_names`（可选）、`images_subdir_name`、`path_prefix_replace_from` / `path_prefix_replace_to`（成对）、`output_yaml_path` |
 | `yolo-train` | `yaml_path`（须含 `/dataset/` 段）、`project_root_dir`（子进程 `cwd`）、`yolo_train_env`（conda 环境名）、`model`、`epochs`、`imgsz`（后三项有默认值） |
+| `yolo-txt-augment` | `input_dir`（其下需有 `images/`、`labels/`）、`output_dir`（可选，默认 `<input_dir>/augment`）、七个增强开关（默认全开）；仅支持 YOLO TXT |
 | `voc-bar-crop` | `images_dir`、`xmls_dir`、`output_dir`；可选 `recursive`（默认 `true`）；裁剪正方形边长为**源图高度**（§17） |
 | `restore-voc-crops-batch` | `original_images_dir`、`original_xmls_dir`、`edited_crops_images_dir`、`edited_crops_xmls_dir`、`output_dir`；可选 `recursive`、`skip_unparsed_names`（§18） |
 
@@ -754,7 +755,56 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/remote-slurm-yolo-train
 
 异步示例在同步 body 上增加 `callback_url`、`callback_timeout_seconds` 即可（同 §2）。
 
-## 17. VOC 横向条带正方形裁剪（`voc-bar-crop`）
+## 17. YOLO TXT 数据增强（`yolo-txt-augment`）
+
+- `POST /api/v1/preprocess/yolo-txt-augment`
+- `POST /api/v1/preprocess/yolo-txt-augment/async`
+
+仅支持 YOLO TXT 标注。输入目录固定为：
+
+- `<input_dir>/images`
+- `<input_dir>/labels`
+
+输出目录默认写到：
+
+- `<input_dir>/augment/images`
+- `<input_dir>/augment/labels`
+
+默认启用以下七种增强：
+
+- `horizontal_flip`
+- `vertical_flip`
+- `brightness_up`
+- `brightness_down`
+- `contrast_up`
+- `contrast_down`
+- `gaussian_blur`
+
+```bash
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-txt-augment" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/datasets/demo",
+    "horizontal_flip": true,
+    "vertical_flip": true,
+    "brightness_up": true,
+    "brightness_down": true,
+    "contrast_up": true,
+    "contrast_down": true,
+    "gaussian_blur": true
+  }'
+```
+
+补充说明：
+
+- 每张图会按启用的增强项分别生成新文件，文件名后缀形如 `_hflip`、`_contrast_up`
+- 水平/垂直翻转会同步改写 YOLO 框中心点；亮度、对比度、高斯模糊仅改图像，不改框
+- 若 `labels/classes.txt` 存在，会复制到输出 `labels/`
+- 若未显式传 `output_dir`，默认输出到 `<input_dir>/augment`
+
+异步示例在同步 body 上增加 `callback_url`、`callback_timeout_seconds` 即可（同 §2）。
+
+## 18. VOC 横向条带正方形裁剪（`voc-bar-crop`）
 
 对 `xmls_dir` 中每个 Pascal VOC XML：对每个 **宽不小于高** 的目标框触发一次裁剪。正方形 **边长 = 源图像高度**（宽≥高的横向长条图：`top=0`，水平方向以该框中心居中，左右越界则在图内平移；窄高图则 `left=0`、垂直居中）。与 `yolo-sliding-window-crop` 的「边长=图片高度」一致，**不是**标注框高度。小图文件名含裁剪中心与边长，例如 `stem_cx512_cy409_S819.jpg`，同 stem 的 XML 写入 `output_dir/xmls/`。裁剪图内保留 **与窗口相交** 的所有物体框（坐标换算到小图）。
 
@@ -791,7 +841,7 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/voc-bar-crop/async" \
 
 编辑后把裁剪贴回整图并合并 VOC，请使用 **`restore-voc-crops-batch`**（§18）。裁剪文件名 `{stem}_cx{cx}_cy{cy}_S{S}` 与窗口对应关系为：`x = cx - S//2`，`y = cy - S//2`，`width = height = S`（与 `details` 中 `window_*` 一致；贴边 clamp 时以 `details` 为准）。
 
-## 18. 批量还原 voc 裁剪到原图（`restore-voc-crops-batch`）
+## 19. 批量还原 voc 裁剪到原图（`restore-voc-crops-batch`）
 
 适用于目录结构形如：
 
