@@ -208,3 +208,138 @@ def test_build_yolo_yaml_async(client: TestClient, case_dir: Path) -> None:
             return
         time.sleep(0.05)
     raise AssertionError("async build-yolo-yaml did not finish")
+
+
+def test_build_yolo_yaml_merge_last_local(client: TestClient, case_dir: Path) -> None:
+    ds = case_dir / "dataset_merge"
+    _make_yolo_splits(ds, ("train", "val", "test"))
+    prev = ds / "previous.yaml"
+    prev.write_text(
+        "train: /legacy/train/images\n"
+        "val: /legacy/val/images\n"
+        "nc: 99\n"
+        "names:\n"
+        "  0: ignore\n",
+        encoding="utf-8",
+    )
+    out = ds / "merged.yaml"
+    r = client.post(
+        "/api/v1/preprocess/build-yolo-yaml",
+        json={
+            "input_dir": str(ds),
+            "last_yaml": str(prev),
+            "output_yaml_path": str(out),
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["last_yaml_merged"] is True
+    assert data["last_yaml_source"] == "local"
+    assert data["classes_count"] == 2
+    text = out.read_text(encoding="utf-8")
+    train_new = (ds / "train" / "images").resolve().as_posix()
+    assert "train:" in text
+    assert "/legacy/train/images" in text
+    assert train_new in text
+    assert "nc: 2" in text
+    assert "0: dog" in text
+
+
+def test_build_yolo_yaml_empty_classes_txt_uses_last_yaml_names(
+    client: TestClient, case_dir: Path,
+) -> None:
+    ds = case_dir / "dataset_empty_cls"
+    _make_yolo_splits(ds, ("train", "val", "test"))
+    (ds / "classes.txt").write_text("# no lines\n", encoding="utf-8")
+    base = ds / "previous.yaml"
+    base.write_text(
+        "train: /legacy/train/images\n"
+        "val: /legacy/val/images\n"
+        "nc: 2\n"
+        "names:\n"
+        "  0: dog\n"
+        "  1: cat\n",
+        encoding="utf-8",
+    )
+    out = ds / "out_empty_cls.yaml"
+    r = client.post(
+        "/api/v1/preprocess/build-yolo-yaml",
+        json={
+            "input_dir": str(ds),
+            "last_yaml": str(base),
+            "output_yaml_path": str(out),
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["classes_count"] == 2
+    text = out.read_text(encoding="utf-8")
+    train_new = (ds / "train" / "images").resolve().as_posix()
+    assert "/legacy/train/images" in text
+    assert train_new in text
+    assert "nc: 2" in text
+    assert "0: dog" in text
+
+
+def test_build_yolo_yaml_no_classes_file_uses_last_yaml(
+    client: TestClient, case_dir: Path,
+) -> None:
+    ds = case_dir / "dataset_no_cls_file"
+    for split in ("train", "val"):
+        im = ds / split / "images"
+        im.mkdir(parents=True)
+        create_image(im / "sample.png", color=(10, 20, 30), size=(32, 32))
+    base = ds / "base.yaml"
+    base.write_text(
+        "train: /a/images\n"
+        "val: /b/images\n"
+        "names:\n"
+        "  0: only\n",
+        encoding="utf-8",
+    )
+    out = ds / "merged_no_cls.yaml"
+    r = client.post(
+        "/api/v1/preprocess/build-yolo-yaml",
+        json={
+            "input_dir": str(ds),
+            "last_yaml": str(base),
+            "output_yaml_path": str(out),
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["classes_count"] == 1
+    text = out.read_text(encoding="utf-8")
+    assert "0: only" in text
+    assert (ds / "train" / "images").resolve().as_posix() in text
+
+
+def test_build_yolo_yaml_empty_classes_without_last_yaml_fails(
+    client: TestClient, case_dir: Path,
+) -> None:
+    ds = case_dir / "dataset_empty_fail"
+    _make_yolo_splits(ds, ("train", "val", "test"))
+    (ds / "classes.txt").write_text("\n", encoding="utf-8")
+    out = ds / "fail.yaml"
+    r = client.post(
+        "/api/v1/preprocess/build-yolo-yaml",
+        json={"input_dir": str(ds), "output_yaml_path": str(out)},
+    )
+    assert r.status_code == 400
+
+
+def test_build_yolo_yaml_last_yaml_remote_requires_sftp_fields(
+    client: TestClient, case_dir: Path,
+) -> None:
+    ds = case_dir / "dataset_sftp_err"
+    _make_yolo_splits(ds, ("train", "val", "test"))
+    out = ds / "out.yaml"
+    r = client.post(
+        "/api/v1/preprocess/build-yolo-yaml",
+        json={
+            "input_dir": str(ds),
+            "last_yaml": "sftp://example.com/var/data.yaml",
+            "output_yaml_path": str(out),
+        },
+    )
+    assert r.status_code == 400
+    assert "sftp_username" in r.json()["detail"]

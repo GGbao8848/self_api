@@ -1,0 +1,26 @@
+<annotation>
+	<folder>HANGZHOUDONGHUKUNXIAXING_20260318085202_022_CRH380BL-3523_1</folder>
+	<filename>14_5.jpg</filename>
+	<path>D:\tesxt\公司\中科\上海局\上海0315-0323漏报图\上海0315-0323漏报图\HANGZHOUDONGHUKUNXIAXING_20260318085202_022_CRH380BL-3523_1\14_5.jpg</path>
+	<source>
+		<database>Unknown</database>
+	</source>
+	<size>
+		<width>22944</width>
+		<height>1399</height>
+		<depth>1</depth>
+	</size>
+	<segmented>0</segmented>
+	<object>
+		<name>dibu__&lt;diban&gt;__louyou</name>
+		<pose>Unspecified</pose>
+		<truncated>0</truncated>
+		<difficult>0</difficult>
+		<bndbox>
+			<xmin>8575</xmin>
+			<ymin>648</ymin>
+			<xmax>9049</xmax>
+			<ymax>748</ymax>
+		</bndbox>
+	</object>
+</annotation>

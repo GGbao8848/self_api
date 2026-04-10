@@ -73,6 +73,44 @@ def _discover_leaf_dirs(
     return sorted(leaves)
 
 
+def _discover_images_xmls_pair_roots(
+    input_dir: Path,
+    *,
+    recursive: bool,
+    images_dir_name: str,
+    xmls_dir_name: str,
+    image_exts: set[str],
+    skip_dirs: list[Path] | None = None,
+) -> list[Path]:
+    """Directories that directly contain both ``images_dir_name`` and ``xmls_dir_name`` subfolders with at least one file."""
+    skip_dirs = skip_dirs or []
+
+    def _should_skip(path: Path) -> bool:
+        return any(_is_within(path, skip_dir) for skip_dir in skip_dirs)
+
+    if recursive:
+        dirs_to_visit = sorted({input_dir, *input_dir.rglob("*")})
+        dirs_to_visit = [p for p in dirs_to_visit if p.is_dir()]
+    else:
+        dirs_to_visit = [input_dir]
+
+    candidates: list[Path] = []
+    for path in dirs_to_visit:
+        ensure_current_task_active()
+        if _should_skip(path):
+            continue
+        img_sub = path / images_dir_name
+        xml_sub = path / xmls_dir_name
+        if not img_sub.is_dir() or not xml_sub.is_dir():
+            continue
+        imgs, _ = _iter_direct_annotation_files(img_sub, image_exts)
+        _, xmls = _iter_direct_annotation_files(xml_sub, image_exts)
+        if not imgs and not xmls:
+            continue
+        candidates.append(path)
+    return sorted(candidates)
+
+
 def run_discover_leaf_dirs(request: DiscoverLeafDirsRequest) -> DiscoverLeafDirsResponse:
     input_dir = resolve_safe_path(
         request.input_dir,
@@ -97,6 +135,16 @@ def _remove_existing_target(path: Path) -> None:
         path.unlink()
     elif path.is_dir():
         shutil.rmtree(path)
+
+
+def _flatten_basename(rel_dir: Path, filename: str) -> str:
+    """Prefix filename with sanitized relative path so flattened outputs do not collide."""
+    key = rel_dir.as_posix()
+    if key == ".":
+        key = "root"
+    else:
+        key = key.replace("/", "__")
+    return f"{key}__{filename}"
 
 
 def _copy_or_move_file(source_path: Path, target_path: Path, *, copy_files: bool, overwrite: bool) -> None:
@@ -124,33 +172,54 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
         else (input_dir / "cleaned_dataset").resolve()
     )
     image_exts = normalize_extensions(request.extensions)
-    leaf_dirs = _discover_leaf_dirs(
-        input_dir,
-        recursive=request.recursive,
-        image_exts=image_exts,
-        skip_dirs=[output_dir] if _is_within(output_dir, input_dir) else [],
-    )
+    skip_dirs = [output_dir] if _is_within(output_dir, input_dir) else []
+    if request.pairing_mode == "same_directory":
+        leaf_dirs = _discover_leaf_dirs(
+            input_dir,
+            recursive=request.recursive,
+            image_exts=image_exts,
+            skip_dirs=skip_dirs,
+        )
+    else:
+        leaf_dirs = _discover_images_xmls_pair_roots(
+            input_dir,
+            recursive=request.recursive,
+            images_dir_name=request.images_dir_name,
+            xmls_dir_name=request.xmls_dir_name,
+            image_exts=image_exts,
+            skip_dirs=skip_dirs,
+        )
 
     details: list[CleanNestedDatasetLeafDetail] = []
     processed_leaf_dirs = 0
     total_images = 0
     labeled_images = 0
     background_images = 0
+    skipped_unlabeled_images = 0
     copied_xml_files = 0
     empty_or_invalid_xml_files = 0
     orphan_xml_files = 0
 
-    for leaf_dir in leaf_dirs:
+    for unit_dir in leaf_dirs:
         ensure_current_task_active()
-        rel_dir = leaf_dir.relative_to(input_dir)
-        leaf_output_dir = output_dir / rel_dir
-        images, xml_paths = _iter_direct_annotation_files(leaf_dir, image_exts)
+        rel_dir = unit_dir.relative_to(input_dir)
+        leaf_output_dir = output_dir if request.flatten else output_dir / rel_dir
+        if request.pairing_mode == "same_directory":
+            images_src = unit_dir
+            xmls_src = unit_dir
+            images, xml_paths = _iter_direct_annotation_files(images_src, image_exts)
+        else:
+            images_src = unit_dir / request.images_dir_name
+            xmls_src = unit_dir / request.xmls_dir_name
+            images, _ = _iter_direct_annotation_files(images_src, image_exts)
+            _, xml_paths = _iter_direct_annotation_files(xmls_src, image_exts)
         xml_by_stem = {path.stem: path for path in xml_paths}
         image_by_stem = {path.stem: path for path in images}
 
         leaf_total_images = len(images)
         leaf_labeled_images = 0
         leaf_background_images = 0
+        leaf_skipped_unlabeled = 0
         leaf_copied_xml_files = 0
         leaf_empty_or_invalid_xml_files = 0
         leaf_orphan_xml_files = 0
@@ -160,7 +229,7 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
             ensure_current_task_active()
             _, _, objects, error = _load_xml_annotation(
                 xml_path=xml_path,
-                images_dir=leaf_dir,
+                images_dir=images_src,
                 include_difficult=request.include_difficult,
             )
             xml_validity[stem] = error is None and len(objects) > 0
@@ -171,8 +240,18 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
             ensure_current_task_active()
             matched_xml = xml_by_stem.get(image_path.stem)
             if matched_xml and xml_validity.get(image_path.stem, False):
-                target_image = leaf_output_dir / request.images_dir_name / image_path.name
-                target_xml = leaf_output_dir / request.xmls_dir_name / matched_xml.name
+                image_name = (
+                    _flatten_basename(rel_dir, image_path.name)
+                    if request.flatten
+                    else image_path.name
+                )
+                xml_name = (
+                    _flatten_basename(rel_dir, matched_xml.name)
+                    if request.flatten
+                    else matched_xml.name
+                )
+                target_image = leaf_output_dir / request.images_dir_name / image_name
+                target_xml = leaf_output_dir / request.xmls_dir_name / xml_name
                 _copy_or_move_file(
                     image_path,
                     target_image,
@@ -187,8 +266,11 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
                 )
                 leaf_labeled_images += 1
                 leaf_copied_xml_files += 1
-            else:
-                target_background = leaf_output_dir / request.backgrounds_dir_name / image_path.name
+            elif request.include_backgrounds:
+                bg_name = (
+                    _flatten_basename(rel_dir, image_path.name) if request.flatten else image_path.name
+                )
+                target_background = leaf_output_dir / request.backgrounds_dir_name / bg_name
                 _copy_or_move_file(
                     image_path,
                     target_background,
@@ -196,6 +278,8 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
                     overwrite=request.overwrite,
                 )
                 leaf_background_images += 1
+            else:
+                leaf_skipped_unlabeled += 1
 
         for stem, xml_path in xml_by_stem.items():
             if stem not in image_by_stem:
@@ -208,16 +292,18 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
         total_images += leaf_total_images
         labeled_images += leaf_labeled_images
         background_images += leaf_background_images
+        skipped_unlabeled_images += leaf_skipped_unlabeled
         copied_xml_files += leaf_copied_xml_files
         empty_or_invalid_xml_files += leaf_empty_or_invalid_xml_files
         orphan_xml_files += leaf_orphan_xml_files
         details.append(
             CleanNestedDatasetLeafDetail(
-                source_dir=str(leaf_dir),
+                source_dir=str(unit_dir),
                 output_dir=str(leaf_output_dir),
                 total_images=leaf_total_images,
                 labeled_images=leaf_labeled_images,
                 background_images=leaf_background_images,
+                skipped_unlabeled_images=leaf_skipped_unlabeled,
                 copied_xml_files=leaf_copied_xml_files,
                 empty_or_invalid_xml_files=leaf_empty_or_invalid_xml_files,
                 orphan_xml_files=leaf_orphan_xml_files,
@@ -232,6 +318,7 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
         total_images=total_images,
         labeled_images=labeled_images,
         background_images=background_images,
+        skipped_unlabeled_images=skipped_unlabeled_images,
         copied_xml_files=copied_xml_files,
         empty_or_invalid_xml_files=empty_or_invalid_xml_files,
         orphan_xml_files=orphan_xml_files,

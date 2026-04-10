@@ -32,6 +32,9 @@ from app.schemas.preprocess import (
     RemoteUnzipAsyncRequest,
     RemoteUnzipRequest,
     RemoteUnzipResponse,
+    ResetYoloLabelIndexAsyncRequest,
+    ResetYoloLabelIndexRequest,
+    ResetYoloLabelIndexResponse,
     SplitYoloDatasetAsyncRequest,
     SplitYoloDatasetRequest,
     SplitYoloDatasetResponse,
@@ -91,6 +94,7 @@ from app.services.xml_to_yolo import run_xml_to_yolo
 from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
 from app.services.voc_bar_crop import run_voc_bar_crop
 from app.services.restore_voc_crops_batch import run_restore_voc_crops_batch
+from app.services.reset_yolo_labels_index import run_reset_yolo_labels_index
 
 router = APIRouter(
     prefix="/preprocess",
@@ -826,6 +830,44 @@ def yolo_txt_augment(payload: YoloTxtAugmentRequest) -> YoloTxtAugmentResponse:
         return run_yolo_txt_augment(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/reset-yolo-label-index", response_model=ResetYoloLabelIndexResponse)
+def reset_yolo_label_index(
+    payload: ResetYoloLabelIndexRequest,
+) -> ResetYoloLabelIndexResponse:
+    try:
+        return run_reset_yolo_labels_index(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/reset-yolo-label-index/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def reset_yolo_label_index_async(
+    payload: ResetYoloLabelIndexAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "reset_yolo_label_index"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = ResetYoloLabelIndexRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_reset_yolo_labels_index(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
 
 
 @router.post(

@@ -637,6 +637,29 @@ class CleanNestedDatasetRequest(BaseModel):
         default=False,
         description="Whether to overwrite existing target files",
     )
+    flatten: bool = Field(
+        default=False,
+        description=(
+            "When true, merge all leaf outputs into a single tree under output_dir: "
+            "output_dir/<images_dir_name>, output_dir/<xmls_dir_name>, etc., with basenames "
+            "prefixed by relative path to avoid collisions"
+        ),
+    )
+    include_backgrounds: bool = Field(
+        default=True,
+        description=(
+            "When false, do not copy unlabeled images to backgrounds; only images/xmls pairs "
+            "are written (plus orphan-xml handling when not copy_files)"
+        ),
+    )
+    pairing_mode: Literal["same_directory", "images_xmls_subfolders"] = Field(
+        default="same_directory",
+        description=(
+            "same_directory: each leaf folder contains image and xml files as direct siblings. "
+            "images_xmls_subfolders: each unit folder contains subfolders named images_dir_name "
+            "and xmls_dir_name with files inside (VOC-style layout)"
+        ),
+    )
 
 
 class CleanNestedDatasetLeafDetail(BaseModel):
@@ -645,6 +668,10 @@ class CleanNestedDatasetLeafDetail(BaseModel):
     total_images: int
     labeled_images: int
     background_images: int
+    skipped_unlabeled_images: int = Field(
+        default=0,
+        description="Unlabeled images not copied because include_backgrounds is false",
+    )
     copied_xml_files: int
     empty_or_invalid_xml_files: int
     orphan_xml_files: int
@@ -659,6 +686,10 @@ class CleanNestedDatasetResponse(BaseModel):
     total_images: int
     labeled_images: int
     background_images: int
+    skipped_unlabeled_images: int = Field(
+        default=0,
+        description="Unlabeled images not copied because include_backgrounds is false",
+    )
     copied_xml_files: int
     empty_or_invalid_xml_files: int
     orphan_xml_files: int
@@ -919,7 +950,10 @@ class BuildYoloYamlRequest(BaseModel):
     )
     classes_file: str | None = Field(
         default=None,
-        description="Path to classes.txt. Defaults to <input_dir>/classes.txt",
+        description=(
+            "Path to classes.txt. Defaults to search under dataset root / input_dir / yolo_split. "
+            "May be empty: then last_yaml is required and nc/names are taken from last_yaml."
+        ),
     )
     split_names: list[str] | None = Field(
         default=None,
@@ -940,6 +974,26 @@ class BuildYoloYamlRequest(BaseModel):
     output_yaml_path: str = Field(
         ...,
         description="Full path for the generated data.yaml (parent dirs are created if needed)",
+    )
+    last_yaml: str | None = Field(
+        default=None,
+        description=(
+            "Optional previous data.yaml. Split paths from last_yaml are prepended before current "
+            "scan paths (deduplicated). If classes.txt is missing or has no class lines, last_yaml is "
+            "required and must contain names (and typically nc). May be local path or SFTP URI (sftp_*)."
+        ),
+    )
+    sftp_username: str | None = Field(
+        default=None,
+        description="Required when last_yaml is a remote SFTP URI; SSH username",
+    )
+    sftp_private_key_path: str | None = Field(
+        default=None,
+        description="Required when last_yaml is remote (unless using password auth in future); local path to private key",
+    )
+    sftp_port: int | None = Field(
+        default=None,
+        description="Optional SSH port when omitted from last_yaml URI (default 22)",
     )
 
 
@@ -967,6 +1021,14 @@ class BuildYoloYamlResponse(BaseModel):
     )
     splits_included: list[str]
     classes_count: int
+    last_yaml_merged: bool = Field(
+        default=False,
+        description="Whether paths from last_yaml were merged into the output",
+    )
+    last_yaml_source: str | None = Field(
+        default=None,
+        description="none | local | sftp — how last_yaml was loaded when merged",
+    )
 
 
 class YoloTrainRequest(BaseModel):
@@ -1050,6 +1112,38 @@ class YoloTxtAugmentResponse(BaseModel):
 
 
 class YoloTxtAugmentAsyncRequest(YoloTxtAugmentRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class ResetYoloLabelIndexRequest(BaseModel):
+    input_dir: str = Field(
+        description="输入数据集根目录，目录下需包含 labels/ 子目录",
+    )
+    labels_dir_name: str = Field(default="labels", description="标签目录名称")
+    recursive: bool = Field(default=True, description="是否递归扫描 labels 目录")
+
+
+class ResetYoloLabelIndexResponse(BaseModel):
+    status: str = "ok"
+    input_dir: str
+    labels_dir: str
+    total_label_files: int
+    modified_label_files: int
+    unchanged_label_files: int
+    changed_lines: int
+    skipped_invalid_lines: int
+
+
+class ResetYoloLabelIndexAsyncRequest(ResetYoloLabelIndexRequest):
     callback_url: AnyHttpUrl | None = Field(
         default=None,
         description="Optional webhook URL that receives task result when finished",

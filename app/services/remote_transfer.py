@@ -209,3 +209,65 @@ def run_remote_transfer(request: RemoteTransferRequest) -> RemoteTransferRespons
         )
     finally:
         client.close()
+
+
+def read_sftp_file_text(
+    target: str,
+    *,
+    username: str | None = None,
+    private_key_path: str | None = None,
+    password: str | None = None,
+    port: int | None = None,
+) -> str:
+    """Download a remote file over SFTP and return its text (UTF-8)."""
+    host, default_port, remote_path = _parse_target(target)
+    uname = username or _extract_username_from_target(target)
+    if not uname:
+        raise ValueError("username is required: set username or use user@host:path in target")
+
+    if password and private_key_path:
+        raise ValueError("use either password or private_key_path, not both")
+    if not password and not private_key_path:
+        raise ValueError("either password or private_key_path is required")
+
+    pkey = None
+    if private_key_path:
+        key_path = Path(private_key_path).expanduser().resolve()
+        if not key_path.exists():
+            raise ValueError(f"private_key_path does not exist: {key_path}")
+        try:
+            pkey = paramiko.Ed25519Key.from_private_key_file(str(key_path))
+        except paramiko.ssh_exception.SSHException:
+            try:
+                pkey = paramiko.RSAKey.from_private_key_file(str(key_path))
+            except paramiko.ssh_exception.SSHException as e:
+                raise ValueError(f"failed to load private key: {e}") from e
+
+    use_port = port if port is not None else default_port
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            hostname=host,
+            port=use_port,
+            username=uname,
+            password=password,
+            pkey=pkey,
+            timeout=30,
+        )
+    except paramiko.AuthenticationException as e:
+        raise ValueError(f"SSH authentication failed: {e}") from e
+    except paramiko.SSHException as e:
+        raise ValueError(f"SSH connection failed: {e}") from e
+
+    try:
+        sftp = client.open_sftp()
+        try:
+            with sftp.open(remote_path, "r") as rf:
+                raw = rf.read()
+        except OSError as e:
+            raise ValueError(f"remote file not readable: {remote_path}: {e}") from e
+        return raw.decode("utf-8")
+    finally:
+        client.close()

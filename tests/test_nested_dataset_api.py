@@ -103,6 +103,121 @@ def test_clean_nested_dataset_endpoint(client: TestClient, case_dir: Path) -> No
     assert (cleaned_leaf / "backgrounds" / "empty_label.jpg").exists()
 
 
+def test_clean_nested_dataset_flatten_endpoint(client: TestClient, case_dir: Path) -> None:
+    root_dir = case_dir / "flatten_nested"
+    leaf_a = root_dir / "branch_a" / "leaf"
+    leaf_b = root_dir / "branch_b" / "leaf"
+    create_image(leaf_a / "same.jpg", color=(255, 0, 0), size=(8, 8))
+    create_voc_xml(
+        leaf_a / "same.xml",
+        filename="same.jpg",
+        size=(8, 8),
+        objects=[("cat", (1, 1, 4, 4))],
+    )
+    create_image(leaf_b / "same.jpg", color=(0, 255, 0), size=(8, 8))
+    create_voc_xml(
+        leaf_b / "same.xml",
+        filename="same.jpg",
+        size=(8, 8),
+        objects=[("dog", (1, 1, 4, 4))],
+    )
+
+    output_dir = case_dir / "flatten_out"
+    response = client.post(
+        "/api/v1/preprocess/clean-nested-dataset",
+        json={
+            "input_dir": str(root_dir),
+            "output_dir": str(output_dir),
+            "flatten": True,
+        },
+    )
+    data = response.json()
+    assert response.status_code == 200
+    assert data["discovered_leaf_dirs"] == 2
+    assert data["labeled_images"] == 2
+    images_dir = output_dir / "images"
+    xmls_dir = output_dir / "xmls"
+    assert images_dir.is_dir()
+    assert xmls_dir.is_dir()
+    names = {p.name for p in images_dir.glob("*.jpg")}
+    assert names == {
+        "branch_a__leaf__same.jpg",
+        "branch_b__leaf__same.jpg",
+    }
+    assert {p.name for p in xmls_dir.glob("*.xml")} == {
+        "branch_a__leaf__same.xml",
+        "branch_b__leaf__same.xml",
+    }
+
+
+def test_clean_nested_dataset_images_xmls_subfolders_endpoint(client: TestClient, case_dir: Path) -> None:
+    """VOC-style: sample dir contains images/ and xmls/ subfolders."""
+    root_dir = case_dir / "voc_style"
+    sample = root_dir / "session_a"
+    create_image(sample / "images" / "a.jpg", color=(255, 0, 0), size=(16, 16))
+    create_image(sample / "images" / "bg.jpg", color=(0, 255, 0), size=(16, 16))
+    create_voc_xml(
+        sample / "xmls" / "a.xml",
+        filename="a.jpg",
+        size=(16, 16),
+        objects=[("cat", (2, 2, 8, 8))],
+    )
+
+    output_dir = case_dir / "voc_cleaned"
+    response = client.post(
+        "/api/v1/preprocess/clean-nested-dataset",
+        json={
+            "input_dir": str(root_dir),
+            "output_dir": str(output_dir),
+            "pairing_mode": "images_xmls_subfolders",
+        },
+    )
+    data = response.json()
+    assert response.status_code == 200
+    assert data["discovered_leaf_dirs"] == 1
+    assert data["labeled_images"] == 1
+    assert data["background_images"] == 1
+    assert data["copied_xml_files"] == 1
+
+    out_leaf = output_dir / "session_a"
+    assert (out_leaf / "images" / "a.jpg").exists()
+    assert (out_leaf / "xmls" / "a.xml").exists()
+    assert (out_leaf / "backgrounds" / "bg.jpg").exists()
+
+
+def test_clean_nested_dataset_skip_backgrounds_endpoint(client: TestClient, case_dir: Path) -> None:
+    root_dir = case_dir / "raw_nested_skip_bg"
+    leaf_dir = root_dir / "project" / "batch_1"
+    create_image(leaf_dir / "has_label.jpg", color=(255, 0, 0), size=(40, 40))
+    create_image(leaf_dir / "no_label.jpg", color=(0, 255, 0), size=(40, 40))
+    create_voc_xml(
+        leaf_dir / "has_label.xml",
+        filename="has_label.jpg",
+        size=(40, 40),
+        objects=[("cat", (5, 5, 20, 20))],
+    )
+
+    output_dir = case_dir / "cleaned_skip_bg"
+    response = client.post(
+        "/api/v1/preprocess/clean-nested-dataset",
+        json={
+            "input_dir": str(root_dir),
+            "output_dir": str(output_dir),
+            "include_backgrounds": False,
+        },
+    )
+    data = response.json()
+    assert response.status_code == 200
+    assert data["labeled_images"] == 1
+    assert data["background_images"] == 0
+    assert data["skipped_unlabeled_images"] == 1
+
+    cleaned_leaf = output_dir / "project" / "batch_1"
+    assert (cleaned_leaf / "images" / "has_label.jpg").exists()
+    assert (cleaned_leaf / "xmls" / "has_label.xml").exists()
+    assert not (cleaned_leaf / "backgrounds").exists()
+
+
 def test_aggregate_nested_dataset_endpoint(client: TestClient, case_dir: Path) -> None:
     cleaned_root = case_dir / "cleaned_nested"
 

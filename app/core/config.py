@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     redis_url: str | None = None
     s3_endpoint_url: str | None = None
     max_upload_size_mb: int = 512
+    # 供与 n8n 集成时使用（.env：SELF_API_N8N_BASE_URL / SELF_API_N8N_API_KEY）
+    n8n_base_url: str | None = None
+    n8n_api_key: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="SELF_API_")
 

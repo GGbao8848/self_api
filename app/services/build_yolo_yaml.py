@@ -1,13 +1,122 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+import yaml
 
 from app.core.path_safety import resolve_safe_path
 from app.schemas.preprocess import BuildYoloYamlRequest, BuildYoloYamlResponse
+from app.services.remote_transfer import read_sftp_file_text
 from app.services.task_manager import ensure_current_task_active
 from app.utils.images import normalize_extensions
 
 _DEFAULT_SPLITS = ("train", "val", "test")
+
+_YAML_META_KEYS = frozenset({"nc", "names", "path", "yaml_file", "download", "roboflow"})
+
+
+def _looks_remote_last_yaml(s: str) -> bool:
+    t = s.strip()
+    if t.startswith(("sftp://", "ssh://")):
+        return True
+    if re.match(r"^[^@/\s]+@[^:]+:.+", t):
+        return True
+    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*:/", t) and not re.match(r"^[a-zA-Z]:[/\\]", t):
+        return True
+    return False
+
+
+def _normalize_split_entry(v: object) -> list[str]:
+    if v is None:
+        return []
+    if isinstance(v, str):
+        return [v] if v.strip() else []
+    if isinstance(v, list):
+        return [str(x) for x in v if str(x).strip()]
+    return [str(v)]
+
+
+def _split_paths_from_yaml_text(text: str) -> dict[str, list[str]]:
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for k, v in data.items():
+        if not isinstance(k, str):
+            continue
+        if k in _YAML_META_KEYS:
+            continue
+        paths = _normalize_split_entry(v)
+        if paths:
+            out[k] = paths
+    return out
+
+
+def _order_included_from_merged(
+    merged: dict[str, list[str]],
+    preferred: list[str],
+) -> list[str]:
+    order: list[str] = []
+    seen: set[str] = set()
+    for k in preferred:
+        if k in merged and k not in seen:
+            order.append(k)
+            seen.add(k)
+    for k in sorted(set(merged.keys()) - seen):
+        order.append(k)
+    return order
+
+
+def _merge_split_path_dicts(
+    last_paths: dict[str, list[str]],
+    new_paths: dict[str, list[str]],
+    preferred_key_order: list[str],
+) -> dict[str, list[str]]:
+    all_keys = set(last_paths) | set(new_paths)
+    order: list[str] = []
+    seen: set[str] = set()
+    for k in preferred_key_order:
+        if k in all_keys and k not in seen:
+            order.append(k)
+            seen.add(k)
+    for k in sorted(all_keys - seen):
+        order.append(k)
+
+    merged: dict[str, list[str]] = {}
+    for k in order:
+        combined: list[str] = []
+        dup: set[str] = set()
+        for p in last_paths.get(k, []) + new_paths.get(k, []):
+            if p not in dup:
+                dup.add(p)
+                combined.append(p)
+        if combined:
+            merged[k] = combined
+    return merged
+
+
+def _load_last_yaml_text(request: BuildYoloYamlRequest) -> tuple[str, str]:
+    assert request.last_yaml is not None
+    if _looks_remote_last_yaml(request.last_yaml):
+        if not request.sftp_username or not request.sftp_private_key_path:
+            raise ValueError(
+                "sftp_username and sftp_private_key_path are required when last_yaml is a remote SFTP path"
+            )
+        text = read_sftp_file_text(
+            request.last_yaml,
+            username=request.sftp_username,
+            private_key_path=request.sftp_private_key_path,
+            port=request.sftp_port,
+        )
+        return text, "sftp"
+    path = resolve_safe_path(
+        request.last_yaml,
+        field_name="last_yaml",
+        must_exist=True,
+        expect_file=True,
+    )
+    return path.read_text(encoding="utf-8"), "local"
 
 
 def _read_classes(path: Path) -> list[str]:
@@ -19,6 +128,26 @@ def _read_classes(path: Path) -> list[str]:
             continue
         lines.append(s)
     return lines
+
+
+def _class_names_from_yaml_data(data: dict) -> list[str]:
+    """Build ordered class name list from Ultralytics-style names: list or dict of id -> name."""
+    names = data.get("names")
+    if names is None:
+        return []
+    if isinstance(names, list):
+        return [str(x) for x in names if str(x).strip()]
+    if isinstance(names, dict):
+
+        def key_idx(k: object) -> int:
+            try:
+                return int(k)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return 0
+
+        pairs = sorted(names.items(), key=lambda kv: key_idx(kv[0]))
+        return [str(v) for _, v in pairs]
+    return []
 
 
 def _yaml_quote_scalar(value: str) -> str:
@@ -199,12 +328,12 @@ def _pick_effective_root_and_layout(
     return best
 
 
-def _resolve_classes_file(
+def _resolve_classes_file_optional(
     request: BuildYoloYamlRequest,
     *,
     effective_root: Path,
     root_input: Path,
-) -> Path:
+) -> Path | None:
     if request.classes_file is not None:
         return resolve_safe_path(
             request.classes_file,
@@ -220,10 +349,7 @@ def _resolve_classes_file(
     ):
         if p.is_file():
             return p.resolve()
-    raise ValueError(
-        f"classes.txt not found; set classes_file or place classes.txt under {effective_root} "
-        f"or {root_input}"
-    )
+    return None
 
 
 def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
@@ -246,15 +372,37 @@ def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
         exts,
     )
 
-    classes_path = _resolve_classes_file(
+    classes_path = _resolve_classes_file_optional(
         request,
         effective_root=effective_root,
         root_input=root_input,
     )
 
-    class_names = _read_classes(classes_path)
-    if not class_names:
-        raise ValueError(f"no class names in {classes_path}")
+    last_yaml_text: str | None = None
+    last_yaml_source: str | None = None
+    if request.last_yaml:
+        last_yaml_text, last_yaml_source = _load_last_yaml_text(request)
+
+    class_names: list[str] = []
+    if classes_path is not None:
+        class_names = _read_classes(classes_path)
+
+    if class_names:
+        pass
+    elif last_yaml_text:
+        data = yaml.safe_load(last_yaml_text)
+        if not isinstance(data, dict):
+            raise ValueError("last_yaml must be a YAML mapping when classes.txt is empty or missing")
+        class_names = _class_names_from_yaml_data(data)
+        if not class_names:
+            raise ValueError(
+                "no class names: classes.txt is empty or missing lines, and last_yaml has no usable names"
+            )
+    else:
+        raise ValueError(
+            "classes.txt not found or has no class names: add non-empty classes.txt, or provide "
+            "last_yaml with a names section (classes.txt may be an empty file when last_yaml is set)"
+        )
 
     from_prefix = request.path_prefix_replace_from
     to_prefix = request.path_prefix_replace_to
@@ -272,6 +420,14 @@ def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
                 path_str = _apply_prefix_abs(path_str, from_prefix, to_prefix)
             split_abs_paths[sp].append(path_str)
 
+    last_yaml_merged = False
+    included_order = included
+    if last_yaml_text:
+        last_paths = _split_paths_from_yaml_text(last_yaml_text)
+        split_abs_paths = _merge_split_path_dicts(last_paths, split_abs_paths, split_names)
+        last_yaml_merged = bool(last_paths)
+        included_order = _order_included_from_merged(split_abs_paths, split_names)
+
     output_yaml = resolve_safe_path(
         request.output_yaml_path,
         field_name="output_yaml_path",
@@ -280,17 +436,19 @@ def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
     output_yaml.parent.mkdir(parents=True, exist_ok=True)
     content = _build_yaml_lines(
         split_abs_paths=split_abs_paths,
-        included_order=included,
+        included_order=included_order,
         class_names=class_names,
     )
     output_yaml.write_text(content, encoding="utf-8")
 
-    first_path = split_abs_paths[included[0]][0] if included else ""
+    first_path = split_abs_paths[included_order[0]][0] if included_order else ""
 
     return BuildYoloYamlResponse(
         output_yaml_path=str(output_yaml),
         path_in_yaml=first_path,
         dataset_root=str(effective_root.resolve()),
-        splits_included=included,
+        splits_included=included_order,
         classes_count=len(class_names),
+        last_yaml_merged=last_yaml_merged,
+        last_yaml_source=last_yaml_source,
     )

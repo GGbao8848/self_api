@@ -12,7 +12,7 @@
 8. **跨机器 SFTP 远程传输**（文件/目录上传到远程 SFTP 服务器）
 9. YOLO 大图正方形滑窗裁剪为小图数据集（标签同步裁剪，仅宽图水平滑动）
 10. 递归发现多层目录中的最底层叶子数据目录
-11. 递归清洗多层目录中的图像/XML数据并归类为 `images/xmls/backgrounds`
+11. 递归清洗多层目录中的图像/XML 数据并归类为 `images` / `xmls`（可选 `backgrounds`；支持扁平化合并与仅输出成对标注）
 12. 汇总多个子目录处理结果为统一 `dataset/images`、`dataset/labels`、`dataset/backgrounds`
 
 ## 1. 最小可交付范围
@@ -148,17 +148,25 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 
 - `POST /api/v1/preprocess/clean-nested-dataset`
 
-用于递归处理多层子目录中的原始图片/XML 标注数据：
+用于递归处理多层子目录中的原始图片/XML 标注数据，按 **`pairing_mode`** 决定配对范围：
+
+- **`same_directory`**（默认）：图与 XML 为同一目录下的直接文件，按 stem 配对。
+- **`images_xmls_subfolders`**：每个「样本」目录下含有子文件夹 `images_dir_name` 与 `xmls_dir_name`（如 `…/车次_1/images/` 与 `…/车次_1/xmls/`），在父目录内跨子文件夹配对。
 
 - 有有效标注的图片复制到 `images/`
 - 对应 XML 复制到 `xmls/`
-- 无 XML 或 XML 中无有效目标框的图片复制到 `backgrounds/`
+- 无 XML 或 XML 中无有效目标框的图片：默认复制到 `backgrounds/`；若 `include_backgrounds: false` 则不输出 backgrounds，仅保留成对的 `images/xmls`，无标注图数量在响应 `skipped_unlabeled_images` 中统计
+- `flatten: false`（默认）时在 `output_dir` 下保留相对 `input_dir` 的子目录结构；`flatten: true` 时合并为 `output_dir/images`、`output_dir/xmls` 等单层目录，文件名带相对路径前缀以防重名
 
 关键参数：
 
 - `input_dir`: 原始多层目录根目录
 - `output_dir`: 清洗输出目录（默认 `input_dir/cleaned_dataset`）
-- `images_dir_name/xmls_dir_name/backgrounds_dir_name`: 输出目录名配置
+- `recursive`: 是否递归扫描（默认 `true`）
+- `pairing_mode`: `same_directory` 或 `images_xmls_subfolders`
+- `images_dir_name/xmls_dir_name/backgrounds_dir_name`: 输入子目录名（`images_xmls_subfolders` 时）及输出目录名
+- `flatten`: 是否扁平化合并到单一输出树
+- `include_backgrounds`: 是否整理无标注图到 `backgrounds/`
 - `include_difficult`: 是否把 `difficult=1` 视为有效目标
 - `copy_files`: `true` 复制，`false` 移动
 - `overwrite`: 目标已存在时是否覆盖
@@ -276,7 +284,7 @@ docker run --rm -p 8000:8000 self-api:0.1.0
 - `POST /api/v1/preprocess/build-yolo-yaml`（及 `/async`）
 - `POST /api/v1/preprocess/yolo-train`（及 `/async`，conda 下执行 `yolo train`）
 
-根据数据集根目录与各划分下的 `images` 路径、`classes.txt` 生成 Ultralytics 风格 YAML。字段约定见 `docs/api_examples.md` 第 0 节与第 15 节。
+根据数据集根目录与各划分下的 `images` 路径、`classes.txt` 生成 Ultralytics 风格 YAML。可选 **`last_yaml`** 与当前扫描结果合并划分路径（旧路径在前）。**`classes.txt` 可为空或省略**：此时依赖 **`last_yaml`** 中的 **`names`**。远程 `last_yaml` 需 **`sftp_username`** + **`sftp_private_key_path`**。字段约定见 `docs/api_examples.md` 第 0 节与第 15 节。
 
 ## 5. 一期最小生产版
 

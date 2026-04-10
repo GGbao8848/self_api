@@ -15,9 +15,10 @@
 | `zip-folder` | `input_dir`、`output_zip_path`（兼容 `output_dir`）、`include_root_dir`、`overwrite` |
 | `unzip-archive` | `archive_path`（兼容 `input_dir`）、`output_dir`、`overwrite` |
 | `move-path` / `copy-path` | `source_path`（兼容 `input_dir`）、`target_dir`（兼容 `output_dir`）、`overwrite` |
-| `build-yolo-yaml` | `input_dir`（可传数据集**上级目录**，服务会依次尝试 `<input_dir>/dataset`、`input_dir` 自身、`<input_dir>/yolo_split`，并自动匹配 **train/images** 或 **images/train**）、`classes_file`（可选；默认同目录或 `yolo_split`/`dataset` 下 `classes.txt`）、`split_names`（可选）、`images_subdir_name`、`path_prefix_replace_from` / `path_prefix_replace_to`（成对）、`output_yaml_path` |
+| `build-yolo-yaml` | 同上；**`last_yaml`** 与当前扫描路径合并（旧路径在前、去重）。**`classes.txt` 有有效类别行时**：`nc`/`names` 以该文件为准。**`classes.txt` 为空或不存在时**：必须提供 **`last_yaml`**，且其中需含 **`names`**（及通常的 `nc`），类别表从该 YAML 读取；当前数据集各划分路径仍按扫描结果**追加**到对应 `train`/`val`/…。远程 `last_yaml` 需 **`sftp_username`**、**`sftp_private_key_path`** |
 | `yolo-train` | `yaml_path`（须含 `/dataset/` 段）、`project_root_dir`（子进程 `cwd`）、`yolo_train_env`（conda 环境名）、`model`、`epochs`、`imgsz`（后三项有默认值） |
 | `yolo-txt-augment` | `input_dir`（其下需有 `images/`、`labels/`）、`output_dir`（可选，默认 `<input_dir>/augment`）、七个增强开关（默认全开）；仅支持 YOLO TXT |
+| `reset-yolo-label-index` | `input_dir`（其下需有 `labels/`）、`labels_dir_name`（默认 `labels`）、`recursive`（默认 `true`）；**原地**将各 `.txt` 每行首列类别 id 改为 `0`（§17.1） |
 | `voc-bar-crop` | `images_dir`、`xmls_dir`、`output_dir`；可选 `recursive`（默认 `true`）；裁剪正方形边长为**源图高度**（§17） |
 | `restore-voc-crops-batch` | `original_images_dir`、`original_xmls_dir`、`edited_crops_images_dir`、`edited_crops_xmls_dir`、`output_dir`；可选 `recursive`、`skip_unparsed_names`（§18） |
 
@@ -319,6 +320,19 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/discover-leaf-dirs/asyn
 - `POST /api/v1/preprocess/clean-nested-dataset`
 - `POST /api/v1/preprocess/clean-nested-dataset/async`
 
+**`pairing_mode`**（默认 `same_directory`）：
+
+- **`same_directory`**：递归识别「叶子目录」（目录内**直接**含有图片或 XML 文件），在同一目录内按 stem 配对。
+- **`images_xmls_subfolders`**：识别同时含有子目录 `images_dir_name` 与 `xmls_dir_name` 的文件夹（VOC 常见布局：`样本/images/*.jpg` 与 `样本/xmls/*.xml`），在**该父目录**范围内配对；不要求图与 XML 在同一子文件夹内。
+
+有有效标注的写入 `images/` 与 `xmls/`；无标注或 XML 无效的图默认写入 `backgrounds/`（可通过 `include_backgrounds` 关闭，仅保留成对输出）。
+
+默认（`flatten: false`）在 `output_dir` 下**保留**相对 `input_dir` 的子目录结构。设为 `flatten: true` 时，所有处理单元的结果合并到 **`output_dir/images`**、**`output_dir/xmls`**（及可选的 **`output_dir/backgrounds`**），文件名会带上相对路径前缀（如 `子路径__样本目录__原文件名.jpg`），避免不同分支同名文件互相覆盖。
+
+响应中的 **`skipped_unlabeled_images`**（及每条 `details` 内的同名字段）表示：在 `include_backgrounds: false` 时未复制到 backgrounds 的无标注图数量。
+
+### 7.1 保留目录结构（默认）
+
 ```bash
 # 同步
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/clean-nested-dataset" \
@@ -326,10 +340,14 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/clean-nested-dataset" \
   -d '{
     "input_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/TEDS广州局正线_转向架漏油_负类标注_20260312-标注完成",
     "output_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/cleaned_dataset",
+    "recursive": true,
     "images_dir_name": "images",
     "xmls_dir_name": "xmls",
     "backgrounds_dir_name": "backgrounds",
     "include_difficult": false,
+    "pairing_mode": "same_directory",
+    "flatten": false,
+    "include_backgrounds": true,
     "copy_files": true,
     "overwrite": true
   }'
@@ -340,9 +358,55 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/clean-nested-dataset/as
   -d '{
     "input_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/TEDS广州局正线_转向架漏油_负类标注_20260312-标注完成",
     "output_dir": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/cleaned_dataset",
+    "recursive": true,
     "images_dir_name": "images",
     "xmls_dir_name": "xmls",
     "backgrounds_dir_name": "backgrounds",
+    "include_difficult": false,
+    "pairing_mode": "same_directory",
+    "flatten": false,
+    "include_backgrounds": true,
+    "copy_files": true,
+    "overwrite": true,
+    "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
+    "callback_timeout_seconds": 10
+  }'
+```
+
+### 7.2 扁平化输出，且仅整理 images / xmls（不输出 backgrounds）
+
+适用于希望直接得到单层 `images/`、`xmls/` 目录的场景。若数据为 **每样本目录下分 `images/` 与 `xmls/` 子文件夹**（如 `/media/qzq/16T/n8n_workspace/.../20260407_非转数据拟合/`），必须设置 **`pairing_mode`: `images_xmls_subfolders`**。
+
+```bash
+# 同步
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/clean-nested-dataset" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/n8n_workspace/nzxj_diaban_louyou/20260407_非转数据拟合",
+    "output_dir": "/media/qzq/16T/n8n_workspace/nzxj_diaban_louyou/20260407_非转数据拟合/cleaned_flat",
+    "recursive": true,
+    "pairing_mode": "images_xmls_subfolders",
+    "flatten": true,
+    "include_backgrounds": false,
+    "images_dir_name": "images",
+    "xmls_dir_name": "xmls",
+    "include_difficult": false,
+    "copy_files": true,
+    "overwrite": true
+  }'
+
+# 异步（参数与上相同，仅多 callback）
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/clean-nested-dataset/async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/n8n_workspace/nzxj_diaban_louyou/20260407_非转数据拟合",
+    "output_dir": "/media/qzq/16T/n8n_workspace/nzxj_diaban_louyou/20260407_非转数据拟合/cleaned_flat",
+    "recursive": true,
+    "pairing_mode": "images_xmls_subfolders",
+    "flatten": true,
+    "include_backgrounds": false,
+    "images_dir_name": "images",
+    "xmls_dir_name": "xmls",
     "include_difficult": false,
     "copy_files": true,
     "overwrite": true,
@@ -391,9 +455,9 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/aggregate-nested-datase
 推荐的处理链路是：
 
 1. `discover-leaf-dirs`：确认最底层叶子目录
-2. `clean-nested-dataset`：把原始图片/XML清洗为 `images/xmls/backgrounds`
-3. `xml-to-yolo`：在每个清洗后的碎片目录中生成 `labels`
-4. `aggregate-nested-dataset`：汇总为统一 `dataset`
+2. `clean-nested-dataset`：把原始图片/XML清洗为 `images` / `xmls`（及可选 `backgrounds`）；若使用 `flatten: true`，输出集中在同一 `output_dir` 下，后续 `xml-to-yolo` 的 `dataset_dir` 可直接填该目录
+3. `xml-to-yolo`：在含 `images/` 与 `xmls/` 的数据集根目录生成 `labels/`
+4. `aggregate-nested-dataset`：若存在多个碎片目录需再汇总，则指向包含多组 `images/labels/...` 的上级目录；若已在步骤 2 扁平化为单一目录并完成步骤 3，可按需跳过或仅汇总其它路径
 
 ## 9. 目录打包为 ZIP
 
@@ -659,7 +723,11 @@ python yolo_square_sliding_crop.py \
 - `POST /api/v1/preprocess/build-yolo-yaml`
 - `POST /api/v1/preprocess/build-yolo-yaml/async`
 
-在 `input_dir` 下自动匹配数据集根（见 §0），扫描 `train` / `val` / `test` 等划分；各划分下需存在 `images` 子目录且含至少一张图片。生成的 YAML 中 **`train` / `val` / `test` 的值为各划分 `images` 目录的绝对路径**（POSIX），例如 `train: /Users/.../dataset1/dataset/train/images`，不再使用单独的 `path:` 与相对子路径。`path_prefix_replace_from` / `path_prefix_replace_to` 若成对填写，则对**每一条**上述绝对路径做前缀替换（例如把本机 `original_dataset` 前缀换成 `project_root/detector` 下的目标根路径）。
+在 `input_dir` 下自动匹配数据集根（见 §0），扫描 `train` / `val` / `test` 等划分；各划分下需存在 `images` 子目录且含至少一张图片。生成的 YAML 中 **`train` / `val` / `test` 的值为各划分 `images` 目录的绝对路径**（POSIX），例如 `train: /Users/.../dataset1/dataset/train/images`，不再使用单独的 `path:` 与相对子路径。`path_prefix_replace_from` / `path_prefix_replace_to` 若成对填写，则对**当前扫描得到的**划分路径做前缀替换（`last_yaml` 里已有的路径**不会**再替换）。
+
+**`last_yaml`（可选）**：上一份数据 YAML。解析其中的划分路径，与本次从 `input_dir` 扫描得到的路径按划分**合并**（先 `last_yaml`、后本次扫描，路径去重）。**类别名 `nc`/`names`**：若 **`classes.txt` 存在且含至少一行有效类别**，则以该文件为准；若 **`classes.txt` 为空或不存在**，则**必须**提供 `last_yaml`，并从其中的 **`names`**（及行数决定 `nc`）读取，此时以 `last_yaml` 为类别基准，当前数据仅**追加**各划分下的 images 路径。
+
+远程 `last_yaml` 示例：`"last_yaml": "sftp://my.host/var/data.yaml"`，并设置 `"sftp_username": "me"`、`"sftp_private_key_path": "/home/me/.ssh/id_ed25519"`；可选 `"sftp_port": 22`。
 
 ```bash
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/build-yolo-yaml" \
@@ -673,7 +741,7 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/build-yolo-yaml" \
   }'
 ```
 
-`classes_file` 可省略，按 §0 在 `dataset` / `yolo_split` 等位置自动查找 `classes.txt`。`path_prefix_replace_*` 可省略；若填写则须成对出现，且每条划分路径须以 `path_prefix_replace_from` 为前缀。
+`classes_file` 可省略，按 §0 在 `dataset` / `yolo_split` 等位置自动查找 `classes.txt`。`path_prefix_replace_*` 可省略；若填写则须成对出现，且每条**扫描得到的**划分路径须以 `path_prefix_replace_from` 为前缀。
 
 ## 16. YOLO 训练（conda + `yolo train`）
 
@@ -803,6 +871,39 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-txt-augment" \
 - 若未显式传 `output_dir`，默认输出到 `<input_dir>/augment`
 
 异步示例在同步 body 上增加 `callback_url`、`callback_timeout_seconds` 即可（同 §2）。
+
+## 17.1 批量将 YOLO labels 类别索引置 0（`reset-yolo-label-index`）
+
+- `POST /api/v1/preprocess/reset-yolo-label-index`
+- `POST /api/v1/preprocess/reset-yolo-label-index/async`
+
+在 `<input_dir>/<labels_dir_name>/` 下递归（或仅一层）扫描 `*.txt`，按 YOLO 格式解析每行；将**首列类别 id** 统一改为 `0`，坐标列不变。**直接覆盖原文件**，请事先备份。
+
+返回字段包括：`labels_dir`、`total_label_files`、`modified_label_files`、`unchanged_label_files`、`changed_lines`、`skipped_invalid_lines`（格式异常行数）。
+
+```bash
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/reset-yolo-label-index" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/datasets/demo",
+    "labels_dir_name": "labels",
+    "recursive": true
+  }'
+```
+
+异步（`task_type` 为 `reset_yolo_label_index`；结果在 `GET /api/v1/preprocess/tasks/{task_id}` 的 `result` 中，亦可通过 `callback_url` 回调）：
+
+```bash
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/reset-yolo-label-index/async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/datasets/demo",
+    "labels_dir_name": "labels",
+    "recursive": true,
+    "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
+    "callback_timeout_seconds": 10
+  }'
+```
 
 ## 18. VOC 横向条带正方形裁剪（`voc-bar-crop`）
 
