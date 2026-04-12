@@ -1,0 +1,411 @@
+{
+  "name": "Chat with local LLMs using n8n and Ollama",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 聊天 OCR（单图 / 文件夹批量 + 审核）\n\n### A. 单图 / 附件\n- 发文字并可上传图片或 PDF；**Prompt = Auto**。\n\n### B. 文件夹批量（需审核）\n1. 发**一行绝对路径**（n8n 进程可读）：如 `/data/imgs` 或 `folder:/path`。\n2. 机器人回复 **待 OCR 审核**：**总数** + **文件名列表**（过长会截断显示）。\n3. 确认无误后回复 **`确认`**（或 `yes` / `ok` / `开始`）才进入 **Ollama 智能体**逐张 OCR；回复 **`取消`** 作废。\n4. 审核前若发其它内容，会提示先确认/取消/或发新路径覆盖。\n\n### 技术说明\n- 待处理文件列表存在 **`$getWorkflowStaticData('global')`**，按 **`sessionId`** 区分会话；成功执行路径在「确认」时已从静态数据删除。\n- **手动点 Test / 部分环境**下静态数据可能不落库，审核流异常时请用**已激活工作流**的 Hosted Chat 测。\n- Docker 须挂载目录；仅适合**自托管**。\n\n### Memory\n- 已接 **Simple Memory**（按 `sessionId` 保留最近对话轮次，默认窗口 **10**）。\n- 仅走 **AI Agent** 的轮次会写入记忆；纯文本审核/提示节点不会写入。\n- 内存存本机 n8n 进程内：**Queue Mode / 多主** 不共享；生产扩缩可换 Redis 等外部记忆节点。\n",
+        "height": 620,
+        "width": 580
+      },
+      "id": "04edbca4-2cc4-4ec7-aa00-e669650cd4a9",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        200,
+        40
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## Ollama\n- 凭证 Base URL 如 `http://127.0.0.1:11434`；与 n8n 不同机时填 Ollama 所在地址。\n",
+        "height": 160,
+        "width": 360,
+        "color": 6
+      },
+      "id": "937ff243-4f50-41ec-a884-5984d25802fb",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -240,
+        80
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst raw = String(item.json.chatInput ?? '').trim();\nconst sessionId = String(item.json.sessionId ?? 'default');\nconst staticData = $getWorkflowStaticData('global');\nconst key = `ocr_batch_${sessionId}`;\n\nlet pending = staticData[key];\nif (pending?.createdAt && Date.now() - pending.createdAt > 60 * 60 * 1000) {\n  delete staticData[key];\n  pending = null;\n}\n\nconst m = raw.match(/^folder:\\s*(.+)$/i);\nconst pathStr = m ? m[1].trim() : raw;\nconst unix = pathStr.startsWith('/');\nconst win = /^[A-Za-z]:[\\\\/]/.test(pathStr);\nconst oneLine = !pathStr.includes('\\n');\nconst explicit = Boolean(m);\nconst looksDir = explicit || (oneLine && (unix || win));\n\nfunction isConfirm(s) {\n  return /^(确认|确定|yes|ok|y|proceed|开始|继续)$/i.test(s);\n}\nfunction isCancel(s) {\n  return /^(取消|cancel|no|否)$/i.test(s);\n}\n\nif (pending?.filePaths?.length) {\n  if (isConfirm(raw)) {\n    const paths = pending.filePaths.slice();\n    const names = (pending.fileNames || []).slice();\n    delete staticData[key];\n    return [\n      {\n        json: {\n          mode: 'folder_execute',\n          filePaths: paths,\n          fileNames: names,\n          sessionId,\n          chatInput: '批量 OCR',\n        },\n      },\n    ];\n  }\n  if (isCancel(raw)) {\n    delete staticData[key];\n    const msg =\n      '已取消批量 OCR。如需重新开始，请再次发送文件夹路径。';\n    return [\n      {\n        json: {\n          mode: 'plain_reply',\n          output: msg,\n          text: msg,\n          sessionId,\n        },\n      },\n    ];\n  }\n  if (!(looksDir && (unix || win))) {\n    const n = pending.fileNames?.length ?? pending.filePaths.length;\n    const msg = `仍有待确认的批量任务（共 **${n}** 张图）。请回复 **确认** 开始 OCR，**取消** 作废，或发送新的文件夹路径覆盖当前待办。`;\n    return [\n      {\n        json: {\n          mode: 'plain_reply',\n          output: msg,\n          text: msg,\n          sessionId,\n        },\n      },\n    ];\n  }\n}\n\nif (looksDir && (unix || win)) {\n  return [\n    {\n      json: {\n        mode: 'folder_preview',\n        folderPath: pathStr,\n        sessionId,\n        chatInput: pathStr,\n      },\n    },\n  ];\n}\n\nconst fallback =\n  raw ||\n  '请识别图片中的文字。若图中有红色矩形框，只输出红色框内的文字。';\nreturn [\n  {\n    json: { mode: 'single', chatInput: fallback, sessionId },\n    binary: item.binary,\n  },\n];\n"
+      },
+      "id": "a1c2e3f4-1111-4222-8333-444455556666",
+      "name": "Route Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c-prev",
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "folder_preview",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e1e2e3e4-aaaa-bbbb-cccc-111122223333",
+      "name": "IF Folder Preview",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c-exec",
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "folder_execute",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f1f2f3f4-bbbb-cccc-dddd-222233334444",
+      "name": "IF Folder Execute",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c-plain",
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "plain_reply",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1a2a3a4-cccc-dddd-eeee-333344445555",
+      "name": "IF Plain Reply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\n\nconst input = $input.first().json;\nconst folderPath = input.folderPath;\nconst sessionId = String(input.sessionId ?? 'default');\nif (!folderPath) {\n  throw new Error('缺少 folderPath');\n}\nif (!fs.existsSync(folderPath)) {\n  throw new Error('目录不存在或 n8n 进程无法访问: ' + folderPath);\n}\nif (!fs.statSync(folderPath).isDirectory()) {\n  throw new Error('路径不是文件夹: ' + folderPath);\n}\n\nconst exts = new Set([\n  '.png',\n  '.jpg',\n  '.jpeg',\n  '.webp',\n  '.gif',\n  '.bmp',\n  '.tiff',\n  '.tif',\n]);\nconst names = fs\n  .readdirSync(folderPath, { withFileTypes: true })\n  .filter((d) => d.isFile())\n  .map((d) => d.name);\nconst files = names\n  .filter((n) => exts.has(path.extname(n).toLowerCase()))\n  .sort()\n  .map((n) => path.join(folderPath, n));\n\nif (!files.length) {\n  throw new Error('目录内没有支持的图片文件: ' + folderPath);\n}\n\nconst fileNames = files.map((f) => path.basename(f));\nconst staticData = $getWorkflowStaticData('global');\nconst key = `ocr_batch_${sessionId}`;\nstaticData[key] = {\n  filePaths: files,\n  fileNames,\n  folderPath,\n  createdAt: Date.now(),\n};\n\nconst maxShow = 40;\nconst shown = fileNames.slice(0, maxShow);\nconst more =\n  fileNames.length > maxShow\n    ? `\\n… 另有 **${fileNames.length - maxShow}** 个文件未展开显示（仍会参与 OCR）。`\n    : '';\n\nconst body =\n  `### 待 OCR 审核\\n\\n` +\n  `- **目录**：\\`${folderPath}\\`\\n` +\n  `- **图片总数**：**${fileNames.length}**\\n\\n` +\n  `**文件名**（前 ${Math.min(maxShow, fileNames.length)} 个）：\\n` +\n  shown.map((n) => `- ${n}`).join('\\n') +\n  more +\n  `\\n\\n---\\n` +\n  `请核对。确认无误后回复 **确认**（或 \\`yes\\` / \\`ok\\` / \\`开始\\`）开始 OCR；回复 **取消** 作废本次任务。\\n` +\n  `（约 **60 分钟**内有效，超时需重新发送路径。）`;\n\nreturn [\n  {\n    json: {\n      output: body,\n      text: body,\n      previewCount: fileNames.length,\n    },\n  },\n];\n"
+      },
+      "id": "c3d4e5f6-3333-4444-9555-666677778888",
+      "name": "Build Folder Preview",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\n\nconst input = $input.first().json;\nconst sessionId = String(input.sessionId ?? 'default');\nconst filePaths = input.filePaths;\nif (!Array.isArray(filePaths) || !filePaths.length) {\n  throw new Error('缺少 filePaths');\n}\n\nconst items = [];\nfor (const filePath of filePaths) {\n  if (!fs.existsSync(filePath)) {\n    throw new Error('文件不存在: ' + filePath);\n  }\n  const buf = fs.readFileSync(filePath);\n  const base = path.basename(filePath);\n  const ext = path.extname(base).toLowerCase();\n  const mime =\n    ext === '.png'\n      ? 'image/png'\n      : ext === '.jpg' || ext === '.jpeg'\n        ? 'image/jpeg'\n        : ext === '.webp'\n          ? 'image/webp'\n          : ext === '.gif'\n            ? 'image/gif'\n            : ext === '.bmp'\n              ? 'image/bmp'\n              : 'image/tiff';\n  const binary = await this.helpers.prepareBinaryData(buf, base, mime);\n  items.push({\n    json: {\n      chatInput:\n        '请识别本图文字。若图中有红色矩形框，只输出红色框内的文字。',\n      fileName: base,\n      filePath,\n      sessionId,\n    },\n    binary: { data: binary },\n  });\n}\nreturn items;\n"
+      },
+      "id": "b5b6b7b8-5555-6666-7777-888899990000",
+      "name": "Load Pending Images",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nreturn items.map((item) => {\n  const j = item.json;\n  const t = j.output ?? j.text ?? '';\n  return { json: { output: t, text: t } };\n});\n"
+      },
+      "id": "c7c8c9ca-7777-8888-9999-aaaabbbbcccc",
+      "name": "Shape Plain Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "auto",
+        "text": "",
+        "options": {
+          "systemMessage": "你是 OCR 识别专家，可以识别图像上的文字与简单版式。若用户要求关注特定颜色框（例如红色框），只输出该框内的文字，不要输出框外内容，也不要编造图中不存在的文字。若用户未提供图片，请简要说明需要上传含文字的截图，或提供本机（n8n 可访问）文件夹绝对路径以批量识别（需先在聊天中完成清单审核与确认）。",
+          "passthroughBinaryImages": true,
+          "enableStreaming": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1440,
+        560
+      ],
+      "id": "aa1fd0d1-6e3f-4a7e-aa46-df94b9045174",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": "glm-ocr:q8_0",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        1380,
+        760
+      ],
+      "id": "b255fde4-e9a4-457f-a6e8-0b82b1312403",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "CppEX4XbJSWj36kd",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.sessionId }}",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1320,
+        920
+      ],
+      "id": "mem-buf-aabb-ccdd-eeff-001122334455",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const all = $input.all();\nif (all.length === 1) {\n  return [all[0]];\n}\n\nfunction pickText(j) {\n  if (j == null) return '';\n  if (typeof j.output === 'string') return j.output;\n  if (typeof j.text === 'string') return j.text;\n  if (j.message && typeof j.message.content === 'string') return j.message.content;\n  return JSON.stringify(j);\n}\n\nconst parts = all.map((item, i) => {\n  const name = item.json.fileName ?? `图像_${i + 1}`;\n  return `### ${name}\\n${pickText(item.json)}`;\n});\n\nconst combined =\n  `共 ${all.length} 张图，OCR 结果如下：\\n\\n` + parts.join('\\n\\n---\\n\\n');\n\nreturn [{ json: { output: combined, text: combined, batchCount: all.length } }];\n"
+      },
+      "id": "d4e5f6a7-4444-5555-a666-777788889999",
+      "name": "Normalize OCR Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1720,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "public": true,
+        "mode": "hostedChat",
+        "options": {
+          "allowFileUploads": true,
+          "allowedFilesMimeTypes": "image/*,application/pdf",
+          "responseMode": "lastNode"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        240,
+        480
+      ],
+      "id": "05c2c8d8-6928-46c3-a02f-effd9151c35a",
+      "name": "When chat message received",
+      "webhookId": "a5ff90e3-52e3-4807-8a6a-dee6291d8f02"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Route Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Input": {
+      "main": [
+        [
+          {
+            "node": "IF Folder Preview",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Folder Preview": {
+      "main": [
+        [
+          {
+            "node": "Build Folder Preview",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Folder Execute",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Folder Execute": {
+      "main": [
+        [
+          {
+            "node": "Load Pending Images",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Plain Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Plain Reply": {
+      "main": [
+        [
+          {
+            "node": "Shape Plain Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Pending Images": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Normalize OCR Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "951e6cba-d418-4835-9434-eaa4646faad9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c4b7aa9096bc87944216bba48ef2687b8e22851666781e0193f26f348f4651ec"
+  },
+  "id": "zlMtxTLTv9ZNgDcn",
+  "tags": []
+}
