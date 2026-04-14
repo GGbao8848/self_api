@@ -6,10 +6,10 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -3472,
-        240
+        -3536,
+        -368
       ],
-      "id": "b0d05d78-e59b-47cc-aa89-d496fb03f3df",
+      "id": "cf798c10-559d-4a79-ac81-91232802ec71",
       "name": "When clicking ‘Execute workflow’"
     },
     {
@@ -46,14 +46,6 @@
             {
               "name": "write_classes_file",
               "value": "true"
-            },
-            {
-              "name": "callback_url",
-              "value": "http://127.0.0.1:9000/webhooks/preprocess-finished"
-            },
-            {
-              "name": "callback_timeout_seconds",
-              "value": "10"
             }
           ]
         },
@@ -62,10 +54,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -2800,
-        240
+        -2864,
+        -368
       ],
-      "id": "8bd99071-8f1b-4ceb-b2b8-79064e4f409d",
+      "id": "5028706a-3e3f-4cd5-b27a-1a4babbc16b3",
       "name": "xml-to-yolo",
       "retryOnFail": false
     },
@@ -76,37 +68,19 @@
             {
               "id": "f54590ca-7856-4eaf-85ec-58236b4abe3e",
               "name": "self_api",
-              "value": "=http://192.168.2.26:8666",
-              "type": "string"
-            },
-            {
-              "id": "ab2f8629-80d2-4888-a430-5746f0f23496",
-              "name": "original_dataset",
-              "value": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/1/正线故障第二批-划痕漏油破损异物/漏油/zxj/牵引电机/dibu_small",
-              "type": "string"
-            },
-            {
-              "id": "f5d76981-1d2b-4cfa-80bf-6aa5573f1cca",
-              "name": "temp_dataset",
-              "value": "/media/qzq/16T/TEDS/广州局__转向架__正线漏油/20260312/1/正线故障第二批-划痕漏油破损异物/漏油/zxj/牵引电机/dibu_small/dataset",
-              "type": "string"
-            },
-            {
-              "id": "3145aa9b-ac14-4328-8e57-924b85b46aba",
-              "name": "project_root_dir",
-              "value": "/mnt/usrhome/sk/ndata/TVDS_n8n",
-              "type": "string"
-            },
-            {
-              "id": "f7ac4c53-2a1b-4c6a-9a5b-1f2e3d4c5b6a",
-              "name": "sever",
-              "value": "172.31.1.9",
+              "value": "=http://192.168.2.35:8666",
               "type": "string"
             },
             {
               "id": "90e7b625-d57e-4aa5-97ac-82f5c2ffce11",
               "name": "sftp_username",
-              "value": "sk",
+              "value": "xlh",
+              "type": "string"
+            },
+            {
+              "id": "f7ac4c53-2a1b-4c6a-9a5b-1f2e3d4c5b6a",
+              "name": "sever",
+              "value": "172.31.1.42",
               "type": "string"
             },
             {
@@ -116,9 +90,27 @@
               "type": "string"
             },
             {
+              "id": "ab2f8629-80d2-4888-a430-5746f0f23496",
+              "name": "original_dataset",
+              "value": "/home/user/TVDS/TV数据集训练和推理/动集/A类/A_检修盖板丢失/data",
+              "type": "string"
+            },
+            {
+              "id": "f5d76981-1d2b-4cfa-80bf-6aa5573f1cca",
+              "name": "temp_dataset",
+              "value": "/home/user/TVDS/TV数据集训练和推理/动集/A类/A_检修盖板丢失/data/dataset",
+              "type": "string"
+            },
+            {
+              "id": "3145aa9b-ac14-4328-8e57-924b85b46aba",
+              "name": "project_root_dir",
+              "value": "/mnt/usrhome/xlh/ndata/TVDS_n8n",
+              "type": "string"
+            },
+            {
               "id": "a386ad76-63b9-411e-83db-7ca1c952bc16",
               "name": "detector_name",
-              "value": "qianyindianji_louyou",
+              "value": "jianxiugaiban_diushi",
               "type": "string"
             },
             {
@@ -136,13 +128,13 @@
             {
               "id": "d6e7f8a9-b0c1-4234-d567-89abcdef0123",
               "name": "yolo_train_epochs",
-              "value": "10",
+              "value": "150",
               "type": "string"
             },
             {
               "id": "e7f8a9b0-c1d2-4345-e678-9abcdef01234",
               "name": "yolo_train_imgsz",
-              "value": "1024",
+              "value": "800",
               "type": "string"
             }
           ]
@@ -153,63 +145,11 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -3248,
-        240
+        -3312,
+        -368
       ],
-      "id": "fd8a6898-4499-47da-8d2e-c406fee76708",
+      "id": "701e773a-ec36-4387-8205-eaa3a562a9f7",
       "name": "base_config"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/split-yolo-dataset",
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "dataset_dir",
-              "value": "={{ $('base_config').item.json.original_dataset }}"
-            },
-            {
-              "name": "output_dir",
-              "value": "={{ $('base_config').item.json.original_dataset }}/{{ $('base_config').first().json.detector_name  +'_'+new Date().toISOString().slice(0,19).replace(/[-T:]/g, '').replace(/^(\\d{4})(\\d{2})(\\d{2})(\\d{2})(\\d{2})(\\d{2})$/, '$1$2$3_$4$5$6') + \"_\" }}"
-            },
-            {
-              "name": "mode",
-              "value": "train_val"
-            },
-            {
-              "name": "train_ratio",
-              "value": "0.7"
-            },
-            {
-              "name": "val_ratio",
-              "value": "0.3"
-            },
-            {
-              "name": "shuffle",
-              "value": "true"
-            },
-            {
-              "name": "seed",
-              "value": "42"
-            },
-            {
-              "name": "copy_files",
-              "value": "true"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
-      "position": [
-        -2576,
-        240
-      ],
-      "id": "2415ec07-f8a4-4350-bb6e-2912b81e9f7d",
-      "name": "split-yolo-dataset"
     },
     {
       "parameters": {
@@ -245,10 +185,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -1904,
-        240
+        -1744,
+        -368
       ],
-      "id": "66887d9a-14f1-4504-888a-859e19e32297",
+      "id": "a69731ba-1a53-4e3b-8ae2-1b2d8f5df14e",
       "name": "build-yolo-yaml"
     },
     {
@@ -281,10 +221,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -1680,
-        240
+        -1520,
+        -368
       ],
-      "id": "2f5cbd6d-0651-426e-9215-ccf530728451",
+      "id": "b47e7759-d9fa-4de7-ab3f-32dcc0f613ac",
       "name": "zip-folder",
       "executeOnce": true
     },
@@ -322,10 +262,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -1456,
-        240
+        -1296,
+        -368
       ],
-      "id": "5c2d7e43-92f4-480a-83cb-23acc4cdf3c2",
+      "id": "260a553d-0a45-4bf9-8a61-4c26b22233b4",
       "name": "move-path"
     },
     {
@@ -352,10 +292,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -1232,
-        240
+        -1072,
+        -368
       ],
-      "id": "d962750e-9e78-4937-8ecb-9f5e005af3b3",
+      "id": "4b4f18f6-d065-44ba-ab53-61f5ad52faf6",
       "name": "组装远端压缩包路径"
     },
     {
@@ -392,10 +332,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -1008,
-        240
+        -848,
+        -368
       ],
-      "id": "0f400bc5-5e46-4ec1-8054-3f0b50ba1548",
+      "id": "0a0300c7-4c3b-42f0-9ed2-4f71d661c139",
       "name": "unzip-archive"
     },
     {
@@ -405,10 +345,10 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        -2128,
-        240
+        -1968,
+        -368
       ],
-      "id": "de387154-71d2-47ad-9a84-7d1c47452e27",
+      "id": "e2a1aeb6-d7fa-4bd8-9fc1-36fb950927ed",
       "name": "Merge"
     },
     {
@@ -418,10 +358,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        -336,
-        336
+        -176,
+        -272
       ],
-      "id": "284f627a-a081-409f-8fb4-fb2158a8c1ae",
+      "id": "c541ba27-ce69-471c-b0db-53ba79f2c887",
       "name": "Wait",
       "webhookId": "7838da9c-f79a-4ae7-8910-2250a871db40"
     },
@@ -503,115 +443,11 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.4,
       "position": [
-        -560,
-        144
+        -400,
+        -464
       ],
-      "id": "bf5a53e9-7483-401d-9bc1-4b01b9c69fb3",
+      "id": "a5e85969-3e72-4319-b273-8cde708d1e93",
       "name": "Switch"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://192.168.2.26:8666/api/v1/preprocess/yolo-txt-augment",
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "input_dir",
-              "value": "={{ $json.output_dir }}/train"
-            },
-            {
-              "name": "horizontal_flip",
-              "value": "true"
-            },
-            {
-              "name": "vertical_flip",
-              "value": "true"
-            },
-            {
-              "name": "brightness_up",
-              "value": "true"
-            },
-            {
-              "name": "brightness_down",
-              "value": "true"
-            },
-            {
-              "name": "contrast_up",
-              "value": "true"
-            },
-            {
-              "name": "contrast_down",
-              "value": "true"
-            },
-            {
-              "name": "gaussian_blur",
-              "value": "true"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
-      "position": [
-        -2352,
-        144
-      ],
-      "id": "e3e04cff-46f9-4528-bd69-903d0eed30fd",
-      "name": "train-crop"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://192.168.2.26:8666/api/v1/preprocess/yolo-txt-augment",
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "input_dir",
-              "value": "={{ $json.output_dir }}/val"
-            },
-            {
-              "name": "horizontal_flip",
-              "value": "true"
-            },
-            {
-              "name": "vertical_flip",
-              "value": "true"
-            },
-            {
-              "name": "brightness_up",
-              "value": "true"
-            },
-            {
-              "name": "brightness_down",
-              "value": "true"
-            },
-            {
-              "name": "contrast_up",
-              "value": "true"
-            },
-            {
-              "name": "contrast_down",
-              "value": "true"
-            },
-            {
-              "name": "gaussian_blur",
-              "value": "true"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
-      "position": [
-        -2352,
-        336
-      ],
-      "id": "d0691625-690d-494a-8793-b8fc8cd46e88",
-      "name": "val-crop"
     },
     {
       "parameters": {
@@ -621,16 +457,16 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -784,
-        240
+        -624,
+        -368
       ],
-      "id": "8718716c-e852-452a-a85e-2555a6b1b12e",
+      "id": "c31cb8ac-de22-40b0-a5f5-8c42105b2d3f",
       "name": "获取压缩包解压状态"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://192.168.2.26:8666/api/v1/preprocess/remote-slurm-yolo-train",
+        "url": "={{ $('base_config').first().json.self_api }}/api/v1/preprocess/remote-slurm-yolo-train",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -689,10 +525,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -336,
-        112
+        -176,
+        -496
       ],
-      "id": "2d8aca47-9dc3-44e6-aadc-beab4f8aa89d",
+      "id": "6e25801c-5d54-47d3-bdd8-7cb98f14ceb9",
       "name": "创建slurm任务"
     },
     {
@@ -703,12 +539,264 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -3024,
-        240
+        -3088,
+        -368
       ],
-      "id": "3ee5bc8b-422a-4ca2-b01e-8d5e7426148f",
+      "id": "c71c253e-04b7-4686-b632-c31d83e1d738",
       "name": "客户端是否开启",
       "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$('base_config').item.json.self_api}}/api/v1/preprocess/split-yolo-dataset",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "dataset_dir",
+              "value": "={{ $json.dataset_dir }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $('base_config').item.json.original_dataset }}/{{ $('base_config').first().json.detector_name  +'_'+new Date().toISOString().slice(0,19).replace(/[-T:]/g, '').replace(/^(\\d{4})(\\d{2})(\\d{2})(\\d{2})(\\d{2})(\\d{2})$/, '$1$2$3_$4$5$6') + \"_\" }}"
+            },
+            {
+              "name": "mode",
+              "value": "train_val"
+            },
+            {
+              "name": "train_ratio",
+              "value": "0.8"
+            },
+            {
+              "name": "val_ratio",
+              "value": "0.2"
+            },
+            {
+              "name": "shuffle",
+              "value": "true"
+            },
+            {
+              "name": "seed",
+              "value": "42"
+            },
+            {
+              "name": "copy_files",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2640,
+        -368
+      ],
+      "id": "2a1a04e3-6d89-4b70-9704-46556c7e63b1",
+      "name": "split-yolo-dataset"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$('base_config').item.json.self_api}}/api/v1/preprocess/yolo-txt-augment",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $json.output_dir }}"
+            },
+            {
+              "name": "horizontal_flip",
+              "value": "true"
+            },
+            {
+              "name": "vertical_flip",
+              "value": "true"
+            },
+            {
+              "name": "brightness_up",
+              "value": "true"
+            },
+            {
+              "name": "brightness_down",
+              "value": "true"
+            },
+            {
+              "name": "contrast_up",
+              "value": "true"
+            },
+            {
+              "name": "contrast_down",
+              "value": "true"
+            },
+            {
+              "name": "gaussian_blur",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2192,
+        -464
+      ],
+      "id": "187828f2-1cea-445a-9ab4-625b2741d5d6",
+      "name": "train-aug"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$('base_config').item.json.self_api}}/api/v1/preprocess/yolo-sliding-window-crop",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "images_dir",
+              "value": "={{ $('split-yolo-dataset').item.json.output_dir }}/train/images"
+            },
+            {
+              "name": "labels_dir",
+              "value": "={{ $('split-yolo-dataset').item.json.output_dir }}/train/labels"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $('split-yolo-dataset').item.json.output_dir }}/crop/train"
+            },
+            {
+              "name": "min_vis_ratio",
+              "value": "0.5"
+            },
+            {
+              "name": "stride_ratio",
+              "value": "0.2"
+            },
+            {
+              "name": "ignore_vis_ratio",
+              "value": "0.05"
+            },
+            {
+              "name": "only_wide",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2416,
+        -464
+      ],
+      "id": "a5747dfc-5cda-4688-80c0-822f5464a36b",
+      "name": "train-crop"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$('base_config').item.json.self_api}}/api/v1/preprocess/yolo-txt-augment",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $json.output_dir }}"
+            },
+            {
+              "name": "horizontal_flip",
+              "value": "true"
+            },
+            {
+              "name": "vertical_flip",
+              "value": "true"
+            },
+            {
+              "name": "brightness_up",
+              "value": "true"
+            },
+            {
+              "name": "brightness_down",
+              "value": "true"
+            },
+            {
+              "name": "contrast_up",
+              "value": "true"
+            },
+            {
+              "name": "contrast_down",
+              "value": "true"
+            },
+            {
+              "name": "gaussian_blur",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2192,
+        -272
+      ],
+      "id": "e05631fa-bf85-42c8-bd27-15ed4ed12f11",
+      "name": "val-aug"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').item.json.self_api}}/api/v1/preprocess/yolo-sliding-window-crop",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "images_dir",
+              "value": "={{$('split-yolo-dataset').item.json.output_dir}}/val/images"
+            },
+            {
+              "name": "labels_dir",
+              "value": "={{$('split-yolo-dataset').item.json.output_dir}}/val/labels"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{$('split-yolo-dataset').item.json.output_dir}}/crop/val"
+            },
+            {
+              "name": "min_vis_ratio",
+              "value": "0.5"
+            },
+            {
+              "name": "stride_ratio",
+              "value": "0.2"
+            },
+            {
+              "name": "ignore_vis_ratio",
+              "value": "0.05"
+            },
+            {
+              "name": "only_wide",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2416,
+        -272
+      ],
+      "id": "a683708f-a318-45f7-ae8c-bd83b9f44bb8",
+      "name": "val-crop"
     }
   ],
   "pinData": {},
@@ -740,22 +828,6 @@
         [
           {
             "node": "客户端是否开启",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "split-yolo-dataset": {
-      "main": [
-        [
-          {
-            "node": "train-crop",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "val-crop",
             "type": "main",
             "index": 0
           }
@@ -858,28 +930,6 @@
         ]
       ]
     },
-    "train-crop": {
-      "main": [
-        [
-          {
-            "node": "Merge",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "val-crop": {
-      "main": [
-        [
-          {
-            "node": "Merge",
-            "type": "main",
-            "index": 1
-          }
-        ]
-      ]
-    },
     "获取压缩包解压状态": {
       "main": [
         [
@@ -901,6 +951,66 @@
           }
         ]
       ]
+    },
+    "split-yolo-dataset": {
+      "main": [
+        [
+          {
+            "node": "train-crop",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "val-crop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "train-aug": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "train-crop": {
+      "main": [
+        [
+          {
+            "node": "train-aug",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "val-aug": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "val-crop": {
+      "main": [
+        [
+          {
+            "node": "val-aug",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
@@ -908,10 +1018,10 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "062cb154-119f-42cc-bd0d-32c5ce0cca15",
+  "versionId": "4c633316-8b6b-4d9e-8720-a818fc9f4655",
   "meta": {
     "instanceId": "1b3e6ee362a456055e06758c3fd4e960c3621b1a8e2c51a10220c369f5f16c17"
   },
-  "id": "RTmJiOWuQi4COFVP",
+  "id": "hlFsNHbdqSjbcH9K",
   "tags": []
 }
