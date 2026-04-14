@@ -1,0 +1,169 @@
+{
+  "name": "AI-底板漏油聊天分析(简化)",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "你是底板漏油数据分析助手。目标是减少工具调用，采用固定链路：先提取关键参数并展示给用户审批，再执行固定拷贝流程。\n\n【固定流程】\n1) 调用 tool-diban-louyou-empty-rows-by-path 获取空值行数据。\n2) 如用户要求拷贝，调用 tool-copy-folders-preserve-structure（只调用这一个执行工具）：\n   - 若 approvalText 未明确批准：工具只返回“拟执行计划”和统计，不落盘；\n   - 若 approvalText 包含“确认执行拷贝”或“批准执行拷贝”或“approve copy”：工具执行拷贝。\n\n【约束】\n- 缺少关键参数（xlsxPath、destinationRoot）必须先追问。\n- 不得臆造路径。\n- 输出给聊天窗口时，先给关键参数，再给审批状态，再给结果统计。\n- 待审批状态下，请明确提示用户点击人机交互按钮或回复“确认执行拷贝”。",
+          "maxIterations": 8,
+          "returnIntermediateSteps": false,
+          "enableStreaming": false
+        }
+      },
+      "id": "f0fa4bc3-40f0-4747-a5f4-42a0e7186fb3",
+      "name": "底板漏油分析智能体",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        608,
+        320
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "model": "qwen3.5:2b",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "f45a663d-1d5d-4abb-82d8-14f2608c2e41",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        480,
+        544
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "ollamaApi": {
+          "id": "jSx1SgjMDyvj4aMJ",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "public": true,
+        "initialMessages": "Hi there! 👋\n",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        256,
+        320
+      ],
+      "id": "056659bf-31cb-4c3b-bd08-a628a6a928e1",
+      "name": "When chat message received",
+      "webhookId": "d650617a-4bfe-47a4-95fe-70b410f26866"
+    },
+    {
+      "parameters": {
+        "toolDescription": "获取xlsx文件的绝对路径与相对应的sheet名称后，既可以调用此工具获取该表中“底板漏油”列的存在空值的行的所有数据",
+        "method": "POST",
+        "url": "http://192.168.2.26:5678/webhook/tool-diban-louyou-empty-rows-by-path",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "xlsxPath",
+              "value": "={{$fromAI('xlsxPath','xlsx 文件绝对路径，例如 /media/qzq/16T/xxx.xlsx','string')}}"
+            },
+            {
+              "name": "sheetName",
+              "value": "={{$fromAI('sheetName','sheet 名称，默认 数据表','string') || '数据表'}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        608,
+        624
+      ],
+      "id": "956e0795-17a6-414f-b081-917938eb173d",
+      "name": "tool-diban-louyou-empty-rows-by-path"
+    },
+    {
+      "parameters": {
+        "description": "固定拷贝链路（含审批门控）：输入空值行+目标目录，未审批仅返回计划，审批后执行拷贝",
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\nconst rowsJson = $fromAI('rowsJson','空值行 JSON（可传 emptyRows 数组，或包含 emptyRows 字段的对象）','string');\nconst destinationRoot = $fromAI('destinationRoot','目标根目录绝对路径','string');\nconst sourceRootsRaw = $fromAI('sourceRoots','可选：源根目录列表，逗号分隔，用于保持相对结构','string') || '';\nconst pathMappingsJson = $fromAI('pathMappingsJson','可选：盘符映射 JSON，例如 {\\\"Z:\\\":\\\"/home/zkzy/16T/common\\\"}','string') || '{}';\nconst approvalTextRaw = $fromAI('approvalText','用户审批文本（确认执行拷贝/批准执行拷贝/approve copy）','string') || '';\nfunction parseRows(raw){const p=JSON.parse(raw);if(Array.isArray(p))return p;if(p&&Array.isArray(p.emptyRows))return p.emptyRows;if(p&&Array.isArray(p.data?.emptyRows))return p.data.emptyRows;throw new Error('rowsJson 无法解析为空值行数组');}\nfunction parseMappings(raw){try{const o=JSON.parse(raw||'{}');return o&&typeof o==='object'?o:{};}catch{return {};}}\nfunction normalizePath(v,m){if(!v||typeof v!=='string')return '';let s=v.trim();if(!s)return '';s=s.replace(/\\\\/g,'/');const mm=s.match(/^([A-Za-z]:)(\\/.*)?$/);if(mm){const d=mm[1],r=mm[2]||'';if(m[d])return path.join(m[d],r).replace(/\\\\/g,'/');}return s;}\nfunction isDir(p){try{return fs.existsSync(p)&&fs.statSync(p).isDirectory();}catch{return false;}}\nfunction approved(text){const t=String(text||'').toLowerCase();return t.includes('确认执行拷贝')||t.includes('批准执行拷贝')||t.includes('approve copy');}\nconst rows=parseRows(rowsJson);\nconst mappings=parseMappings(pathMappingsJson);\nconst sourceRoots=sourceRootsRaw.split(',').map(s=>normalizePath(s,mappings)).filter(Boolean);\nif(!destinationRoot)throw new Error('缺少 destinationRoot');\nconst plan=[];\nfor(const row of rows){\n  const folderName=String(row['文件夹名称']||'').trim();\n  const filePathRaw=String(row['文件路径']||'').trim();\n  const filePath=normalizePath(filePathRaw,mappings);\n  const candidates=[];\n  if(filePath){\n    candidates.push(filePath);\n    if(folderName)candidates.push(path.join(filePath,folderName));\n  }\n  let src=candidates.find(isDir)||'';\n  if(!src&&folderName){\n    for(const root of sourceRoots){\n      const c=path.join(root,folderName);\n      if(isDir(c)){src=c;break;}\n    }\n  }\n  if(!src){\n    plan.push({ok:false,folderName,filePath:filePathRaw,reason:'未找到可用源目录'});\n    continue;\n  }\n  let dest=path.join(destinationRoot,path.basename(src));\n  for(const root of sourceRoots){\n    const rel=path.relative(root,src);\n    if(!rel.startsWith('..')&&!path.isAbsolute(rel)){dest=path.join(destinationRoot,rel);break;}\n  }\n  plan.push({ok:true,folderName,filePath:filePathRaw,sourceFolder:src,destinationFolder:dest});\n}\nif(!approved(approvalTextRaw)){\n  return [{json:{ok:true,executed:false,approvalRequired:true,approvalHint:'请点击人机交互按钮同意，或回复“确认执行拷贝”',total:rows.length,copyable:plan.filter(p=>p.ok).length,failed:plan.filter(p=>!p.ok).length,planPreview:plan.slice(0,20)}}];\n}\nfs.mkdirSync(destinationRoot,{recursive:true});\nconst results=[];\nfor(const item of plan){\n  if(!item.ok){results.push({ok:false,folderName:item.folderName||'',reason:item.reason||'计划项不可执行'});continue;}\n  try{\n    fs.mkdirSync(path.dirname(item.destinationFolder),{recursive:true});\n    fs.cpSync(item.sourceFolder,item.destinationFolder,{recursive:true,force:false,errorOnExist:false});\n    results.push({ok:true,folderName:item.folderName||'',sourceFolder:item.sourceFolder,destinationFolder:item.destinationFolder});\n  }catch(error){\n    results.push({ok:false,folderName:item.folderName||'',sourceFolder:item.sourceFolder,destinationFolder:item.destinationFolder,reason:error.message});\n  }\n}\nreturn [{json:{ok:true,executed:true,approvalRequired:false,total:rows.length,copied:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length,results}}];"
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.3,
+      "position": [
+        1024,
+        608
+      ],
+      "id": "e5d5d22e-690d-4b16-a472-8eb1e1110d9d",
+      "name": "tool-copy-folders-preserve-structure"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "底板漏油分析智能体",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "底板漏油分析智能体",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool-diban-louyou-empty-rows-by-path": {
+      "ai_tool": [
+        [
+          {
+            "node": "底板漏油分析智能体",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool-copy-folders-preserve-structure": {
+      "ai_tool": [
+        [
+          {
+            "node": "底板漏油分析智能体",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "1b26fa10-ab44-4a82-aa32-16b2afb0c73c",
+  "meta": {
+    "aiBuilderAssisted": true,
+    "instanceId": "1b3e6ee362a456055e06758c3fd4e960c3621b1a8e2c51a10220c369f5f16c17"
+  },
+  "id": "1Os8gmBWzQtpm7Kw",
+  "tags": []
+}
