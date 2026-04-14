@@ -1,0 +1,27 @@
+# 在项目根目录执行：docker compose up -d --build
+# 环境变量从根目录 .env 加载（与 app/core/config.py 中 SELF_API_ 前缀一致）。
+# 容器内请使用相对存储路径，例如 SELF_API_STORAGE_ROOT=./storage（对应下方数据卷）。
+# 映射宿主机端口可通过环境变量 SELF_API_PUBLISH_PORT（默认 8666，与 make run 一致），或在本文件修改 ports。
+
+name: self_api
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: self_api:latest
+    container_name: self_api
+    ports:
+      - "${SELF_API_PUBLISH_PORT:-8666}:8666"
+    env_file:
+      - .env
+    environment:
+      # 覆盖宿主机 .env 中的绝对路径，使数据落在命名卷挂载的 /app/storage
+      SELF_API_STORAGE_ROOT: ./storage
+    volumes:
+      - self_api_storage:/app/storage
+    restart: unless-stopped
+
+volumes:
+  self_api_storage:

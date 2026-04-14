@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "image-preprocess-api"
+name = "self_api"
 version = "0.1.0"
 description = "API service for image and dataset preprocessing"
 readme = "README.md"
