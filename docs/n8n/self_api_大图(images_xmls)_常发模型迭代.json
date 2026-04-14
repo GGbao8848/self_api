@@ -29,7 +29,7 @@
             },
             {
               "name": "xmls_dir_name",
-              "value": "xmls"
+              "value": "xml"
             },
             {
               "name": "labels_dir_name",
@@ -81,13 +81,13 @@
             {
               "id": "ab2f8629-80d2-4888-a430-5746f0f23496",
               "name": "original_dataset",
-              "value": "/media/qzq/16T/n8n_workspace/nzxj_diaban_louyou/20260407_非转数据拟合",
+              "value": "/media/qzq/16T/n8n_workspace/nzxj_diaban_louyou/20260413_非转数据拟合/",
               "type": "string"
             },
             {
               "id": "f5d76981-1d2b-4cfa-80bf-6aa5573f1cca",
               "name": "temp_dataset",
-              "value": "/media/qzq/16T/n8n_workspace/nzxj_diaban_louyou/20260407_非转数据拟合/dataset",
+              "value": "/media/qzq/16T/n8n_workspace/nzxj_diaban_louyou/20260413_非转数据拟合/dataset",
               "type": "string"
             },
             {
@@ -544,7 +544,7 @@
             },
             {
               "name": "xmls_dir_name",
-              "value": "xmls"
+              "value": "xml"
             },
             {
               "name": "include_difficult",
@@ -727,8 +727,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -336,
-        -16
+        -272,
+        -80
       ],
       "id": "7966c6d6-fb13-4d22-b0b1-ae7d1572a346",
       "name": "提交slurm任务"
@@ -926,7 +926,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "769a20f5-97a5-44d6-8ce4-15997a4a4be3",
+  "versionId": "4c875528-4dcb-43a5-b2f8-6feada38f2df",
   "meta": {
     "instanceId": "1b3e6ee362a456055e06758c3fd4e960c3621b1a8e2c51a10220c369f5f16c17"
   },
