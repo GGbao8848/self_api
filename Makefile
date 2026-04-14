@@ -6,7 +6,7 @@ PORT ?= 8666
 
 run:
 	@echo "Local: http://127.0.0.1:$(PORT)"
-	@LAN_IP=$$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || ifconfig | awk '/inet / && $$2 != "127.0.0.1" {print $$2; exit}'); \
+	@LAN_IP=$$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || ip -4 addr show scope global | awk '/inet / {sub(/\/.*/, "", $$2); print $$2; exit}'); \
 	if [ -n "$$LAN_IP" ]; then echo "LAN:   http://$$LAN_IP:$(PORT)"; fi
 	uvicorn $(APP) --host $(HOST) --port $(PORT) --reload --access-log
 
