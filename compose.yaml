@@ -12,6 +12,7 @@ services:
       dockerfile: Dockerfile
     image: self_api:latest
     container_name: self_api
+    user: "${UID}:${GID}"
     ports:
       - "${SELF_API_PUBLISH_PORT:-8666}:8666"
     env_file:
@@ -20,6 +21,9 @@ services:
       # 覆盖宿主机 .env 中的绝对路径，使数据落在命名卷挂载的 /app/storage
       SELF_API_STORAGE_ROOT: ./storage
     volumes:
+      # 目录挂载与 SELF_API_FILE_ACCESS_ROOTS 保持一致（在 .env 中修改即可）
+      - ${SELF_API_FILE_ACCESS_ROOTS}:${SELF_API_FILE_ACCESS_ROOTS}
+      - /home/qzq/.ssh:/home/qzq/.ssh
       - self_api_storage:/app/storage
     restart: unless-stopped
 

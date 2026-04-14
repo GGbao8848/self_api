@@ -111,6 +111,8 @@ make run
 
 以下命令均在**仓库根目录**执行。Compose 中服务名为 **`api`**，容器名为 **`self_api`**；默认将容器 **8666** 映射到宿主机 **8666**（与 `make run` 一致）。若要改宿主机映射端口，可在 `.env` 中设置 `SELF_API_PUBLISH_PORT=...` 后再启动。
 
+为避免容器写入挂载目录后出现 root 权限文件，请在 `.env` 中配置当前用户 `UID`/`GID`（例如 Linux 常见 `1000/1000`）。
+
 持久化：命名卷挂载到容器内 **`/app/storage`**；`compose.yaml` 中已通过 `SELF_API_STORAGE_ROOT=./storage` 与卷对齐。**不要**在容器场景下把 `SELF_API_STORAGE_ROOT` 设成仅宿主机存在的绝对路径（除非你自己配置了正确的 `volumes` 绑定）。
 
 #### Compose 启动命令
