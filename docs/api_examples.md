@@ -11,7 +11,7 @@
 | `xml-to-yolo` | `dataset_dir`（兼容别名 `input_dir`） |
 | `annotate-visualize` | `images_dir`、`output_dir`；**`labels_dir`（YOLO `.txt`）与 `xmls_dir`（Pascal VOC XML）二选一**，未使用的一方留空 `""`；可选 `recursive`、`extensions`、`include_difficult`（仅 XML）、`line_width`、`overwrite`；YOLO 类别名可选 `classes` 或 `classes_file`（二选一，**均可省略**；均不提供或 `classes_file` 为空字符串时，框上显示**类别 id 数字**） |
 | `split-yolo-dataset` | `dataset_dir`（兼容 `input_dir`）、`output_dir`（可选） |
-| `yolo-sliding-window-crop` | `images_dir`、`labels_dir`、`output_dir`、`min_vis_ratio`、`stride_ratio`、`ignore_vis_ratio`、`only_wide` |
+| `yolo-sliding-window-crop` | `images_dir`、`output_dir`；可选 `labels_dir`（有值时同步输出 YOLO `labels/`，留空时只输出 `images/`）；可选 `window_width`、`window_height`、`stride_x`、`stride_y`（传入即覆盖默认）；以及 `min_vis_ratio`、`stride_ratio`、`ignore_vis_ratio`、`only_wide` |
 | `zip-folder` | `input_dir`、`output_zip_path`（兼容 `output_dir`）、`include_root_dir`、`overwrite` |
 | `unzip-archive` | `archive_path`（兼容 `input_dir`）、`output_dir`、`overwrite` |
 | `move-path` / `copy-path` | `source_path`（兼容 `input_dir`）、`target_dir`（兼容 `output_dir`）、`overwrite` |
@@ -32,132 +32,6 @@
 
 ```bash
 curl "http://192.168.2.26:8666/api/v1/healthz"
-```
-
-## 2. 滑窗裁剪
-
-- `POST /api/v1/preprocess/sliding-window-crop`
-
-```bash
-curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/sliding-window-crop" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_dir": "./data/raw",
-    "output_dir": "./data/crops",
-    "window_width": 512,
-    "window_height": 512,
-    "stride_x": 256,
-    "stride_y": 256,
-    "include_partial_edges": false,
-    "recursive": true,
-    "keep_subdirs": true,
-    "output_format": "png"
-  }'
-```
-
-大数据量场景建议改用异步接口，避免调用方超时：
-
-- `POST /api/v1/preprocess/sliding-window-crop/async`
-
-```bash
-curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/sliding-window-crop/async" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_dir": "./data/raw",
-    "output_dir": "./data/crops",
-    "window_width": 2048,
-    "window_height": 2048,
-    "stride_x": 2048,
-    "stride_y": 2048,
-    "include_partial_edges": false,
-    "recursive": true,
-    "keep_subdirs": true,
-    "output_format": "png",
-    "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
-    "callback_timeout_seconds": 10
-  }'
-```
-
-响应示例（`202 Accepted`）：
-
-```json
-{
-  "status": "accepted",
-  "task_id": "7f8df8f52f5f4bcfa4b6a4f6b7a61d93",
-  "task_type": "sliding_window_crop",
-  "status_url": "http://127.0.0.1:8666/api/v1/preprocess/tasks/7f8df8f52f5f4bcfa4b6a4f6b7a61d93",
-  "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished"
-}
-```
-
-仅当任务完成时，才会向 `callback_url` 发送回调：
-
-- `succeeded` 或 `failed`
-
-如果 `POST` 返回 `405/501`，服务会自动回退尝试一次 `GET`。
-
-回调 body 示例（以下是 `state=succeeded`）：
-
-```json
-{
-  "task_id": "7f8df8f52f5f4bcfa4b6a4f6b7a61d93",
-  "task_type": "sliding_window_crop",
-  "state": "succeeded",
-  "created_at": "2026-02-23T12:00:00+00:00",
-  "updated_at": "2026-02-23T12:02:45+00:00",
-  "result": {
-    "status": "ok",
-    "input_images": 120,
-    "processed_images": 120,
-    "skipped_images": 0,
-    "generated_crops": 480,
-    "output_dir": "/abs/path/to/crops",
-    "details": []
-  },
-  "error": null
-}
-```
-
-轮询任务状态：
-
-- `GET /api/v1/preprocess/tasks/{task_id}`
-
-成功示例：
-
-```json
-{
-  "task_id": "7f8df8f52f5f4bcfa4b6a4f6b7a61d93",
-  "task_type": "sliding_window_crop",
-  "state": "succeeded",
-  "created_at": "2026-02-23T12:00:00+00:00",
-  "updated_at": "2026-02-23T12:02:45+00:00",
-  "result": {
-    "status": "ok",
-    "input_images": 120,
-    "processed_images": 120,
-    "skipped_images": 0,
-    "generated_crops": 480,
-    "output_dir": "/abs/path/to/crops",
-    "details": []
-  },
-  "error": null,
-  "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
-  "callback_state": "succeeded",
-  "callback_sent_at": "2026-02-23T12:02:45+00:00",
-  "callback_status_code": 200,
-  "callback_error": null,
-  "callback_events": [
-    {
-      "state": "succeeded",
-      "attempted_at": "2026-02-23T12:02:45+00:00",
-      "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
-      "status_code": 200,
-      "method": "POST",
-      "success": true,
-      "error": null
-    }
-  ]
-}
 ```
 
 ## 3. VOC XML 转 YOLO 标签
@@ -668,50 +542,70 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/remote-unzip/async" \
   }'
 ```
 
-## 14. YOLO 大图正方形滑窗裁剪为小图数据集
+## 14. YOLO 滑窗裁剪为小图数据集
 
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 - `POST /api/v1/preprocess/yolo-sliding-window-crop/async`
 
-正方形滑窗（边长=图片高度），仅水平滑动。适用于宽图（如整车图）的裁剪。
+默认行为保持兼容：窗口宽高默认都等于**图片高度**；`stride_x` 默认等于 `round(stride_ratio * 图片高度)`；`stride_y` 默认等于 `window_height`。如果手动传入 `window_width`、`window_height`、`stride_x`、`stride_y`，则按传入值覆盖对应默认。
+
+`labels_dir` 为可选：
+
+- 有 `labels_dir`：输出 `output_dir/images/` 和 `output_dir/labels/`，并保留现有 YOLO 标注裁剪/过滤逻辑
+- 无 `labels_dir`：只输出 `output_dir/images/`
 
 ```bash
-# 同步
+# 同步：带 labels，且手动覆盖窗口/步长
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-sliding-window-crop" \
   -H "Content-Type: application/json" \
   -d '{
     "images_dir": "/path/to/dataset/images",
     "labels_dir": "/path/to/dataset/labels",
     "output_dir": "/path/to/dataset/data_crops",
+    "window_width": 1024,
+    "window_height": 1024,
+    "stride_x": 512,
+    "stride_y": 512,
     "min_vis_ratio": 0.5,
     "stride_ratio": 0.2,
     "ignore_vis_ratio": 0.05,
     "only_wide": true
   }'
 
-# 异步
+# 异步：不传 labels_dir，仅输出 images
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-sliding-window-crop/async" \
   -H "Content-Type: application/json" \
   -d '{
     "images_dir": "/path/to/dataset/images",
-    "labels_dir": "/path/to/dataset/labels",
     "output_dir": "/path/to/dataset/data_crops",
-    "min_vis_ratio": 0.5,
+    "window_width": 2048,
+    "window_height": 2048,
+    "stride_x": 1024,
+    "stride_y": 1024,
     "stride_ratio": 0.2,
-    "ignore_vis_ratio": 0.05,
     "only_wide": true,
     "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",
     "callback_timeout_seconds": 10
   }'
 ```
 
-命令行等价示例：
+响应要点：
+
+- `labels_dir` 有值时，响应中的 `labels_dir` 为实际使用的标注目录；未传时返回 `null`
+- `generated_crops` 为输出图片数
+- `generated_labels` 为输出标注行数；未传 `labels_dir` 时固定为 `0`
+
+命令行等价示例（带 labels）：
 
 ```bash
 python yolo_square_sliding_crop.py \
   --images /path/to/dataset/images \
   --labels /path/to/dataset/labels \
   --out /path/to/dataset/data_crops \
+  --window_width 1024 \
+  --window_height 1024 \
+  --stride_x 512 \
+  --stride_y 512 \
   --min_vis_ratio 0.5 \
   --stride_ratio 0.2 \
   --ignore_vis_ratio 0.05 \

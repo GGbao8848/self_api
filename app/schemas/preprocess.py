@@ -5,61 +5,6 @@ from pydantic import AliasChoices, AnyHttpUrl, BaseModel, ConfigDict, Field, mod
 from app.schemas.artifacts import ArtifactSummary
 
 
-class SlidingWindowCropRequest(BaseModel):
-    input_dir: str = Field(description="Input directory containing images")
-    output_dir: str = Field(description="Output directory for cropped images")
-    window_width: int = Field(ge=1, description="Sliding window width")
-    window_height: int = Field(ge=1, description="Sliding window height")
-    stride_x: int = Field(ge=1, description="Horizontal stride")
-    stride_y: int = Field(ge=1, description="Vertical stride")
-    include_partial_edges: bool = Field(
-        default=False,
-        description="Include edge windows smaller than the configured window size",
-    )
-    recursive: bool = Field(default=True, description="Search files recursively")
-    keep_subdirs: bool = Field(
-        default=True,
-        description="Keep source folder structure under output directory",
-    )
-    extensions: list[str] | None = Field(
-        default=None,
-        description="Allowed image extensions, e.g. ['.jpg', '.png']",
-    )
-    output_format: Literal["keep", "png", "jpg", "jpeg", "webp"] = Field(
-        default="keep",
-        description="Output image format",
-    )
-
-
-class CropImageDetail(BaseModel):
-    source_image: str
-    crop_count: int = 0
-    skipped_reason: str | None = None
-
-
-class SlidingWindowCropResponse(BaseModel):
-    status: str = "ok"
-    input_images: int
-    processed_images: int
-    skipped_images: int
-    generated_crops: int
-    output_dir: str
-    details: list[CropImageDetail]
-
-
-class SlidingWindowCropAsyncRequest(SlidingWindowCropRequest):
-    callback_url: AnyHttpUrl | None = Field(
-        default=None,
-        description="Optional webhook URL that receives task result when finished",
-    )
-    callback_timeout_seconds: float = Field(
-        default=10.0,
-        ge=1.0,
-        le=120.0,
-        description="Callback HTTP timeout in seconds",
-    )
-
-
 class AsyncTaskSubmitResponse(BaseModel):
     status: str = "accepted"
     task_id: str
@@ -565,11 +510,32 @@ class YoloSlidingWindowCropRequest(BaseModel):
     images_dir: str = Field(
         description="Input images folder path",
     )
-    labels_dir: str = Field(
-        description="Input YOLO labels folder path (txt files)",
+    labels_dir: str | None = Field(
+        default=None,
+        description="Optional input YOLO labels folder path (txt files)",
     )
     output_dir: str = Field(
         description="Output dataset folder; will create images/ and labels/ subdirs",
+    )
+    window_width: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional crop window width; defaults to image height when omitted",
+    )
+    window_height: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional crop window height; defaults to image height when omitted",
+    )
+    stride_x: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional horizontal stride; defaults to round(stride_ratio * image height)",
+    )
+    stride_y: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional vertical stride; defaults to window height",
     )
     min_vis_ratio: float = Field(
         default=0.5,
@@ -929,7 +895,7 @@ class YoloSlidingWindowCropDetail(BaseModel):
 class YoloSlidingWindowCropResponse(BaseModel):
     status: str = "ok"
     images_dir: str
-    labels_dir: str
+    labels_dir: str | None
     output_dir: str
     input_images: int
     processed_images: int

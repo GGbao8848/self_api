@@ -38,9 +38,6 @@ from app.schemas.preprocess import (
     SplitYoloDatasetAsyncRequest,
     SplitYoloDatasetRequest,
     SplitYoloDatasetResponse,
-    SlidingWindowCropAsyncRequest,
-    SlidingWindowCropRequest,
-    SlidingWindowCropResponse,
     UnzipArchiveAsyncRequest,
     UnzipArchiveRequest,
     UnzipArchiveResponse,
@@ -83,7 +80,6 @@ from app.services.nested_dataset import (
     run_clean_nested_dataset,
     run_discover_leaf_dirs,
 )
-from app.services.sliding_window import run_sliding_window_crop
 from app.services.split_yolo_dataset import run_split_yolo_dataset
 from app.services.task_manager import get_task, submit_task
 from app.services.build_yolo_yaml import run_build_yolo_yaml
@@ -118,42 +114,6 @@ def _build_async_submit_response(
             "get_preprocess_task_status",
             task_id=task_id,
         ),
-        callback_url=callback_url,
-    )
-
-
-@router.post("/sliding-window-crop", response_model=SlidingWindowCropResponse)
-def sliding_window_crop(payload: SlidingWindowCropRequest) -> SlidingWindowCropResponse:
-    try:
-        return run_sliding_window_crop(payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.post(
-    "/sliding-window-crop/async",
-    response_model=AsyncTaskSubmitResponse,
-    status_code=202,
-)
-def sliding_window_crop_async(
-    payload: SlidingWindowCropAsyncRequest,
-    request: Request,
-) -> AsyncTaskSubmitResponse:
-    task_type = "sliding_window_crop"
-    callback_url = str(payload.callback_url) if payload.callback_url else None
-    sync_payload = SlidingWindowCropRequest(
-        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
-    )
-    task_id = submit_task(
-        task_type=task_type,
-        runner=lambda: run_sliding_window_crop(sync_payload).model_dump(),
-        callback_url=callback_url,
-        callback_timeout_seconds=payload.callback_timeout_seconds,
-    )
-    return _build_async_submit_response(
-        request,
-        task_id=task_id,
-        task_type=task_type,
         callback_url=callback_url,
     )
 

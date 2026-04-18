@@ -45,7 +45,6 @@ self_api/
 │   ├── services/
 │   │   ├── file_operations.py         # 压缩/解压/移动/复制服务
 │   │   ├── nested_dataset.py          # 多层目录发现/清洗/汇总服务
-│   │   ├── sliding_window.py          # 滑窗裁剪服务
 │   │   ├── split_yolo_dataset.py      # YOLO 数据集划分服务
 │   │   ├── xml_to_yolo.py             # VOC XML 转 YOLO 标签服务
 │   │   └── yolo_sliding_window.py     # YOLO 大图数据集滑窗裁剪服务
@@ -54,7 +53,6 @@ self_api/
 │   └── main.py                        # FastAPI 应用入口
 ├── tests/
 │   ├── test_healthz_api.py
-│   ├── test_sliding_window_crop_api.py
 │   ├── test_xml_to_yolo_api.py
 │   ├── test_split_yolo_dataset_api.py
 │   ├── test_zip_folder_api.py
@@ -177,20 +175,7 @@ make run
 
 - `GET /api/v1/healthz`
 
-### 4.2 滑窗裁剪
-
-- `POST /api/v1/preprocess/sliding-window-crop`
-
-关键参数：
-
-- `input_dir`: 输入目录
-- `output_dir`: 输出目录
-- `window_width/window_height`: 窗口宽高
-- `stride_x/stride_y`: 步长
-- `include_partial_edges`: 是否保留边缘不完整窗口
-- `output_format`: `keep/png/jpg/jpeg/webp`
-
-### 4.3 VOC XML 转 YOLO 标签
+### 4.2 VOC XML 转 YOLO 标签
 
 - `POST /api/v1/preprocess/xml-to-yolo`
 
@@ -204,7 +189,7 @@ make run
 - `include_difficult`: 是否包含 `difficult=1` 目标
 - `write_classes_file`: 是否在根目录写出 `classes.txt`
 
-### 4.4 多层目录叶子数据目录发现
+### 4.3 多层目录叶子数据目录发现
 
 - `POST /api/v1/preprocess/discover-leaf-dirs`
 
@@ -216,7 +201,7 @@ make run
 - `recursive`: 是否递归扫描
 - `extensions`: 识别为图像的扩展名列表
 
-### 4.5 多层目录数据清洗
+### 4.4 多层目录数据清洗
 
 - `POST /api/v1/preprocess/clean-nested-dataset`
 
@@ -243,7 +228,7 @@ make run
 - `copy_files`: `true` 复制，`false` 移动
 - `overwrite`: 目标已存在时是否覆盖
 
-### 4.6 多层目录数据集汇总
+### 4.5 多层目录数据集汇总
 
 - `POST /api/v1/preprocess/aggregate-nested-dataset`
 
@@ -265,7 +250,7 @@ make run
 - `require_non_empty_labels`: 是否跳过空标签文件
 - `overwrite`: 目标已存在时是否覆盖
 
-### 4.7 YOLO 数据集划分
+### 4.6 YOLO 数据集划分
 
 - `POST /api/v1/preprocess/split-yolo-dataset`
 
@@ -278,7 +263,7 @@ make run
 - `shuffle/seed`: 是否打乱及随机种子
 - `copy_files`: `true` 复制，`false` 移动
 
-### 4.8 目录打包为 ZIP
+### 4.7 目录打包为 ZIP
 
 - `POST /api/v1/preprocess/zip-folder`
 
@@ -289,7 +274,7 @@ make run
 - `include_root_dir`: 压缩包内是否保留根目录名
 - `overwrite`: 压缩包已存在时是否覆盖
 
-### 4.9 ZIP 解压
+### 4.8 ZIP 解压
 
 - `POST /api/v1/preprocess/unzip-archive`
 
@@ -299,7 +284,7 @@ make run
 - `output_dir`: 解压输出目录（可选）
 - `overwrite`: 目标文件已存在时是否覆盖
 
-### 4.10 文件或目录移动
+### 4.9 文件或目录移动
 
 - `POST /api/v1/preprocess/move-path`
 
@@ -309,7 +294,7 @@ make run
 - `target_dir`: 目标目录
 - `overwrite`: 目标同名已存在时是否覆盖
 
-### 4.11 文件或目录复制
+### 4.10 文件或目录复制
 
 - `POST /api/v1/preprocess/copy-path`
 
@@ -319,7 +304,7 @@ make run
 - `target_dir`: 目标目录
 - `overwrite`: 目标同名已存在时是否覆盖
 
-### 4.12 跨机器 SFTP 远程传输
+### 4.11 跨机器 SFTP 远程传输
 
 - `POST /api/v1/preprocess/remote-transfer`
 - `POST /api/v1/preprocess/remote-transfer/async`
@@ -335,23 +320,25 @@ make run
 - `port`: SSH 端口，默认 22
 - `overwrite`: 目标已存在时是否覆盖
 
-### 4.13 YOLO 大图正方形滑窗裁剪为小图数据集
+### 4.12 YOLO 滑窗裁剪为小图数据集
 
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 
-输入为 YOLO 图像目录和标签目录，输出为新的小图数据集（`images/` + `labels/`）。窗口为正方形（边长=图片高度），仅水平滑动，标签按窗口裁剪并重新归一化。
+输入为图像目录，`labels_dir` 可选。默认保持兼容：窗口宽高默认都等于图片高度；`stride_x` 默认等于 `round(stride_ratio * 图片高度)`；`stride_y` 默认等于 `window_height`。如果手动传入 `window_width/window_height/stride_x/stride_y`，则按传入值覆盖对应默认。
 
 关键参数：
 
 - `images_dir`: 输入图像目录
-- `labels_dir`: 输入 YOLO 标签目录（txt）
-- `output_dir`: 输出目录（会创建 `images/` 和 `labels/` 子目录）
+- `labels_dir`: 可选输入 YOLO 标签目录（txt）；有值时输出 `images/` + `labels/`，留空时只输出 `images/`
+- `output_dir`: 输出目录（会创建 `images/`，有标注时额外创建 `labels/`）
+- `window_width/window_height`: 可选窗口宽高；不传则使用默认
+- `stride_x/stride_y`: 可选步长；不传则使用默认
 - `min_vis_ratio`: 目标在窗口内可见比例阈值，默认 0.5
 - `stride_ratio`: 步长占图片高度的比例，默认 0.3
 - `ignore_vis_ratio`: 可见比例低于此值视为可忽略，默认 0.05
 - `only_wide`: 仅处理宽图（W>H），默认 true
 
-### 4.14 生成 YOLO `data.yaml`
+### 4.13 生成 YOLO `data.yaml`
 
 - `POST /api/v1/preprocess/build-yolo-yaml`（及 `/async`）
 - `POST /api/v1/preprocess/yolo-train`（及 `/async`，conda 下执行 `yolo train`）
