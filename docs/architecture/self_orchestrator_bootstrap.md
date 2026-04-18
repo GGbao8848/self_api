@@ -287,7 +287,7 @@ source .venv/bin/activate
 curl -X POST "http://127.0.0.1:8777/api/v1/workflows/xml-to-yolo" \
   -H "Content-Type: application/json" \
   -d '{
-    "dataset_dir": "/shared/project_a/raw_dataset"
+    "input_dir": "/shared/project_a/raw_dataset"
   }'
 ```
 

@@ -4,17 +4,8 @@ from app.schemas.preprocess import (
     MovePathRequest,
     SplitYoloDatasetRequest,
     UnzipArchiveRequest,
-    XmlToYoloRequest,
     ZipFolderRequest,
 )
-
-
-def test_xml_to_yolo_accepts_input_dir_alias() -> None:
-    m = XmlToYoloRequest.model_validate(
-        {"input_dir": "/data/voc", "recursive": False},
-    )
-    assert m.dataset_dir == "/data/voc"
-    assert m.recursive is False
 
 
 def test_split_yolo_accepts_input_dir_alias() -> None:

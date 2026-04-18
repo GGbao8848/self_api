@@ -107,16 +107,16 @@ def _load_xml_annotation(
 
 
 def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
-    dataset_dir = resolve_safe_path(
-        request.dataset_dir,
-        field_name="dataset_dir",
+    input_dir = resolve_safe_path(
+        request.input_dir,
+        field_name="input_dir",
         must_exist=True,
         expect_directory=True,
     )
 
-    images_dir = dataset_dir / request.images_dir_name
-    xmls_dir = dataset_dir / request.xmls_dir_name
-    labels_dir = dataset_dir / request.labels_dir_name
+    images_dir = input_dir / request.images_dir_name
+    xmls_dir = input_dir / request.xmls_dir_name
+    labels_dir = input_dir / request.labels_dir_name
 
     if not images_dir.exists() or not images_dir.is_dir():
         raise ValueError(f"images_dir does not exist or is not a directory: {images_dir}")
@@ -242,13 +242,13 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
 
     classes_file_output = None
     if request.write_classes_file:
-        classes_path = dataset_dir / request.classes_file_name
+        classes_path = input_dir / request.classes_file_name
         classes_path.parent.mkdir(parents=True, exist_ok=True)
         classes_path.write_text("\n".join(ordered_classes), encoding="utf-8")
         classes_file_output = str(classes_path)
 
     return XmlToYoloResponse(
-        dataset_dir=str(dataset_dir),
+        input_dir=str(input_dir),
         labels_dir=str(labels_dir),
         total_xml_files=len(xml_paths),
         converted_files=converted_files,

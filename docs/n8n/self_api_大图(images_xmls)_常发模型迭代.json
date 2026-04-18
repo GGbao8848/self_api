@@ -20,7 +20,7 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "dataset_dir",
+              "name": "input_dir",
               "value": "={{ $json.output_dir }}"
             },
             {
@@ -172,7 +172,7 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "dataset_dir",
+              "name": "input_dir",
               "value": "={{ $json.output_dir }}"
             },
             {
@@ -580,7 +580,7 @@
           "parameters": [
             {
               "name": "input_dir",
-              "value": "={{ $json.dataset_dir }}"
+              "value": "={{ $json.input_dir }}"
             },
             {
               "name": "labels_dir_name",

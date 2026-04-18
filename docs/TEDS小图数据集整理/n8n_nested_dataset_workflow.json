@@ -34,7 +34,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst convertedFragments = items.map((item) => ({\n  dataset_dir: item.json.dataset_dir,\n  converted_files: item.json.converted_files,\n  total_boxes: item.json.total_boxes,\n  classes: item.json.classes,\n}));\n\nreturn [{\n  json: {\n    converted_fragment_count: convertedFragments.length,\n    converted_fragments: convertedFragments,\n    clean_output_dir: $node[\"Set Config\"].json.clean_output_dir,\n    aggregated_output_dir: $node[\"Set Config\"].json.aggregated_output_dir,\n    images_dir_name: $node[\"Set Config\"].json.images_dir_name,\n    labels_dir_name: $node[\"Set Config\"].json.labels_dir_name,\n    backgrounds_dir_name: $node[\"Set Config\"].json.backgrounds_dir_name,\n  },\n}];"
+        "jsCode": "const items = $input.all();\nconst convertedFragments = items.map((item) => ({\n  input_dir: item.json.input_dir,\n  converted_files: item.json.converted_files,\n  total_boxes: item.json.total_boxes,\n  classes: item.json.classes,\n}));\n\nreturn [{\n  json: {\n    converted_fragment_count: convertedFragments.length,\n    converted_fragments: convertedFragments,\n    clean_output_dir: $node[\"Set Config\"].json.clean_output_dir,\n    aggregated_output_dir: $node[\"Set Config\"].json.aggregated_output_dir,\n    images_dir_name: $node[\"Set Config\"].json.images_dir_name,\n    labels_dir_name: $node[\"Set Config\"].json.labels_dir_name,\n    backgrounds_dir_name: $node[\"Set Config\"].json.backgrounds_dir_name,\n  },\n}];"
       },
       "id": "631ef0d9-f4dd-4ce8-b5ad-80d07c219a35",
       "name": "Summarize Fragment Conversion",
@@ -51,7 +51,7 @@
         "url": "={{$json.api_base_url + \"/preprocess/xml-to-yolo\"}}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ {\n  dataset_dir: $json.dataset_dir,\n  images_dir_name: $json.images_dir_name,\n  xmls_dir_name: $json.xmls_dir_name,\n  labels_dir_name: $json.labels_dir_name,\n  recursive: true,\n  include_difficult: $json.include_difficult,\n  write_classes_file: true,\n  overwrite: $json.overwrite\n} }}",
+        "jsonBody": "={{ {\n  input_dir: $json.input_dir,\n  images_dir_name: $json.images_dir_name,\n  xmls_dir_name: $json.xmls_dir_name,\n  labels_dir_name: $json.labels_dir_name,\n  recursive: true,\n  include_difficult: $json.include_difficult,\n  write_classes_file: true,\n  overwrite: $json.overwrite\n} }}",
         "options": {}
       },
       "id": "6ebd089a-1841-49d3-9f25-d8a6373ef6a7",
@@ -65,7 +65,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const cleanResp = $input.first().json;\nconst config = $node[\"Set Config\"].json;\nconst details = Array.isArray(cleanResp.details) ? cleanResp.details : [];\n\nif (details.length === 0) {\n  throw new Error('clean-nested-dataset 未返回任何可转换目录');\n}\n\nreturn details\n  .filter((detail) => detail.labeled_images > 0)\n  .map((detail) => ({\n    json: {\n      api_base_url: config.api_base_url,\n      dataset_dir: detail.output_dir,\n      source_dir: detail.source_dir,\n      labeled_images: detail.labeled_images,\n      clean_output_dir: config.clean_output_dir,\n      aggregated_output_dir: config.aggregated_output_dir,\n      images_dir_name: config.images_dir_name,\n      xmls_dir_name: config.xmls_dir_name,\n      labels_dir_name: config.labels_dir_name,\n      include_difficult: config.include_difficult,\n      overwrite: config.overwrite,\n    },\n  }));"
+        "jsCode": "const cleanResp = $input.first().json;\nconst config = $node[\"Set Config\"].json;\nconst details = Array.isArray(cleanResp.details) ? cleanResp.details : [];\n\nif (details.length === 0) {\n  throw new Error('clean-nested-dataset 未返回任何可转换目录');\n}\n\nreturn details\n  .filter((detail) => detail.labeled_images > 0)\n  .map((detail) => ({\n    json: {\n      api_base_url: config.api_base_url,\n      input_dir: detail.output_dir,\n      source_dir: detail.source_dir,\n      labeled_images: detail.labeled_images,\n      clean_output_dir: config.clean_output_dir,\n      aggregated_output_dir: config.aggregated_output_dir,\n      images_dir_name: config.images_dir_name,\n      xmls_dir_name: config.xmls_dir_name,\n      labels_dir_name: config.labels_dir_name,\n      include_difficult: config.include_difficult,\n      overwrite: config.overwrite,\n    },\n  }));"
       },
       "id": "a52ed736-860a-4b7f-ade4-4a840b8e35a6",
       "name": "Build XML To YOLO Inputs",

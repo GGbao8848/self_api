@@ -99,6 +99,16 @@ def _resolve_class_names(request: AnnotateVisualizeRequest) -> list[str] | None:
     return None
 
 
+def _resolve_annotation_dirs(input_dir: Path) -> tuple[str, Path]:
+    labels_dir = input_dir / "labels"
+    xmls_dir = input_dir / "xmls"
+    if labels_dir.is_dir():
+        return "yolo", labels_dir
+    if xmls_dir.is_dir():
+        return "xml", xmls_dir
+    raise ValueError(f"labels or xmls directory not found under input_dir: {input_dir}")
+
+
 def _draw_labeled_boxes(
     image: Image.Image,
     boxes: list[tuple[str, tuple[int, int, int, int]]],
@@ -154,12 +164,15 @@ def _boxes_from_xml(
 
 
 def run_annotate_visualize(request: AnnotateVisualizeRequest) -> AnnotateVisualizeResponse:
-    images_dir = resolve_safe_path(
-        request.images_dir,
-        field_name="images_dir",
+    input_dir = resolve_safe_path(
+        request.input_dir,
+        field_name="input_dir",
         must_exist=True,
         expect_directory=True,
     )
+    images_dir = input_dir / "images"
+    if not images_dir.is_dir():
+        raise ValueError(f"images directory not found under input_dir: {images_dir}")
     output_dir = resolve_safe_path(
         request.output_dir,
         field_name="output_dir",
@@ -169,28 +182,11 @@ def run_annotate_visualize(request: AnnotateVisualizeRequest) -> AnnotateVisuali
     output_dir.mkdir(parents=True, exist_ok=True)
 
     yolo_names = _resolve_class_names(request)
-
-    use_yolo = bool((request.labels_dir or "").strip())
-    if use_yolo:
-        labels_dir = resolve_safe_path(
-            request.labels_dir or "",
-            field_name="labels_dir",
-            must_exist=True,
-            expect_directory=True,
-        )
-        mode = "yolo"
-        annotation_dir = str(labels_dir)
-        xmls_dir: Path | None = None
-    else:
-        xmls_dir = resolve_safe_path(
-            request.xmls_dir or "",
-            field_name="xmls_dir",
-            must_exist=True,
-            expect_directory=True,
-        )
-        mode = "xml"
-        annotation_dir = str(xmls_dir)
-        labels_dir = None
+    mode, ann_root = _resolve_annotation_dirs(input_dir)
+    use_yolo = mode == "yolo"
+    annotation_dir = str(ann_root)
+    labels_dir = ann_root if use_yolo else None
+    xmls_dir = ann_root if not use_yolo else None
 
     normalized_exts = normalize_extensions(request.extensions)
     image_paths = list_image_paths(
@@ -301,7 +297,7 @@ def run_annotate_visualize(request: AnnotateVisualizeRequest) -> AnnotateVisuali
 
     return AnnotateVisualizeResponse(
         mode=mode,
-        images_dir=str(images_dir),
+        input_dir=str(input_dir),
         annotation_dir=annotation_dir,
         output_dir=str(output_dir),
         total_images=len(image_paths),

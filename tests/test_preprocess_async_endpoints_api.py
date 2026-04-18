@@ -60,7 +60,7 @@ def test_xml_to_yolo_async_endpoint(client: TestClient, case_dir: Path) -> None:
 
     submit_resp = client.post(
         "/api/v1/preprocess/xml-to-yolo/async",
-        json={"dataset_dir": str(dataset_dir)},
+        json={"input_dir": str(dataset_dir)},
     )
     assert submit_resp.status_code == 202
     submit_data = submit_resp.json()

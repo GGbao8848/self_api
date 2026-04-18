@@ -173,7 +173,19 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
     )
     image_exts = normalize_extensions(request.extensions)
     skip_dirs = [output_dir] if _is_within(output_dir, input_dir) else []
-    if request.pairing_mode == "same_directory":
+    pairing_mode = request.pairing_mode
+    if pairing_mode == "auto":
+        split_roots = _discover_images_xmls_pair_roots(
+            input_dir,
+            recursive=request.recursive,
+            images_dir_name=request.images_dir_name,
+            xmls_dir_name=request.xmls_dir_name,
+            image_exts=image_exts,
+            skip_dirs=skip_dirs,
+        )
+        pairing_mode = "images_xmls_subfolders" if split_roots else "same_directory"
+
+    if pairing_mode == "same_directory":
         leaf_dirs = _discover_leaf_dirs(
             input_dir,
             recursive=request.recursive,
@@ -204,7 +216,7 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
         ensure_current_task_active()
         rel_dir = unit_dir.relative_to(input_dir)
         leaf_output_dir = output_dir if request.flatten else output_dir / rel_dir
-        if request.pairing_mode == "same_directory":
+        if pairing_mode == "same_directory":
             images_src = unit_dir
             xmls_src = unit_dir
             images, xml_paths = _iter_direct_annotation_files(images_src, image_exts)

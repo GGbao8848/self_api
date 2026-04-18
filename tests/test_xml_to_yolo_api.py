@@ -28,7 +28,7 @@ def test_xml_to_yolo_endpoint(client: TestClient, case_dir: Path) -> None:
 
     response = client.post(
         "/api/v1/preprocess/xml-to-yolo",
-        json={"dataset_dir": str(dataset_dir)},
+        json={"input_dir": str(dataset_dir)},
     )
     data = response.json()
 

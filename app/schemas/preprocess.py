@@ -43,18 +43,10 @@ class AsyncTaskStatusResponse(BaseModel):
 
 
 class AnnotateVisualizeRequest(BaseModel):
-    """在图像上绘制标注框：YOLO txt 与 Pascal VOC XML 二选一（另一目录字段留空）。"""
+    """在 input_dir/images 上绘制标注框，默认优先使用 input_dir/labels。"""
 
-    images_dir: str = Field(description="图像目录")
-    labels_dir: str | None = Field(
-        default=None,
-        description="YOLO 格式 .txt 标注目录（与 xmls_dir 二选一，另一项留空）",
-    )
-    xmls_dir: str | None = Field(
-        default=None,
-        description="Pascal VOC XML 标注目录（与 labels_dir 二选一，另一项留空）",
-    )
-    output_dir: str = Field(description="可视化结果输出目录（保持与 images_dir 相同的相对路径结构）")
+    input_dir: str = Field(description="数据集根目录，要求包含 images/，并存在 labels/ 或 xmls/")
+    output_dir: str = Field(description="可视化结果输出目录（保持与 input_dir/images 相同的相对路径结构）")
     recursive: bool = Field(default=True, description="是否递归扫描图像")
     extensions: list[str] | None = Field(
         default=None,
@@ -82,21 +74,13 @@ class AnnotateVisualizeRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _labels_or_xmls_exclusive(self) -> "AnnotateVisualizeRequest":
-        labels = (self.labels_dir or "").strip()
-        xmls = (self.xmls_dir or "").strip()
-        if labels and xmls:
-            raise ValueError("labels_dir 与 xmls_dir 只能填其一，另一项留空")
-        if not labels and not xmls:
-            raise ValueError("labels_dir 与 xmls_dir 必须填其一，另一项留空")
+    def _normalize_optional_fields(self) -> "AnnotateVisualizeRequest":
         classes_inline = self.classes
         classes_path = (self.classes_file or "").strip()
         if classes_inline and classes_path:
             raise ValueError("classes 与 classes_file 只能填其一")
         return self.model_copy(
             update={
-                "labels_dir": labels or None,
-                "xmls_dir": xmls or None,
                 "classes_file": classes_path or None,
             }
         )
@@ -112,7 +96,7 @@ class AnnotateVisualizeDetail(BaseModel):
 class AnnotateVisualizeResponse(BaseModel):
     status: str = "ok"
     mode: Literal["yolo", "xml"]
-    images_dir: str
+    input_dir: str
     annotation_dir: str
     output_dir: str
     total_images: int
@@ -135,11 +119,8 @@ class AnnotateVisualizeAsyncRequest(AnnotateVisualizeRequest):
 
 
 class XmlToYoloRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    dataset_dir: str = Field(
+    input_dir: str = Field(
         description="Dataset root directory containing images and xmls folders",
-        validation_alias=AliasChoices("dataset_dir", "input_dir"),
     )
     images_dir_name: str = Field(default="images", description="Image folder name")
     xmls_dir_name: str = Field(default="xmls", description="Pascal VOC XML folder name")
@@ -176,7 +157,7 @@ class XmlToYoloFileDetail(BaseModel):
 
 class XmlToYoloResponse(BaseModel):
     status: str = "ok"
-    dataset_dir: str
+    input_dir: str
     labels_dir: str
     total_xml_files: int
     converted_files: int
@@ -618,9 +599,10 @@ class CleanNestedDatasetRequest(BaseModel):
             "are written (plus orphan-xml handling when not copy_files)"
         ),
     )
-    pairing_mode: Literal["same_directory", "images_xmls_subfolders"] = Field(
-        default="same_directory",
+    pairing_mode: Literal["auto", "same_directory", "images_xmls_subfolders"] = Field(
+        default="auto",
         description=(
+            "auto: detect the layout automatically. "
             "same_directory: each leaf folder contains image and xml files as direct siblings. "
             "images_xmls_subfolders: each unit folder contains subfolders named images_dir_name "
             "and xmls_dir_name with files inside (VOC-style layout)"
@@ -1094,7 +1076,6 @@ class ResetYoloLabelIndexRequest(BaseModel):
     input_dir: str = Field(
         description="输入数据集根目录，目录下需包含 labels/ 子目录",
     )
-    labels_dir_name: str = Field(default="labels", description="标签目录名称")
     recursive: bool = Field(default=True, description="是否递归扫描 labels 目录")
 
 

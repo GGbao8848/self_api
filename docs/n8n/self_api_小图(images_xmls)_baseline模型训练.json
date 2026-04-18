@@ -20,7 +20,7 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "dataset_dir",
+              "name": "input_dir",
               "value": "={{ $('base_config').item.json.original_dataset }}"
             },
             {
@@ -554,8 +554,8 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "dataset_dir",
-              "value": "={{ $json.dataset_dir }}"
+              "name": "input_dir",
+              "value": "={{ $json.input_dir }}"
             },
             {
               "name": "output_dir",

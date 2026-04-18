@@ -175,175 +175,90 @@ make run
 
 - `GET /api/v1/healthz`
 
-### 4.2 VOC XML 转 YOLO 标签
+### 4.2 常用 SOP（按最常用 workflow）
 
-- `POST /api/v1/preprocess/xml-to-yolo`
+文档与接口说明以下面两条常用工作流为主线：
 
-要求输入目录下有 `images/` 与 `xmls/`，服务会把 YOLO 标签写到 `labels/`（目录名可配置）。
-
-关键参数：
-
-- `dataset_dir`: 数据集根目录（含 `images` 和 `xmls`）
-- `images_dir_name/xmls_dir_name/labels_dir_name`: 目录名配置
-- `classes`: 可选，固定类别顺序；不传则自动从 XML 推断
-- `include_difficult`: 是否包含 `difficult=1` 目标
-- `write_classes_file`: 是否在根目录写出 `classes.txt`
+- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-txt-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
+- 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> yolo-sliding-window-crop -> split-yolo-dataset 或直接 build-yolo-yaml -> zip/remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
+- 多层目录整理：`discover-leaf-dirs -> clean-nested-dataset -> xml-to-yolo -> aggregate-nested-dataset`
 
 ### 4.3 多层目录叶子数据目录发现
 
 - `POST /api/v1/preprocess/discover-leaf-dirs`
 
-用于递归扫描输入目录，找出直接包含图片或 XML 文件、且其子目录不再包含同类文件的最底层叶子目录。
-
-关键参数：
-
-- `input_dir`: 待扫描根目录
-- `recursive`: 是否递归扫描
-- `extensions`: 识别为图像的扩展名列表
+用于先确认原始数据最底层的有效目录，适合作为多层目录清洗前的第一步。
 
 ### 4.4 多层目录数据清洗
 
 - `POST /api/v1/preprocess/clean-nested-dataset`
 
-用于递归处理多层子目录中的原始图片/XML 标注数据，按 **`pairing_mode`** 决定配对范围：
-
-- **`same_directory`**（默认）：图与 XML 为同一目录下的直接文件，按 stem 配对。
-- **`images_xmls_subfolders`**：每个「样本」目录下含有子文件夹 `images_dir_name` 与 `xmls_dir_name`（如 `…/车次_1/images/` 与 `…/车次_1/xmls/`），在父目录内跨子文件夹配对。
-
-- 有有效标注的图片复制到 `images/`
-- 对应 XML 复制到 `xmls/`
-- 无 XML 或 XML 中无有效目标框的图片：默认复制到 `backgrounds/`；若 `include_backgrounds: false` 则不输出 backgrounds，仅保留成对的 `images/xmls`，无标注图数量在响应 `skipped_unlabeled_images` 中统计
-- `flatten: false`（默认）时在 `output_dir` 下保留相对 `input_dir` 的子目录结构；`flatten: true` 时合并为 `output_dir/images`、`output_dir/xmls` 等单层目录，文件名带相对路径前缀以防重名
-
-关键参数：
-
-- `input_dir`: 原始多层目录根目录
-- `output_dir`: 清洗输出目录（默认 `input_dir/cleaned_dataset`）
-- `recursive`: 是否递归扫描（默认 `true`）
-- `pairing_mode`: `same_directory` 或 `images_xmls_subfolders`
-- `images_dir_name/xmls_dir_name/backgrounds_dir_name`: 输入子目录名（`images_xmls_subfolders` 时）及输出目录名
-- `flatten`: 是否扁平化合并到单一输出树
-- `include_backgrounds`: 是否整理无标注图到 `backgrounds/`
-- `include_difficult`: 是否把 `difficult=1` 视为有效目标
-- `copy_files`: `true` 复制，`false` 移动
-- `overwrite`: 目标已存在时是否覆盖
+把原始图片/XML 规整成 `images` / `xmls`（及可选 `backgrounds`）；默认会自动识别常见目录布局，支持保留层级和扁平化输出，是大图迭代与多层目录整理链路的常见起点。
 
 ### 4.5 多层目录数据集汇总
 
 - `POST /api/v1/preprocess/aggregate-nested-dataset`
 
-用于把多个子目录中已经清洗并转换好的碎片数据集汇总为统一数据集：
+用于把多个碎片目录汇总为统一 `dataset/images`、`dataset/labels`、`dataset/backgrounds`，适合多批次数据合并。
 
-- 汇总到 `dataset/images`
-- 汇总到 `dataset/labels`
-- 汇总到 `dataset/backgrounds`
-- 自动规避重名
-- 自动合并并重映射 `classes.txt`
-- 自动生成 `manifest.json`
+### 4.6 VOC XML 转 YOLO 标签
 
-关键参数：
+- `POST /api/v1/preprocess/xml-to-yolo`
 
-- `input_dir`: 已清洗/已转换的多层目录根目录
-- `output_dir`: 汇总输出目录（默认 `input_dir/dataset`）
-- `images_dir_name/labels_dir_name/backgrounds_dir_name`: 输入/输出目录名配置
-- `classes_file_name`: 类别文件名
-- `require_non_empty_labels`: 是否跳过空标签文件
-- `overwrite`: 目标已存在时是否覆盖
+要求输入目录下有 `images/` 与 `xmls/`，服务会把 YOLO 标签写到 `labels/`（目录名可配置）。这是两条训练工作流都会经过的标准步骤。
 
-### 4.6 YOLO 数据集划分
+### 4.7 标注检查与类别整理
+
+- `POST /api/v1/preprocess/annotate-visualize`
+- `POST /api/v1/preprocess/reset-yolo-label-index`
+
+前者用于把 YOLO/VOC 标注可视化做抽检；后者用于单类任务把所有 YOLO label 类别索引统一置为 `0`。
+`annotate-visualize` 现在按标准目录工作：传 `input_dir` 与 `output_dir` 即可，默认优先读取 `input_dir/labels`，若不存在则回退到 `input_dir/xmls`。
+`reset-yolo-label-index` 也已固定按 `input_dir/labels` 工作，最小调用只需 `input_dir`。
+
+### 4.8 YOLO 数据集划分
 
 - `POST /api/v1/preprocess/split-yolo-dataset`
 
-关键参数：
+把标准 YOLO 数据集划分为 `train/val/test`，供后续增强、滑窗或直接训练使用。
 
-- `dataset_dir`: YOLO 数据集根目录（含 `images` 与 `labels`）
-- `output_dir`: 输出目录（默认 `dataset_dir/split_dataset`）
-- `mode`: `train_val_test` / `train_val` / `train_only`
-- `train_ratio/val_ratio/test_ratio`: 划分比例（会自动归一化）
-- `shuffle/seed`: 是否打乱及随机种子
-- `copy_files`: `true` 复制，`false` 移动
+### 4.9 数据增强与滑窗裁剪
 
-### 4.7 目录打包为 ZIP
-
-- `POST /api/v1/preprocess/zip-folder`
-
-关键参数：
-
-- `input_dir`: 待打包目录
-- `output_zip_path`: 输出压缩包路径（可选，默认 `input_dir` 同级）
-- `include_root_dir`: 压缩包内是否保留根目录名
-- `overwrite`: 压缩包已存在时是否覆盖
-
-### 4.8 ZIP 解压
-
-- `POST /api/v1/preprocess/unzip-archive`
-
-关键参数：
-
-- `archive_path`: 压缩包路径（zip）
-- `output_dir`: 解压输出目录（可选）
-- `overwrite`: 目标文件已存在时是否覆盖
-
-### 4.9 文件或目录移动
-
-- `POST /api/v1/preprocess/move-path`
-
-关键参数：
-
-- `source_path`: 源文件或源目录
-- `target_dir`: 目标目录
-- `overwrite`: 目标同名已存在时是否覆盖
-
-### 4.10 文件或目录复制
-
-- `POST /api/v1/preprocess/copy-path`
-
-关键参数：
-
-- `source_path`: 源文件或源目录
-- `target_dir`: 目标目录
-- `overwrite`: 目标同名已存在时是否覆盖
-
-### 4.11 跨机器 SFTP 远程传输
-
-- `POST /api/v1/preprocess/remote-transfer`
-- `POST /api/v1/preprocess/remote-transfer/async`
-
-将本地文件或目录通过 SFTP 上传到远程服务器（基于 paramiko）。
-
-关键参数：
-
-- `source_path`: 本地源文件或目录
-- `target`: 远程目标，支持 `sftp://host/path`、`sftp://user@host/path`、`user@host:path`
-- `username`: SSH 用户名（若 target 中未包含则必填）
-- `password` 或 `private_key_path`: 二选一
-- `port`: SSH 端口，默认 22
-- `overwrite`: 目标已存在时是否覆盖
-
-### 4.12 YOLO 滑窗裁剪为小图数据集
-
+- `POST /api/v1/preprocess/yolo-txt-augment`
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 
-输入为图像目录，`labels_dir` 可选。默认保持兼容：窗口宽高默认都等于图片高度；`stride_x` 默认等于 `round(stride_ratio * 图片高度)`；`stride_y` 默认等于 `window_height`。如果手动传入 `window_width/window_height/stride_x/stride_y`，则按传入值覆盖对应默认。
+`yolo-txt-augment` 适合小图 baseline 的增强；`yolo-sliding-window-crop` 适合大图转小图训练，并可同步输出裁剪后的 labels。
 
-关键参数：
-
-- `images_dir`: 输入图像目录
-- `labels_dir`: 可选输入 YOLO 标签目录（txt）；有值时输出 `images/` + `labels/`，留空时只输出 `images/`
-- `output_dir`: 输出目录（会创建 `images/`，有标注时额外创建 `labels/`）
-- `window_width/window_height`: 可选窗口宽高；不传则使用默认
-- `stride_x/stride_y`: 可选步长；不传则使用默认
-- `min_vis_ratio`: 目标在窗口内可见比例阈值，默认 0.5
-- `stride_ratio`: 步长占图片高度的比例，默认 0.3
-- `ignore_vis_ratio`: 可见比例低于此值视为可忽略，默认 0.05
-- `only_wide`: 仅处理宽图（W>H），默认 true
-
-### 4.13 生成 YOLO `data.yaml`
+### 4.10 生成训练 YAML
 
 - `POST /api/v1/preprocess/build-yolo-yaml`（及 `/async`）
-- `POST /api/v1/preprocess/yolo-train`（及 `/async`，conda 下执行 `yolo train`）
 
-根据数据集根目录与各划分下的 `images` 路径、`classes.txt` 生成 Ultralytics 风格 YAML。可选 **`last_yaml`** 与当前扫描结果合并划分路径（旧路径在前）。**`classes.txt` 可为空或省略**：此时依赖 **`last_yaml`** 中的 **`names`**。远程 `last_yaml` 需 **`sftp_username`** + **`sftp_private_key_path`**。字段约定见 `docs/api_examples.md` 第 0 节与第 15 节。
+根据数据集根目录与各划分下的 `images` 路径、`classes.txt` 生成 Ultralytics 风格 YAML；可选与上一版 `last_yaml` 合并路径。
+
+### 4.11 数据投放与远程准备
+
+- `POST /api/v1/preprocess/zip-folder`
+- `POST /api/v1/preprocess/unzip-archive`
+- `POST /api/v1/preprocess/move-path`
+- `POST /api/v1/preprocess/copy-path`
+- `POST /api/v1/preprocess/remote-transfer`（及 `/async`）
+- `POST /api/v1/preprocess/remote-unzip`（及 `/async`）
+
+这组接口主要用于把本地整理好的数据集放到训练目录，或者上传到远端机器后解压到目标位置。
+
+### 4.12 发起训练
+
+- `POST /api/v1/preprocess/yolo-train`（及 `/async`，conda 下执行 `yolo train`）
+- `POST /api/v1/preprocess/remote-slurm-yolo-train`（及 `/async`）
+
+前者用于本地训练，后者用于远端 SLURM 集群训练。
+
+### 4.13 少用但独立的 VOC 裁剪修订链路
+
+- `POST /api/v1/preprocess/voc-bar-crop`
+- `POST /api/v1/preprocess/restore-voc-crops-batch`
+
+用于 VOC 大图局部裁剪编辑后再回贴原图，不属于当前最常用的两条训练 SOP，但仍保留在服务中。
 
 ## 5. 一期最小生产版
 

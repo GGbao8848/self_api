@@ -44,7 +44,7 @@ def run_reset_yolo_labels_index(
         must_exist=True,
         expect_directory=True,
     )
-    labels_dir = input_dir / request.labels_dir_name
+    labels_dir = input_dir / "labels"
     if not labels_dir.exists() or not labels_dir.is_dir():
         raise ValueError(f"labels_dir does not exist or is not a directory: {labels_dir}")
 
