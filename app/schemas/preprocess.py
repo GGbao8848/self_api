@@ -1,8 +1,80 @@
+from pathlib import PurePosixPath
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import AliasChoices, AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.artifacts import ArtifactSummary
+
+
+_TRAIN_BUCKET_SUFFIXES = {
+    "runs/detect",
+    "runs/segment",
+    "runs/classify",
+    "runs/pose",
+    "runs/obb",
+}
+
+
+def _path_part_for_validation(value: str) -> str:
+    text = value.strip()
+    if text.startswith(("sftp://", "ssh://")):
+        return urlparse(text).path or ""
+    if ":" in text and not text.startswith("/"):
+        return text.split(":", 1)[1]
+    return text
+
+
+def _yaml_stem_for_validation(yaml_path: str) -> str:
+    return PurePosixPath(_path_part_for_validation(yaml_path.strip())).stem
+
+
+def _yaml_structure_for_validation(yaml_path: str) -> tuple[str, str, str]:
+    path = PurePosixPath(_path_part_for_validation(yaml_path.strip()))
+    parts = path.parts
+    try:
+        datasets_idx = parts.index("datasets")
+    except ValueError as exc:
+        raise ValueError("yaml_path must include '/<detector_name>/datasets/<dataset_version>/<dataset_version>.yaml'") from exc
+    if datasets_idx < 2:
+        raise ValueError("yaml_path must contain both root_dir and detector_name before '/datasets/'")
+    if len(parts) <= datasets_idx + 2:
+        raise ValueError("yaml_path must include dataset version folder and yaml filename under '/datasets/'")
+
+    root_dir = str(PurePosixPath(*parts[: datasets_idx - 1]))
+    detector_name = parts[datasets_idx - 1]
+    dataset_version = parts[datasets_idx + 1]
+    yaml_stem = path.stem
+
+    if dataset_version != yaml_stem:
+        raise ValueError(
+            f"dataset version folder must equal yaml filename stem: expected {yaml_stem!r}, got {dataset_version!r}"
+        )
+    return root_dir, detector_name, dataset_version
+
+
+def _normalize_project_for_validation(project: str) -> str:
+    return project.replace("\\", "/").rstrip("/")
+
+
+def _validate_train_project_and_name(*, yaml_path: str, project: str, name: str) -> None:
+    yaml_stem = _yaml_stem_for_validation(yaml_path)
+    if not yaml_stem:
+        raise ValueError("yaml_path must point to a yaml file with a valid stem")
+    if name != yaml_stem:
+        raise ValueError(f"name must equal yaml filename stem: expected {yaml_stem!r}, got {name!r}")
+
+    normalized_project = _normalize_project_for_validation(project)
+    if not any(normalized_project.endswith(suffix) for suffix in _TRAIN_BUCKET_SUFFIXES):
+        allowed = ", ".join(sorted(_TRAIN_BUCKET_SUFFIXES))
+        raise ValueError(f"project must end with one of the training buckets: {allowed}")
+
+    root_dir, detector_name, _ = _yaml_structure_for_validation(yaml_path)
+    expected_prefix = _normalize_project_for_validation(str(PurePosixPath(root_dir) / detector_name / "runs"))
+    if not normalized_project.startswith(expected_prefix + "/"):
+        raise ValueError(
+            "project must share the same <root_dir>/<detector_name> prefix as yaml_path and live under '/runs/'"
+        )
 
 
 class AsyncTaskSubmitResponse(BaseModel):
@@ -407,55 +479,91 @@ class RemoteUnzipResponse(BaseModel):
     command: str
 
 
-class RemoteSlurmYoloTrainRequest(BaseModel):
-    """跨机器远程训练：本地 self_api 调远程 Slurm REST 提交训练任务。"""
+class RemoteSbatchYoloTrainRequest(BaseModel):
+    """跨机器远程训练：通过 SSH 在远端执行 sbatch 提交 YOLO 训练任务。"""
 
+    host: str | None = Field(
+        default=None,
+        description="远端主机；当 yaml_path / project_root_dir 直接写绝对路径时必填",
+    )
     yaml_path: str = Field(
-        description="远端数据 yaml 路径，支持 sftp://host/path 或 sftp://user@host/path 或 user@host:path",
+        description="远端数据 yaml 路径；支持绝对路径、sftp://host/path、sftp://user@host/path 或 user@host:path",
     )
     project_root_dir: str = Field(
-        description="远端工作目录，支持 sftp://host/path 或 sftp://user@host/path 或 user@host:path",
+        description="远端工作目录；支持绝对路径、sftp://host/path、sftp://user@host/path 或 user@host:path",
+    )
+    project: str = Field(
+        ...,
+        description="显式指定的 YOLO project 输出目录；API 不再内部推导",
+    )
+    name: str = Field(
+        ...,
+        description="显式指定的 YOLO run 名称；API 不再内部推导",
+    )
+    yolo_train_env: str = Field(
+        ...,
+        description="远端 conda 环境名（例如 yolo_pose）",
     )
     model: str = Field(default="yolo11s.pt", description="YOLO model")
     epochs: int = Field(default=100, ge=1, description="Training epochs")
     imgsz: int = Field(default=640, ge=1, description="Training image size")
-    batch: int | None = Field(default=None, ge=1, description="Base batch size；若未显式设置 device，将按 GPU 数自动扩增")
+    batch: int | None = Field(default=None, ge=1, description="YOLO batch size")
     workers: int | None = Field(default=None, ge=0, description="DataLoader workers")
-    cache: bool | None = Field(default=True, description="YOLO cache 参数（不允许 False）")
-    device: str | None = Field(default=None, description="显式设备，如 0,1；不填则自动探测并设置")
-    project: str | None = Field(default=None, description="YOLO project 输出目录；不填则按 yaml 自动推导")
-    name: str | None = Field(default=None, description="YOLO run 名称；不填则取 yaml 文件名")
+    cache: bool | None = Field(default=True, description="YOLO cache 参数")
+    device: str | None = Field(default=None, description="显式设备，例如 0 或 0,1")
     partition: str | None = Field(default="gpu", description="SLURM 分区")
     nodelist: str | None = Field(default=None, description="可选：要求使用的节点列表（逗号分隔）")
     exclude: str | None = Field(default=None, description="可选：排除的节点列表（逗号分隔）")
+    job_name: str = Field(default="self_api_train", description="sbatch 任务名")
+    stdout_path: str | None = Field(
+        default=None,
+        description="可选：远端 stdout 日志路径；默认 <project_root_dir>/logs/slurm-%j.out",
+    )
+    stderr_path: str | None = Field(
+        default=None,
+        description="可选：远端 stderr 日志路径；默认 <project_root_dir>/logs/slurm-%j.err",
+    )
     username: str | None = Field(
         default=None,
-        description="Slurm 用户名（用于签发 token）",
+        description="SSH 用户名；若路径中未包含则必填",
     )
     password: str | None = Field(
         default=None,
-        description="兼容保留字段（当前模式不使用）",
+        description="SSH 密码（与 private_key_path 二选一）",
     )
     private_key_path: str | None = Field(
         default=None,
-        description="兼容保留字段（当前模式不使用）",
+        description="SSH 私钥路径（与 password 二选一）",
     )
     port: int = Field(
         default=22,
         ge=1,
         le=65535,
-        description="兼容保留字段（当前模式不使用）",
+        description="SSH 端口",
     )
 
+    @model_validator(mode="after")
+    def _validate_project_and_name(self) -> "RemoteSbatchYoloTrainRequest":
+        _validate_train_project_and_name(
+            yaml_path=self.yaml_path,
+            project=self.project,
+            name=self.name,
+        )
+        return self
 
-class RemoteSlurmYoloTrainResponse(BaseModel):
+
+class RemoteSbatchYoloTrainResponse(BaseModel):
     status: str = "ok"
     yaml_path: str
     project_root_dir: str
     target_host: str
     target_port: int
+    project: str
+    name: str
     command: str
-    exit_code: int
+    job_id: str
+    stdout_path: str
+    stderr_path: str
     stdout: str
     stderr: str
 
@@ -811,7 +919,7 @@ class RemoteUnzipAsyncRequest(RemoteUnzipRequest):
     )
 
 
-class RemoteSlurmYoloTrainAsyncRequest(RemoteSlurmYoloTrainRequest):
+class RemoteSbatchYoloTrainAsyncRequest(RemoteSbatchYoloTrainRequest):
     callback_url: AnyHttpUrl | None = Field(
         default=None,
         description="Optional webhook URL that receives task result when finished",
@@ -953,11 +1061,19 @@ class BuildYoloYamlResponse(BaseModel):
 class YoloTrainRequest(BaseModel):
     yaml_path: str = Field(
         ...,
-        description="Absolute path to Ultralytics data YAML (must contain a /dataset/ segment)",
+        description="Absolute path to Ultralytics data YAML",
     )
     project_root_dir: str = Field(
         ...,
         description="Working directory for the training subprocess (shell cwd)",
+    )
+    project: str = Field(
+        ...,
+        description="显式指定的 YOLO project 输出目录；API 不再内部推导",
+    )
+    name: str = Field(
+        ...,
+        description="显式指定的 YOLO run 名称；API 不再内部推导",
     )
     yolo_train_env: str = Field(
         ...,
@@ -966,6 +1082,15 @@ class YoloTrainRequest(BaseModel):
     model: str = Field(default="yolo11s.pt", description="Ultralytics model argument")
     epochs: int = Field(default=100, ge=1)
     imgsz: int = Field(default=640, ge=1)
+
+    @model_validator(mode="after")
+    def _validate_project_and_name(self) -> "YoloTrainRequest":
+        _validate_train_project_and_name(
+            yaml_path=self.yaml_path,
+            project=self.project,
+            name=self.name,
+        )
+        return self
 
 
 class YoloTrainAsyncRequest(YoloTrainRequest):

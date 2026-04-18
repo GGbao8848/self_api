@@ -23,8 +23,8 @@
 | `remote-unzip` | `archive_path`、`output_dir`；以及 `username`、`password` / `private_key_path`、`port`、`overwrite` |
 | `unzip-archive` | `archive_path`、`output_dir`（可选）、`overwrite` |
 | `move-path` / `copy-path` | `source_path`、`target_dir`、`overwrite` |
-| `yolo-train` | `yaml_path`（须含 `/dataset/` 段）、`project_root_dir`（子进程 `cwd`）、`yolo_train_env`（conda 环境名）、`model`、`epochs`、`imgsz`（后三项有默认值） |
-| `remote-slurm-yolo-train` | `yaml_path`、`project_root_dir`、`username`；以及 `model`、`epochs`、`imgsz`、`batch`、`workers` |
+| `yolo-train` | `yaml_path`、`project_root_dir`（子进程 `cwd`）、`project`、`name`、`yolo_train_env`（conda 环境名）；以及 `model`、`epochs`、`imgsz` |
+| `remote-sbatch-yolo-train` | `host`（或在路径里带 host）、`yaml_path`、`project_root_dir`、`project`、`name`、`yolo_train_env`、`username`；以及 `model`、`epochs`、`imgsz`、`batch`、`workers` |
 | `voc-bar-crop` | `input_dir`（其下需有 `images/`、`xmls/`）、`output_dir`；可选 `recursive`（默认 `true`）；裁剪正方形边长为**源图高度**（§17） |
 | `restore-voc-crops-batch` | `original_images_dir`、`original_xmls_dir`、`edited_crops_images_dir`、`edited_crops_xmls_dir`、`output_dir`；可选 `recursive`、`skip_unparsed_names`（§18） |
 
@@ -44,8 +44,8 @@ curl "http://192.168.2.26:8666/api/v1/healthz"
 
 以下顺序按你当前最常用的两条工作流整理：
 
-- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
-- 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> yolo-sliding-window-crop -> split-yolo-dataset 或直接 build-yolo-yaml -> zip/remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
+- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-sbatch-yolo-train`
+- 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> yolo-sliding-window-crop -> split-yolo-dataset 或直接 build-yolo-yaml -> zip/remote-transfer/remote-unzip -> yolo-train / remote-sbatch-yolo-train`
 - 多层目录数据整理：`discover-leaf-dirs -> clean-nested-dataset -> xml-to-yolo -> aggregate-nested-dataset`
 
 阅读建议也按这个顺序往下看：先看数据进入训练前的整理链路，再看投放与训练，最后看少用的 VOC 裁剪/回贴工具。
@@ -687,14 +687,24 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/copy-path/async" \
 - `POST /api/v1/preprocess/yolo-train`
 - `POST /api/v1/preprocess/yolo-train/async`
 
-根据 `yaml_path` 在 **包含 `/dataset/` 段** 的前提下自动推导 Ultralytics 的 `project` 与 `name`：`project` 为「`/dataset/` 之前路径」+ `/runs/train`；`name` 为 yaml 文件名（不含扩展名）。在 `project_root_dir` 下启动子进程，使用 `conda run -n <yolo_train_env> -- yolo train ...`。
+该接口在 `project_root_dir` 下启动子进程，执行 `conda run -n <yolo_train_env> --no-capture-output yolo train ...`。
+
+`project` 与 `name` 不再由 API 内部推导，必须由调用方显式传入，并满足当前项目统一规范：
+
+- `name` 必须等于 `yaml_path` 对应 YAML 文件名的 stem
+- `yaml_path` 必须符合 `<root_dir>/<detector_name>/datasets/<dataset_version>/<dataset_version>.yaml`
+- `project` 必须落在训练 bucket 下，也就是以 `runs/detect`、`runs/segment`、`runs/classify`、`runs/pose` 或 `runs/obb` 结尾
+- `project` 必须与 `yaml_path` 共享同一个 `<root_dir>/<detector_name>` 前缀
+- 推荐由上游 skill 根据知识库统一生成，而不是在调用时手写猜测
 
 ```bash
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-train" \
   -H "Content-Type: application/json" \
   -d '{
-    "yaml_path": "/Users/me/self_api/TVDS/dog_cat_pig/dataset/dataset.yaml",
-    "project_root_dir": "/Users/me/self_api/TVDS",
+    "yaml_path": "/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/datasets/nzxj_louyou_20260417_1430/nzxj_louyou_20260417_1430.yaml",
+    "project_root_dir": "/mnt/usrhome/sk/ndata/TVDS",
+    "project": "/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect",
+    "name": "nzxj_louyou_20260417_1430",
     "yolo_train_env": "yolo_pose",
     "model": "yolo11s.pt",
     "epochs": 100,
@@ -704,28 +714,36 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-train" \
 
 响应含 `command`（拼接后的命令行）、`cwd`、`project`、`name`、`exit_code`、`stdout`、`stderr`。训练失败时 `exit_code` 非零且 `status` 为 `failed`。
 
-## 16.1 远程 SLURM YOLO 训练（自动获取 token + 提交 Slurm 任务）
+## 16.1 远程 SBATCH YOLO 训练（SSH + `sbatch`）
 
-- `POST /api/v1/preprocess/remote-slurm-yolo-train`
-- `POST /api/v1/preprocess/remote-slurm-yolo-train/async`
+- `POST /api/v1/preprocess/remote-sbatch-yolo-train`
+- `POST /api/v1/preprocess/remote-sbatch-yolo-train/async`
 
-该接口由本地 `self_api` 作为客户端，自动调用 token 服务获取用户 JWT，并向远程 Slurm REST (`/slurm/v0.0.42/job/submit`) 提交训练任务。训练脚本在集群侧执行原生 `yolo train`，并自动处理 GPU 与 batch：
+该接口通过 SSH 登录远端机器，执行 `sbatch --parsable --wrap "conda run -n <env> --no-capture-output yolo train ..."` 提交任务。`project` 与 `name` 不再由 API 内部推导，必须由调用方显式传入。
 
-- 自动探测 GPU 列表并设置 `CUDA_VISIBLE_DEVICES`
-- 若请求未显式设置 `device`，自动补 `device=<gpu_list>`
-- 若请求未显式设置 `device`，`batch` 会按 GPU 数量自动扩增
+训练输入同样遵守本地训练的结构约束：
+
+- `name` 必须等于 `yaml_path` 对应 YAML 文件名的 stem
+- `yaml_path` 必须符合 `<root_dir>/<detector_name>/datasets/<dataset_version>/<dataset_version>.yaml`
+- `project` 必须落在训练 bucket 下
+- `project` 必须与 `yaml_path` 共享同一个 `<root_dir>/<detector_name>` 前缀
+
 - Slurm stdout/stderr 默认写入 `project_root_dir/logs/` 下的 `slurm-%j.out`、`slurm-%j.err`
-- 不再依赖 `micromamba`；若 `SELF_API_YOLO_CONDA_ENV` 是绝对路径，则直接执行 `<env>/bin/yolo`；若是环境名，则尝试 `conda activate <env>`
-- 任务名固定为 `self_api_train`
+- 任务名默认 `self_api_train`
+- 若需覆盖日志路径，可显式传 `stdout_path`、`stderr_path`
 
-`yaml_path` 与 `project_root_dir` 支持绝对路径，或 `sftp://...` / `user@host:path`（路径部分会被提取为远端路径）。
+`yaml_path` 与 `project_root_dir` 支持绝对路径，或 `sftp://...` / `user@host:path`。若直接写绝对路径，则需要额外传 `host`。
 
 ```bash
-curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/remote-slurm-yolo-train" \
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/remote-sbatch-yolo-train" \
   -H "Content-Type: application/json" \
   -d '{
-    "yaml_path": "/mnt/usrhome/sk/ndata/TVDS_n8n/qianyindianji_louyou/dataset/qianyindianji_louyou_20260409_093939_/qianyindianji_louyou_20260409_093939_.yaml",
-    "project_root_dir": "/mnt/usrhome/sk/ndata/TVDS_n8n",
+    "host": "172.31.1.9",
+    "yaml_path": "/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/datasets/nzxj_louyou_20260417_1430/nzxj_louyou_20260417_1430.yaml",
+    "project_root_dir": "/mnt/usrhome/sk/ndata/TVDS",
+    "project": "/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect",
+    "name": "nzxj_louyou_20260417_1430",
+    "yolo_train_env": "yolo_pose",
     "username": "sk",
     "model": "yolo11m.pt",
     "epochs": 200,
@@ -733,32 +751,33 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/remote-slurm-yolo-train
     "batch": 24,
     "workers": 4,
     "cache": true,
-    "project": "/mnt/usrhome/sk/ndata/TVDS_n8n/qianyindianji_louyou/runs/train",
-    "name": "qianyindianji_louyou_20260409_093939_",
     "partition": "gpu",
     "nodelist": "node11,node12",
-    "exclude": "node42"
+    "exclude": "node42",
+    "private_key_path": "~/.ssh/id_ed25519"
   }'
 ```
 
 字段说明（重点）：
 
-- `username`：Slurm 用户名（用于签发 token），必填
-- `batch`：基础 batch；当未提供 `device` 时，会按 GPU 数自动扩增
+- `username`：SSH 用户名，必填
+- `host`：远端主机；当 `yaml_path` / `project_root_dir` 不带 host 时必填
+- `project` / `name`：必填；由上游 skill 统一规范后显式传入
+- `yolo_train_env`：远端 conda 环境名
+- `batch`：传给 `yolo train`
 - `workers`：传给 `yolo train`
-- `cache`：必须为 `true`（`false` 会被拒绝）
-- `device`：可选；显式提供则不做自动 device/batch 扩增
-- `project` / `name`：可选；不填时按 `yaml_path` 自动推导
+- `cache`：可选；默认 `true`
+- `device`：可选；显式传给 `yolo train`
 - `partition`：可选，默认 `gpu`
-- `nodelist` / `exclude`：可选，分别映射到 Slurm `required_nodes` / `excluded_nodes`
-- `project_root_dir`：既是远端任务的 `current_working_directory`，默认日志会写到其下的 `logs/` 目录
-- `password` / `private_key_path` / `port`：兼容保留字段，当前 token+REST 模式不使用
+- `nodelist` / `exclude`：可选，分别映射到 `sbatch --nodelist` / `--exclude`
+- `project_root_dir`：远端任务的工作目录，默认日志会写到其下的 `logs/`
+- `password` / `private_key_path` / `port`：SSH 连接参数
 
 补充说明：
 
-- 若集群资源紧张，提交成功后任务也可能仍为 `PENDING`；例如 `state_reason=ReqNodeNotAvail`
-- 若要覆盖默认日志路径，可设置 `SELF_API_SLURM_STDOUT_TEMPLATE`、`SELF_API_SLURM_STDERR_TEMPLATE`
-- 远端训练环境由 `SELF_API_YOLO_CONDA_ENV` 控制
+- 成功时返回 `job_id`
+- 若集群资源紧张，任务提交成功后也可能仍为 `PENDING`
+- 若要覆盖默认日志路径，可传 `stdout_path`、`stderr_path`
 
 异步示例在同步 body 上增加 `callback_url`、`callback_timeout_seconds` 即可（同 §0）。
 

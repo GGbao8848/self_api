@@ -179,8 +179,8 @@ make run
 
 文档与接口说明以下面两条常用工作流为主线：
 
-- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
-- 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> yolo-sliding-window-crop -> split-yolo-dataset 或直接 build-yolo-yaml -> zip/remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
+- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-sbatch-yolo-train`
+- 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> yolo-sliding-window-crop -> split-yolo-dataset 或直接 build-yolo-yaml -> zip/remote-transfer/remote-unzip -> yolo-train / remote-sbatch-yolo-train`
 - 多层目录整理：`discover-leaf-dirs -> clean-nested-dataset -> xml-to-yolo -> aggregate-nested-dataset`
 
 ### 4.3 多层目录叶子数据目录发现
@@ -249,9 +249,9 @@ make run
 ### 4.12 发起训练
 
 - `POST /api/v1/preprocess/yolo-train`（及 `/async`，conda 下执行 `yolo train`）
-- `POST /api/v1/preprocess/remote-slurm-yolo-train`（及 `/async`）
+- `POST /api/v1/preprocess/remote-sbatch-yolo-train`（及 `/async`）
 
-前者用于本地训练，后者用于远端 SLURM 集群训练。
+前者用于本地训练，后者用于远端集群上的 `sbatch` 提交训练。
 
 ### 4.13 少用但独立的 VOC 裁剪修订链路
 

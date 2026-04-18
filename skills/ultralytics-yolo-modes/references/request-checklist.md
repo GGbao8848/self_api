@@ -2,6 +2,8 @@
 
 Use this file when the user gives partial information and wants fast execution.
 
+For `train`, the default result in this project is an API payload, not a raw CLI, unless the user explicitly asks for CLI only.
+
 For company path, naming, bucket, default, and prohibited-output rules, follow [company-cli-standard.md](company-cli-standard.md). This file is only a fast field-gathering aid.
 
 ## Fast classification
@@ -20,13 +22,25 @@ Map the request into one sentence:
 - `root_dir`
 - `detector_name`
 - dataset YAML path
+- whether execution is local or remote
 - task type
 - starting weights
 - target epochs or speed-vs-quality preference
 - enough information to derive `project`
 - enough information to derive `name`
+- local train: `project_root_dir`, `yolo_train_env`
+- remote train: `host`, `project_root_dir`, `yolo_train_env`, `username`, and SSH auth
 
-If required upstream fields are missing, ask the user before producing or running the final `train` CLI.
+If required upstream fields are missing, ask the user before producing or running the final train output.
+
+Default train output:
+
+- local -> `yolo-train` API payload
+- remote -> `remote-sbatch-yolo-train` API payload
+
+CLI-only exception:
+
+- if the user explicitly asks for `只要 CLI`, `不要 API`, `原生命令`, `just the command`, or equivalent, return raw `yolo train ...`
 
 ### For val
 
@@ -87,7 +101,8 @@ For company-standard export:
 ## Good completion pattern
 
 1. Infer task and mode.
-2. Resolve local file paths.
-3. Produce one exact CLI.
-4. Explain the artifact or directory that should appear after success.
-5. If needed, follow with one tighter refinement command instead of many alternatives.
+2. For `train`, resolve whether execution is local or remote first.
+3. For `train`, produce one normalized API payload by default.
+4. For CLI-only exceptions or non-train modes, produce one exact CLI.
+5. Explain the artifact or directory that should appear after success.
+6. If needed, follow with one tighter refinement instead of many alternatives.

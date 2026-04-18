@@ -26,9 +26,9 @@ from app.schemas.preprocess import (
     RemoteTransferAsyncRequest,
     RemoteTransferRequest,
     RemoteTransferResponse,
-    RemoteSlurmYoloTrainAsyncRequest,
-    RemoteSlurmYoloTrainRequest,
-    RemoteSlurmYoloTrainResponse,
+    RemoteSbatchYoloTrainAsyncRequest,
+    RemoteSbatchYoloTrainRequest,
+    RemoteSbatchYoloTrainResponse,
     RemoteUnzipAsyncRequest,
     RemoteUnzipRequest,
     RemoteUnzipResponse,
@@ -74,7 +74,7 @@ from app.services.file_operations import (
 )
 from app.services.remote_transfer import run_remote_transfer
 from app.services.remote_unzip import run_remote_unzip
-from app.services.remote_slurm_yolo_train import run_remote_slurm_yolo_train
+from app.services.remote_sbatch_yolo_train import run_remote_sbatch_yolo_train
 from app.services.nested_dataset import (
     run_aggregate_nested_dataset,
     run_clean_nested_dataset,
@@ -536,33 +536,33 @@ def remote_unzip_async(
     )
 
 
-@router.post("/remote-slurm-yolo-train", response_model=RemoteSlurmYoloTrainResponse)
-def remote_slurm_yolo_train(
-    payload: RemoteSlurmYoloTrainRequest,
-) -> RemoteSlurmYoloTrainResponse:
+@router.post("/remote-sbatch-yolo-train", response_model=RemoteSbatchYoloTrainResponse)
+def remote_sbatch_yolo_train(
+    payload: RemoteSbatchYoloTrainRequest,
+) -> RemoteSbatchYoloTrainResponse:
     try:
-        return run_remote_slurm_yolo_train(payload)
+        return run_remote_sbatch_yolo_train(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post(
-    "/remote-slurm-yolo-train/async",
+    "/remote-sbatch-yolo-train/async",
     response_model=AsyncTaskSubmitResponse,
     status_code=202,
 )
-def remote_slurm_yolo_train_async(
-    payload: RemoteSlurmYoloTrainAsyncRequest,
+def remote_sbatch_yolo_train_async(
+    payload: RemoteSbatchYoloTrainAsyncRequest,
     request: Request,
 ) -> AsyncTaskSubmitResponse:
-    task_type = "remote_slurm_yolo_train"
+    task_type = "remote_sbatch_yolo_train"
     callback_url = str(payload.callback_url) if payload.callback_url else None
-    sync_payload = RemoteSlurmYoloTrainRequest(
+    sync_payload = RemoteSbatchYoloTrainRequest(
         **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
     )
     task_id = submit_task(
         task_type=task_type,
-        runner=lambda: run_remote_slurm_yolo_train(sync_payload).model_dump(),
+        runner=lambda: run_remote_sbatch_yolo_train(sync_payload).model_dump(),
         callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )

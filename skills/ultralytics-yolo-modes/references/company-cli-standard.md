@@ -1,6 +1,10 @@
 # Company CLI Standard
 
-Use this file as the final normalization layer before generating any Ultralytics YOLO CLI for this company.
+Upstream project-structure knowledge lives in:
+
+- `../sop-workflow/references/project-structure-kb.md`
+
+Use this file as the final normalization layer before generating any Ultralytics YOLO training payload or Ultralytics CLI for this company.
 
 Compatibility baseline: `ultralytics v8.4.38`
 
@@ -8,21 +12,43 @@ This file defines:
 
 - required path structure
 - naming rules
+- dataset-to-run relationship
 - mandatory questions
 - mode bucket mapping
 - safe defaults
 
-If any mode-specific reference conflicts with this file, follow this file for company-standard CLI generation, except where the official Ultralytics CLI does not expose the company-preferred argument shape. Export mode is the main exception: the final export CLI must stay within the official documented export argument surface.
+If any mode-specific reference conflicts with this file, follow this file for company-standard output generation. For this self_api project, `train` defaults to normalized API payload generation, while `val`, `predict`, and `export` still default to final CLI generation. Export mode remains constrained to the official documented export argument surface.
+
+If this file and the shared project-structure KB overlap, treat the KB as the macro directory convention and this file as the execution-shape normalization layer.
+
+Dataset location should normally follow the KB rule:
+
+```text
+<root_dir>/<detector_name>/datasets/<dataset_version>
+```
+
+For training, `name` should usually align with the dataset version name so dataset version, YAML stem, and run directory stay aligned.
+
+Hard rule:
+
+- `<dataset_version>` must equal the dataset YAML filename stem
+
+Preferred alignment:
+
+- dataset folder name = dataset version
+- dataset YAML stem = dataset version
+- train `name` = dataset version
 
 ## Required fields to collect
 
-Before producing a final CLI, collect or infer:
+Before producing a final output, collect or infer:
 
 - `mode`: `train`, `val`, `predict`, or `export`
 - `task`: usually `detect`, `segment`, `classify`, `pose`, or `obb`
 - `root_dir`: business project root directory
 - `detector_name`: detector or model family name
 - `model`: starting weights or source model path
+- execution target for `train`: local or remote
 - input target:
   - `data` for `train` and most `val`
   - `source` for `predict`
@@ -48,14 +74,14 @@ Two names exist and they must not be confused:
 
 For training, the preferred rule is:
 
-- dataset YAML filename should usually be `detector_name + timestamp`
+- dataset YAML filename should usually be `detector_name + YYYYMMDD_HHMM`
 - `name` must equal the dataset YAML filename stem
 
 Example:
 
-- `detector_name=name1`
-- dataset YAML: `name1_20260417.yaml`
-- final `name=name1_20260417`
+- `detector_name=nzxj_louyou`
+- dataset YAML: `nzxj_louyou_20260417_1430.yaml`
+- final `name=nzxj_louyou_20260417_1430`
 
 This keeps:
 
@@ -104,27 +130,27 @@ Then the final run directory becomes:
 Examples:
 
 - detection train:
-  - `project=/mnt/usrhome/sk/ndata/TVDS/name1/runs/detect`
-  - `name=name1_20260417`
+  - `project=/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect`
+  - `name=nzxj_louyou_20260417_1430`
   - final run dir:
-    - `/mnt/usrhome/sk/ndata/TVDS/name1/runs/detect/name1_20260417`
+    - `/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect/nzxj_louyou_20260417_1430`
 - predict:
-  - `project=/mnt/usrhome/sk/ndata/TVDS/name1/runs/predict`
-  - `name=name1_20260417`
+  - `project=/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/predict`
+  - `name=nzxj_louyou_20260417_1430`
 - val:
-  - `project=/mnt/usrhome/sk/ndata/TVDS/name1/runs/val`
-  - `name=name1_20260417`
+  - `project=/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/val`
+  - `name=nzxj_louyou_20260417_1430`
 - export:
   - keep the inferred version name for description and bookkeeping
   - do not force `project` or `name` into the CLI unless the chosen export format explicitly supports them
 
 ## Mandatory questioning rules
 
-Do not generate the final CLI until these are clear.
+Do not generate the final train payload or final CLI until these are clear.
 
 Core rule:
 
-- prefer asking over guessing whenever a required field for company-standard CLI generation is missing
+- prefer asking over guessing whenever a required field for company-standard output generation is missing
 - if the required upstream fields are complete, derive `project` and `name` from the company rules for `train`, `val`, and `predict` instead of asking the user to spell them out again
 - for `export`, derive only what the official export CLI actually accepts and describe the artifact path separately
 
@@ -132,6 +158,7 @@ Core rule:
 
 Must know:
 
+- execution target: `local` or `remote`
 - `root_dir`
 - `detector_name`
 - dataset YAML path
@@ -145,10 +172,17 @@ Then enforce:
 
 Ask the user if any of these are missing.
 
+Output rule:
+
+- if execution target is `local`, return or run the normalized `POST /api/v1/preprocess/yolo-train` payload
+- if execution target is `remote`, return or run the normalized `POST /api/v1/preprocess/remote-sbatch-yolo-train` payload
+- only return raw `yolo train ...` when the user explicitly says they do not want API execution, asks for command only, or uses equivalent wording such as `只给我命令`, `不要 API`, `原生命令`, `只要 cli`, or `just the command`
+
 Also ask for confirmation if:
 
 - dataset YAML stem does not start with `detector_name`
 - task cannot be inferred reliably
+- execution target is still ambiguous
 
 ### For val
 
@@ -233,9 +267,39 @@ Export defaults:
 - default `half=True`
 - exported files usually appear adjacent to the source checkpoint or in a format-specific sibling directory
 
-## Standard CLI patterns
+## Standard output patterns
 
-### Train
+### Train API payloads
+
+Local:
+
+```json
+{
+  "model": "MODEL",
+  "yaml_path": "DATA_YAML",
+  "project": "<root_dir>/<detector_name>/runs/TASK_BUCKET",
+  "name": "<yaml_stem>",
+  "task": "TASK",
+  "imgsz": 640
+}
+```
+
+Remote:
+
+```json
+{
+  "host": "REMOTE_HOST",
+  "model": "MODEL",
+  "yaml_path": "DATA_YAML",
+  "project_root_dir": "<root_dir>",
+  "project": "<root_dir>/<detector_name>/runs/TASK_BUCKET",
+  "name": "<yaml_stem>",
+  "task": "TASK",
+  "imgsz": 640
+}
+```
+
+CLI-only exception:
 
 ```bash
 yolo TASK train model=MODEL data=DATA_YAML project=<root_dir>/<detector_name>/runs/TASK_BUCKET name=<yaml_stem> imgsz=640
@@ -268,12 +332,51 @@ Use these as final-form templates when the required fields are already known.
 Scenario:
 
 - `root_dir=/mnt/usrhome/sk/ndata/TVDS`
-- `detector_name=name1`
-- dataset YAML: `/data/name1_20260417.yaml`
-- `yaml_stem=name1_20260417`
+- `detector_name=nzxj_louyou`
+- dataset YAML: `/data/nzxj_louyou_20260417_1430.yaml`
+- `yaml_stem=nzxj_louyou_20260417_1430`
+- execution target: `local`
+
+```json
+{
+  "model": "yolo11n.pt",
+  "yaml_path": "/data/nzxj_louyou_20260417_1430.yaml",
+  "project": "/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect",
+  "name": "nzxj_louyou_20260417_1430",
+  "task": "detect",
+  "imgsz": 640
+}
+```
+
+### 1b. Train, remote
+
+Scenario:
+
+- `root_dir=/mnt/usrhome/sk/ndata/TVDS`
+- `detector_name=nzxj_louyou`
+- dataset YAML: `/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/datasets/nzxj_louyou_20260417_1430/nzxj_louyou_20260417_1430.yaml`
+- `yaml_stem=nzxj_louyou_20260417_1430`
+- execution target: `remote`
+
+```json
+{
+  "host": "gpu-cluster-01",
+  "model": "yolo11n.pt",
+  "yaml_path": "/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/datasets/nzxj_louyou_20260417_1430/nzxj_louyou_20260417_1430.yaml",
+  "project_root_dir": "/mnt/usrhome/sk/ndata/TVDS",
+  "project": "/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect",
+  "name": "nzxj_louyou_20260417_1430",
+  "task": "detect",
+  "imgsz": 640
+}
+```
+
+### 1c. Train, CLI-only exception
+
+Only when the user explicitly asks for raw command output:
 
 ```bash
-yolo detect train model=yolo11n.pt data=/data/name1_20260417.yaml project=/mnt/usrhome/sk/ndata/TVDS/name1/runs/detect name=name1_20260417 imgsz=640
+yolo detect train model=yolo11n.pt data=/data/nzxj_louyou_20260417_1430.yaml project=/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect name=nzxj_louyou_20260417_1430 imgsz=640
 ```
 
 ### 2. Val
@@ -281,11 +384,11 @@ yolo detect train model=yolo11n.pt data=/data/name1_20260417.yaml project=/mnt/u
 Scenario:
 
 - `root_dir=/mnt/usrhome/sk/ndata/TVDS`
-- `detector_name=name1`
-- version name: `name1_20260417`
+- `detector_name=nzxj_louyou`
+- version name: `nzxj_louyou_20260417_1430`
 
 ```bash
-yolo detect val model=/mnt/usrhome/sk/ndata/TVDS/name1/runs/detect/name1_20260417/weights/best.pt data=/data/name1_20260417.yaml project=/mnt/usrhome/sk/ndata/TVDS/name1/runs/val name=name1_20260417 imgsz=640
+yolo detect val model=/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect/nzxj_louyou_20260417_1430/weights/best.pt data=/data/nzxj_louyou_20260417_1430.yaml project=/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/val name=nzxj_louyou_20260417_1430 imgsz=640
 ```
 
 ### 3. Predict
@@ -293,12 +396,12 @@ yolo detect val model=/mnt/usrhome/sk/ndata/TVDS/name1/runs/detect/name1_2026041
 Scenario:
 
 - `root_dir=/mnt/usrhome/sk/ndata/TVDS`
-- `detector_name=name1`
-- version name: `name1_20260417`
+- `detector_name=nzxj_louyou`
+- version name: `nzxj_louyou_20260417_1430`
 - inference source: `/data/demo.jpg`
 
 ```bash
-yolo detect predict model=/mnt/usrhome/sk/ndata/TVDS/name1/runs/detect/name1_20260417/weights/best.pt source=/data/demo.jpg project=/mnt/usrhome/sk/ndata/TVDS/name1/runs/predict name=name1_20260417 imgsz=1280 save=True
+yolo detect predict model=/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect/nzxj_louyou_20260417_1430/weights/best.pt source=/data/demo.jpg project=/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/predict name=nzxj_louyou_20260417_1430 imgsz=1280 save=True
 ```
 
 ### 4. Export
@@ -306,17 +409,17 @@ yolo detect predict model=/mnt/usrhome/sk/ndata/TVDS/name1/runs/detect/name1_202
 Scenario:
 
 - `root_dir=/mnt/usrhome/sk/ndata/TVDS`
-- `detector_name=name1`
-- version name: `name1_20260417`
+- `detector_name=nzxj_louyou`
+- version name: `nzxj_louyou_20260417_1430`
 
 ```bash
-yolo export model=/mnt/usrhome/sk/ndata/TVDS/name1/runs/detect/name1_20260417/weights/best.pt format=torchscript imgsz=1280 half=True
+yolo export model=/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect/nzxj_louyou_20260417_1430/weights/best.pt format=torchscript imgsz=1280 half=True
 ```
 
 In the example above, `imgsz=1280` is assumed to have been read from:
 
 ```text
-/mnt/usrhome/sk/ndata/TVDS/name1/runs/detect/name1_20260417/args.yaml
+/mnt/usrhome/sk/ndata/TVDS/nzxj_louyou/runs/detect/nzxj_louyou_20260417_1430/args.yaml
 ```
 
 ## Resume rule
@@ -331,12 +434,16 @@ yolo train resume model=<root_dir>/<detector_name>/runs/<task-bucket>/<name>/wei
 
 ## Final output checklist
 
-Before returning a final CLI, verify:
+Before returning a final output, verify:
 
 - bucket name matches the fixed dictionary
 - for `train`, `val`, and `predict`, `project` uses `<root_dir>/<detector_name>/<bucket>`
 - for `train`, `val`, and `predict`, `name` is present
 - for train, `name` equals dataset YAML stem
+- for train, execution target is explicit: `local` or `remote`
+- for local train, the default output is the `yolo-train` API payload
+- for remote train, the default output is the `remote-sbatch-yolo-train` API payload
+- for raw train CLI, confirm the user explicitly asked for command-only output
 - for predict and export, `imgsz` should first try to match the training `args.yaml`
 - for export, the CLI contains only officially documented export arguments for the chosen format
 - if tensor or shape mismatch errors appear after reusing training `imgsz`, ask the user before changing it
@@ -345,11 +452,13 @@ Before returning a final CLI, verify:
 
 ## Prohibited outputs
 
-Do not generate a final company-standard CLI if any of these are true:
+Do not generate a final company-standard output if any of these are true:
 
 - missing `root_dir` or `detector_name` while still guessing a company path for `train`, `val`, or `predict`
 - missing `name` for `train`, `val`, or `predict`
+- for train, missing execution target while still choosing local API, remote API, or CLI-only output
 - for train, `name` does not match the dataset YAML filename stem
+- for train, returning raw `yolo train ...` without an explicit CLI-only request
 - for predict or export, `imgsz` is guessed without first checking the sibling `args.yaml` when that path should exist
 - changing `imgsz` after tensor or shape mismatch style errors without asking the user
 - using mixed bucket names such as `runs/detect_predict`, `runs/detect_val`, or `runs/detect_export`

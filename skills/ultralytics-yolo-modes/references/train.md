@@ -5,6 +5,13 @@ Compatibility baseline: `ultralytics v8.4.38`
 
 Use this file when the user wants to train or continue training a YOLO model.
 
+Default behavior for this project:
+
+- training should normally be executed through the self_api training endpoints
+- local training injects `POST /api/v1/preprocess/yolo-train`
+- remote training injects `POST /api/v1/preprocess/remote-sbatch-yolo-train`
+- only return a raw `yolo train ...` CLI when the user explicitly asks for CLI only, says they do not want API execution, or gives an equivalent prompt such as `只给我命令`, `不要 API`, `原生命令`, `只要 cli`, or `just the command`
+
 For company path, naming, bucket, and questioning rules, follow [company-cli-standard.md](company-cli-standard.md). If anything in this file appears to conflict with company conventions, the company standard wins.
 
 ## What train mode is for
@@ -24,7 +31,8 @@ The official docs describe train mode as the mode for fitting a YOLO model on a 
 - `detector_name`: detector or model name
 - `TASK`: usually `detect`, `segment`, `classify`, `pose`, or `obb`
 - `model=...`
-- `data=...`
+- dataset YAML path
+- execution target: local or remote
 
 Derived by company standard:
 
@@ -37,11 +45,51 @@ If the user only says "训练一个模型", do not stop at that. Resolve:
 - `detector_name`
 - dataset YAML path
 - task type
+- whether execution is local or remote
 - whether to start from pretrained `.pt` or architecture `.yaml`
 - enough information to derive `project`
 - enough information to derive `name`
+- local train: `project_root_dir`, `yolo_train_env`
+- remote train: `host`, `project_root_dir`, `yolo_train_env`, `username`, and SSH auth
 
-## Canonical commands
+## Default output shape
+
+For this project, the preferred final output for train is not a raw CLI.
+
+### Local train
+
+Return or execute the `yolo-train` API payload with normalized fields:
+
+- `yaml_path`
+- `project_root_dir`
+- `project`
+- `name`
+- `yolo_train_env`
+- `model`
+- `epochs`
+- `imgsz`
+
+### Remote train
+
+Return or execute the `remote-sbatch-yolo-train` API payload with normalized fields:
+
+- `host`
+- `yaml_path`
+- `project_root_dir`
+- `project`
+- `name`
+- `yolo_train_env`
+- `username`
+- SSH auth
+- optional `partition`, `nodelist`, `exclude`, `batch`, `workers`, `device`
+
+### CLI-only exception
+
+Only output a raw `yolo train ...` command when the user explicitly requests CLI only.
+
+## CLI-only canonical commands
+
+These are fallback command patterns for CLI-only requests.
 
 Start from pretrained weights:
 
@@ -225,6 +273,7 @@ Under the company-standard run directory, typically:
 Include:
 
 1. inferred task and why it is `train`
-2. exact CLI
-3. expected output directory and key artifact, usually `best.pt`
-4. one next step such as validate or export
+2. whether execution is local or remote
+3. the normalized API payload by default, or exact CLI only in the CLI-only exception
+4. expected output directory and key artifact, usually `best.pt`
+5. one next step such as validate or export

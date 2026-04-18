@@ -71,3 +71,4 @@ tmp_datasets/
 tmp_generate_datasets.py
 data/
 TVDS/
+app/services/_ignored/
