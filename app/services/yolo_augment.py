@@ -7,9 +7,9 @@ from PIL import Image, ImageEnhance, ImageFilter
 
 from app.core.path_safety import resolve_safe_path
 from app.schemas.preprocess import (
-    YoloTxtAugmentFileDetail,
-    YoloTxtAugmentRequest,
-    YoloTxtAugmentResponse,
+    YoloAugmentFileDetail,
+    YoloAugmentRequest,
+    YoloAugmentResponse,
 )
 from app.services.task_manager import ensure_current_task_active
 from app.utils.images import list_image_paths
@@ -93,7 +93,7 @@ def _apply_image_transform(image: Image.Image, augmentation_name: str) -> Image.
     raise ValueError(f"unsupported augmentation: {augmentation_name}")
 
 
-def run_yolo_txt_augment(request: YoloTxtAugmentRequest) -> YoloTxtAugmentResponse:
+def run_yolo_augment(request: YoloAugmentRequest) -> YoloAugmentResponse:
     input_dir = resolve_safe_path(
         request.input_dir,
         field_name="input_dir",
@@ -141,7 +141,7 @@ def run_yolo_txt_augment(request: YoloTxtAugmentRequest) -> YoloTxtAugmentRespon
         ensure_current_task_active()
         rel_path = image_path.relative_to(images_dir)
         label_path = (labels_dir / rel_path).with_suffix(".txt")
-        detail = YoloTxtAugmentFileDetail(
+        detail = YoloAugmentFileDetail(
             source_image=str(image_path),
             source_label=str(label_path),
         )
@@ -185,7 +185,7 @@ def run_yolo_txt_augment(request: YoloTxtAugmentRequest) -> YoloTxtAugmentRespon
         processed_images += 1
         details.append(detail)
 
-    return YoloTxtAugmentResponse(
+    return YoloAugmentResponse(
         input_dir=str(input_dir),
         output_dir=str(output_dir),
         processed_images=processed_images,

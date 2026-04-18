@@ -87,18 +87,18 @@ def _intersect_in_crop(
 
 
 def run_voc_bar_crop(request: VocBarCropRequest) -> VocBarCropResponse:
-    images_dir = resolve_safe_path(
-        request.images_dir,
-        field_name="images_dir",
+    input_dir = resolve_safe_path(
+        request.input_dir,
+        field_name="input_dir",
         must_exist=True,
         expect_directory=True,
     )
-    xmls_dir = resolve_safe_path(
-        request.xmls_dir,
-        field_name="xmls_dir",
-        must_exist=True,
-        expect_directory=True,
-    )
+    images_dir = input_dir / "images"
+    xmls_dir = input_dir / "xmls"
+    if not images_dir.exists() or not images_dir.is_dir():
+        raise ValueError(f"images directory does not exist: {images_dir}")
+    if not xmls_dir.exists() or not xmls_dir.is_dir():
+        raise ValueError(f"xmls directory does not exist: {xmls_dir}")
     output_dir = resolve_safe_path(request.output_dir, field_name="output_dir")
     out_images = output_dir / "images"
     out_xmls = output_dir / "xmls"
@@ -249,8 +249,7 @@ def run_voc_bar_crop(request: VocBarCropRequest) -> VocBarCropResponse:
             )
 
     return VocBarCropResponse(
-        images_dir=str(images_dir),
-        xmls_dir=str(xmls_dir),
+        input_dir=str(input_dir),
         output_dir=str(output_dir),
         processed_xml_files=processed_xml,
         skipped_xml_files=skipped_xml,

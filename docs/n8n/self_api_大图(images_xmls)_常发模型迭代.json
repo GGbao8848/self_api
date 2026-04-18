@@ -611,12 +611,8 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "images_dir",
-              "value": "={{ $json.input_dir }}/images"
-            },
-            {
-              "name": "labels_dir",
-              "value": "={{ $json.labels_dir }}"
+              "name": "input_dir",
+              "value": "={{ $json.input_dir }}"
             },
             {
               "name": "output_dir",

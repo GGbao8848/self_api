@@ -340,12 +340,8 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "images_dir",
-              "value": "={{ $json.result.output_dir + '/images/train' }}"
-            },
-            {
-              "name": "labels_dir",
-              "value": "={{ $json.result.output_dir + '/labels/train' }}"
+              "name": "input_dir",
+              "value": "={{ $json.result.output_dir + '/train' }}"
             },
             {
               "name": "output_dir",
@@ -396,12 +392,8 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "images_dir",
-              "value": "={{ $json.result.output_dir + '/images/val' }}"
-            },
-            {
-              "name": "labels_dir",
-              "value": "={{ $json.result.output_dir + '/labels/val' }}"
+              "name": "input_dir",
+              "value": "={{ $json.result.output_dir + '/val' }}"
             },
             {
               "name": "output_dir",
@@ -452,12 +444,8 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "images_dir",
-              "value": "={{ $json.result.output_dir + '/images/test' }}"
-            },
-            {
-              "name": "labels_dir",
-              "value": "={{ $json.result.output_dir + '/labels/test' }}"
+              "name": "input_dir",
+              "value": "={{ $json.result.output_dir + '/test' }}"
             },
             {
               "name": "output_dir",

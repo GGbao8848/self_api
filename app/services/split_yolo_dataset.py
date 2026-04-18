@@ -48,27 +48,27 @@ def _copy_or_move(src: Path, dst: Path, copy_files: bool) -> None:
 
 
 def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDatasetResponse:
-    dataset_dir = resolve_safe_path(
-        request.dataset_dir,
-        field_name="dataset_dir",
+    input_dir = resolve_safe_path(
+        request.input_dir,
+        field_name="input_dir",
         must_exist=True,
         expect_directory=True,
     )
 
-    images_dir = dataset_dir / request.images_dir_name
-    labels_dir = dataset_dir / request.labels_dir_name
+    images_dir = input_dir / "images"
+    labels_dir = input_dir / "labels"
     if not images_dir.exists() or not images_dir.is_dir():
-        raise ValueError(f"images_dir does not exist or is not a directory: {images_dir}")
+        raise ValueError(f"images directory does not exist: {images_dir}")
     if not labels_dir.exists() or not labels_dir.is_dir():
-        raise ValueError(f"labels_dir does not exist or is not a directory: {labels_dir}")
+        raise ValueError(f"labels directory does not exist: {labels_dir}")
 
     output_dir = (
         resolve_safe_path(request.output_dir, field_name="output_dir")
         if request.output_dir
-        else (dataset_dir / "split_dataset").resolve()
+        else (input_dir / "split_dataset").resolve()
     )
-    if output_dir == dataset_dir and not request.copy_files:
-        raise ValueError("output_dir cannot equal dataset_dir when copy_files=False")
+    if output_dir == input_dir and not request.copy_files:
+        raise ValueError("output_dir cannot equal input_dir when copy_files=False")
 
     normalized_exts = normalize_extensions(request.extensions)
     iterator = images_dir.rglob("*") if request.recursive else images_dir.glob("*")
@@ -146,24 +146,14 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
             ensure_current_task_active()
             target_rel = rel_path if request.keep_subdirs else Path(rel_path.name)
             if request.output_layout == "split_first":
-                target_image = (
-                    output_dir / split_name / request.images_dir_name / target_rel
-                )
+                target_image = output_dir / split_name / "images" / target_rel
                 target_label = (
-                    output_dir
-                    / split_name
-                    / request.labels_dir_name
-                    / target_rel.with_suffix(".txt")
+                    output_dir / split_name / "labels" / target_rel.with_suffix(".txt")
                 )
             else:
-                target_image = (
-                    output_dir / request.images_dir_name / split_name / target_rel
-                )
+                target_image = output_dir / "images" / split_name / target_rel
                 target_label = (
-                    output_dir
-                    / request.labels_dir_name
-                    / split_name
-                    / target_rel.with_suffix(".txt")
+                    output_dir / "labels" / split_name / target_rel.with_suffix(".txt")
                 )
 
             if (target_image.exists() or target_label.exists()) and not request.overwrite:
@@ -227,7 +217,7 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
             )
 
     copied_classes_file = None
-    classes_src = dataset_dir / "classes.txt"
+    classes_src = input_dir / "classes.txt"
     if classes_src.exists() and classes_src.is_file():
         classes_dst = output_dir / "classes.txt"
         classes_dst.parent.mkdir(parents=True, exist_ok=True)
@@ -235,7 +225,7 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
         copied_classes_file = str(classes_dst)
 
     return SplitYoloDatasetResponse(
-        dataset_dir=str(dataset_dir),
+        input_dir=str(input_dir),
         output_dir=str(output_dir),
         mode=request.mode,
         total_images=len(image_paths),

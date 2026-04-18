@@ -14,18 +14,18 @@
 | `xml-to-yolo` | `input_dir` |
 | `annotate-visualize` | `input_dir`、`output_dir`；要求 `input_dir/images` 存在，默认优先使用 `input_dir/labels`，若不存在再回退到 `input_dir/xmls`；可选 `recursive`、`extensions`、`include_difficult`（仅 XML）、`line_width`、`overwrite`；YOLO 类别名可选 `classes` 或 `classes_file`（二选一，**均可省略**；均不提供或 `classes_file` 为空字符串时，框上显示**类别 id 数字**） |
 | `reset-yolo-label-index` | `input_dir`（其下需有 `labels/`）；可选 `recursive`（默认 `true`）；**原地**将各 `.txt` 每行首列类别 id 改为 `0`（§8） |
-| `split-yolo-dataset` | `dataset_dir`（兼容 `input_dir`）、`output_dir`（可选） |
-| `yolo-txt-augment` | `input_dir`（其下需有 `images/`、`labels/`）、`output_dir`（可选，默认 `<input_dir>/augment`）、七个增强开关（默认全开）；仅支持 YOLO TXT |
-| `yolo-sliding-window-crop` | `images_dir`、`output_dir`；可选 `labels_dir`（有值时同步输出 YOLO `labels/`，留空时只输出 `images/`）；可选 `window_width`、`window_height`、`stride_x`、`stride_y`（传入即覆盖默认）；以及 `min_vis_ratio`、`stride_ratio`、`ignore_vis_ratio`、`only_wide` |
+| `split-yolo-dataset` | `input_dir`（其下需有 `images/`、`labels/`）、`output_dir`（可选，默认 `<input_dir>/split_dataset`） |
+| `yolo-augment` | `input_dir`（其下需有 `images/`、`labels/`）、`output_dir`（可选，默认 `<input_dir>/augment`）、七个增强开关（默认全开）；仅支持 YOLO TXT |
+| `yolo-sliding-window-crop` | `input_dir`（其下需有 `images/`；若存在 `labels/` 则自动同步输出裁剪标注）、`output_dir`；可选 `window_width`、`window_height`、`stride_x`、`stride_y`（传入即覆盖默认）；以及 `min_vis_ratio`、`stride_ratio`、`ignore_vis_ratio`、`only_wide` |
 | `build-yolo-yaml` | 同上；**`last_yaml`** 与当前扫描路径合并（旧路径在前、去重）。**`classes.txt` 有有效类别行时**：`nc`/`names` 以该文件为准。**`classes.txt` 为空或不存在时**：必须提供 **`last_yaml`**，且其中需含 **`names`**（及通常的 `nc`），类别表从该 YAML 读取；当前数据集各划分路径仍按扫描结果**追加**到对应 `train`/`val`/…。远程 `last_yaml` 需 **`sftp_username`**、**`sftp_private_key_path`** |
-| `zip-folder` | `input_dir`、`output_zip_path`（兼容 `output_dir`）、`include_root_dir`、`overwrite` |
+| `zip-folder` | `input_dir`、`output_zip_path`（可选，默认 `<input_dir_parent>/<input_dir_name>.zip`）、`include_root_dir`、`overwrite` |
 | `remote-transfer` | `source_path`、`target`；以及 `username`、`password` / `private_key_path`、`port`、`overwrite` |
 | `remote-unzip` | `archive_path`、`output_dir`；以及 `username`、`password` / `private_key_path`、`port`、`overwrite` |
-| `unzip-archive` | `archive_path`（兼容 `input_dir`）、`output_dir`、`overwrite` |
-| `move-path` / `copy-path` | `source_path`（兼容 `input_dir`）、`target_dir`（兼容 `output_dir`）、`overwrite` |
+| `unzip-archive` | `archive_path`、`output_dir`（可选）、`overwrite` |
+| `move-path` / `copy-path` | `source_path`、`target_dir`、`overwrite` |
 | `yolo-train` | `yaml_path`（须含 `/dataset/` 段）、`project_root_dir`（子进程 `cwd`）、`yolo_train_env`（conda 环境名）、`model`、`epochs`、`imgsz`（后三项有默认值） |
 | `remote-slurm-yolo-train` | `yaml_path`、`project_root_dir`、`username`；以及 `model`、`epochs`、`imgsz`、`batch`、`workers` |
-| `voc-bar-crop` | `images_dir`、`xmls_dir`、`output_dir`；可选 `recursive`（默认 `true`）；裁剪正方形边长为**源图高度**（§17） |
+| `voc-bar-crop` | `input_dir`（其下需有 `images/`、`xmls/`）、`output_dir`；可选 `recursive`（默认 `true`）；裁剪正方形边长为**源图高度**（§17） |
 | `restore-voc-crops-batch` | `original_images_dir`、`original_xmls_dir`、`edited_crops_images_dir`、`edited_crops_xmls_dir`、`output_dir`；可选 `recursive`、`skip_unparsed_names`（§18） |
 
 **异步任务轮询**：`GET /api/v1/preprocess/tasks/{task_id}` 返回体中，业务结果在 **`result`** 对象内（例如 `result.output_dir`、`result.output_zip_path`），勿与顶层字段混淆。
@@ -44,7 +44,7 @@ curl "http://192.168.2.26:8666/api/v1/healthz"
 
 以下顺序按你当前最常用的两条工作流整理：
 
-- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-txt-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
+- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
 - 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> yolo-sliding-window-crop -> split-yolo-dataset 或直接 build-yolo-yaml -> zip/remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
 - 多层目录数据整理：`discover-leaf-dirs -> clean-nested-dataset -> xml-to-yolo -> aggregate-nested-dataset`
 
@@ -317,20 +317,22 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/reset-yolo-label-index/
 - `POST /api/v1/preprocess/split-yolo-dataset`
 - `POST /api/v1/preprocess/split-yolo-dataset/async`
 
+要求 `input_dir` 下同时存在 `images/` 与 `labels/`；若存在 `input_dir/classes.txt` 会自动复制到 `output_dir/classes.txt`。输出目录结构由 `output_layout` 控制（默认 `split_first`：`<output_dir>/<split>/images,labels`；`images_first`：`<output_dir>/images,labels/<split>`）。
+
 ```bash
-# 同步
+# 同步：最小使用示例
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/split-yolo-dataset" \
   -H "Content-Type: application/json" \
   -d '{
-    "dataset_dir": "./data/yolo_raw",
+    "input_dir": "./data/yolo_raw",
     "output_dir": "./data/yolo_split"
   }'
 
-# 异步
+# 异步：按需调整比例 / 输出布局
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/split-yolo-dataset/async" \
   -H "Content-Type: application/json" \
   -d '{
-    "dataset_dir": "./data/yolo_raw",
+    "input_dir": "./data/yolo_raw",
     "output_dir": "./data/yolo_split",
     "mode": "train_val_test",
     "train_ratio": 0.8,
@@ -344,10 +346,10 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/split-yolo-dataset/asyn
   }'
 ```
 
-## 10. YOLO TXT 数据增强（`yolo-txt-augment`）
+## 10. YOLO 数据增强（`yolo-augment`）
 
-- `POST /api/v1/preprocess/yolo-txt-augment`
-- `POST /api/v1/preprocess/yolo-txt-augment/async`
+- `POST /api/v1/preprocess/yolo-augment`
+- `POST /api/v1/preprocess/yolo-augment/async`
 
 仅支持 YOLO TXT 标注。输入目录固定为：
 
@@ -370,7 +372,7 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/split-yolo-dataset/asyn
 - `gaussian_blur`
 
 ```bash
-curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-txt-augment" \
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-augment" \
   -H "Content-Type: application/json" \
   -d '{
     "input_dir": "/media/qzq/16T/datasets/demo"
@@ -384,35 +386,29 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-txt-augment" \
 - 若 `labels/classes.txt` 存在，会复制到输出 `labels/`
 - 若未显式传 `output_dir`，默认输出到 `<input_dir>/augment`
 
-异步示例在同步 body 上增加 `callback_url`、`callback_timeout_seconds` 即可（同 §0）。
+异步端点为 `/yolo-augment/async`，在同步 body 上增加 `callback_url`、`callback_timeout_seconds` 即可（同 §0）。
 
 ## 11. YOLO 滑窗裁剪为小图数据集
 
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 - `POST /api/v1/preprocess/yolo-sliding-window-crop/async`
 
-默认行为保持兼容：窗口宽高默认都等于**图片高度**；`stride_x` 默认等于 `round(stride_ratio * 图片高度)`；`stride_y` 默认等于 `window_height`。如果手动传入 `window_width`、`window_height`、`stride_x`、`stride_y`，则按传入值覆盖对应默认。
-
-`labels_dir` 为可选：
-
-- 有 `labels_dir`：输出 `output_dir/images/` 和 `output_dir/labels/`，并保留现有 YOLO 标注裁剪/过滤逻辑
-- 无 `labels_dir`：只输出 `output_dir/images/`
+要求 `input_dir` 下包含 `images/` 子目录；若同时存在 `labels/` 则自动输出裁剪后的 YOLO 标注，否则只输出裁剪图片。窗口宽高默认等于**图片高度**；`stride_x` 默认等于 `round(stride_ratio * 图片高度)`；`stride_y` 默认等于 `window_height`。如果手动传入 `window_width`、`window_height`、`stride_x`、`stride_y`，则按传入值覆盖对应默认。
 
 ```bash
-# 同步：最小使用示例（标准模式）
+# 同步：最小使用示例（input_dir 下有 images/ 和 labels/）
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-sliding-window-crop" \
   -H "Content-Type: application/json" \
   -d '{
-    "images_dir": "/path/to/dataset/images",
-    "labels_dir": "/path/to/dataset/labels",
+    "input_dir": "/path/to/dataset",
     "output_dir": "/path/to/dataset/data_crops"
   }'
 
-# 异步：不传 labels_dir，仅输出 images
+# 异步：自定义窗口与步长
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-sliding-window-crop/async" \
   -H "Content-Type: application/json" \
   -d '{
-    "images_dir": "/path/to/dataset/images",
+    "input_dir": "/path/to/dataset",
     "output_dir": "/path/to/dataset/data_crops",
     "window_width": 2048,
     "window_height": 2048,
@@ -427,9 +423,9 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-sliding-window-cro
 
 响应要点：
 
-- `labels_dir` 有值时，响应中的 `labels_dir` 为实际使用的标注目录；未传时返回 `null`
+- `labels_dir`：`input_dir/labels` 存在时为实际路径，否则返回 `null`
 - `generated_crops` 为输出图片数
-- `generated_labels` 为输出标注行数；未传 `labels_dir` 时固定为 `0`
+- `generated_labels` 为输出标注行数；无 labels 时固定为 `0`
 
 命令行等价示例（带 labels）：
 
@@ -773,25 +769,22 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/remote-slurm-yolo-train
 - `POST /api/v1/preprocess/voc-bar-crop`
 - `POST /api/v1/preprocess/voc-bar-crop/async`
 
+要求 `input_dir` 下包含 `images/` 与 `xmls/` 子目录。
+
 ```bash
+# 同步：最小使用示例
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/voc-bar-crop" \
   -H "Content-Type: application/json" \
   -d '{
-    "images_dir": "/path/to/dataset/images",
-    "xmls_dir": "/path/to/dataset/xmls",
-    "output_dir": "/path/to/dataset/bar_crops",
-    "recursive": true
+    "input_dir": "/path/to/dataset",
+    "output_dir": "/path/to/dataset/bar_crops"
   }'
-```
 
-异步（`202 Accepted`，避免大批量同步请求超时；结果在 `GET /api/v1/preprocess/tasks/{task_id}` 的 `result` 中，亦可通过 `callback_url` 回调）：
-
-```bash
+# 异步
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/voc-bar-crop/async" \
   -H "Content-Type: application/json" \
   -d '{
-    "images_dir": "/path/to/dataset/images",
-    "xmls_dir": "/path/to/dataset/xmls",
+    "input_dir": "/path/to/dataset",
     "output_dir": "/path/to/dataset/bar_crops",
     "recursive": true,
     "callback_url": "http://127.0.0.1:9000/webhooks/preprocess-finished",

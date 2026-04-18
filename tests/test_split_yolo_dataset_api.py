@@ -16,7 +16,7 @@ def test_split_yolo_dataset_endpoint_train_val_test(
     response = client.post(
         "/api/v1/preprocess/split-yolo-dataset",
         json={
-            "dataset_dir": str(dataset_dir),
+            "input_dir": str(dataset_dir),
             "output_dir": str(output_dir),
             "mode": "train_val_test",
             "train_ratio": 0.5,
@@ -52,7 +52,7 @@ def test_split_yolo_dataset_endpoint_train_val(client: TestClient, case_dir: Pat
     response = client.post(
         "/api/v1/preprocess/split-yolo-dataset",
         json={
-            "dataset_dir": str(dataset_dir),
+            "input_dir": str(dataset_dir),
             "output_dir": str(output_dir),
             "mode": "train_val",
             "train_ratio": 0.6,
@@ -80,7 +80,7 @@ def test_split_yolo_dataset_endpoint_train_only(client: TestClient, case_dir: Pa
     response = client.post(
         "/api/v1/preprocess/split-yolo-dataset",
         json={
-            "dataset_dir": str(dataset_dir),
+            "input_dir": str(dataset_dir),
             "output_dir": str(output_dir),
             "mode": "train_only",
             "shuffle": False,
@@ -108,7 +108,7 @@ def test_split_yolo_dataset_endpoint_split_first_layout(
     response = client.post(
         "/api/v1/preprocess/split-yolo-dataset",
         json={
-            "dataset_dir": str(dataset_dir),
+            "input_dir": str(dataset_dir),
             "output_dir": str(output_dir),
             "mode": "train_val_test",
             "train_ratio": 0.5,

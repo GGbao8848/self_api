@@ -80,7 +80,7 @@ def test_split_yolo_dataset_async_endpoint(client: TestClient, case_dir: Path) -
     submit_resp = client.post(
         "/api/v1/preprocess/split-yolo-dataset/async",
         json={
-            "dataset_dir": str(dataset_dir),
+            "input_dir": str(dataset_dir),
             "output_dir": str(output_dir),
             "mode": "train_only",
             "shuffle": False,
@@ -332,8 +332,7 @@ def test_yolo_sliding_window_crop_async_endpoint(
     submit_resp = client.post(
         "/api/v1/preprocess/yolo-sliding-window-crop/async",
         json={
-            "images_dir": str(images_dir),
-            "labels_dir": str(labels_dir),
+            "input_dir": str(case_dir),
             "output_dir": str(output_dir),
             "min_vis_ratio": 0.5,
             "stride_ratio": 0.25,

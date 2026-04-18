@@ -23,8 +23,7 @@ def test_voc_bar_crop_horizontal_bar(client: TestClient, case_dir: Path) -> None
     r = client.post(
         "/api/v1/preprocess/voc-bar-crop",
         json={
-            "images_dir": str(images_dir),
-            "xmls_dir": str(xmls_dir),
+            "input_dir": str(case_dir),
             "output_dir": str(out_dir),
             "recursive": False,
         },
@@ -60,8 +59,7 @@ def test_voc_bar_crop_skips_vertical_box(client: TestClient, case_dir: Path) -> 
     r = client.post(
         "/api/v1/preprocess/voc-bar-crop",
         json={
-            "images_dir": str(images_dir),
-            "xmls_dir": str(xmls_dir),
+            "input_dir": str(case_dir),
             "output_dir": str(out_dir),
             "recursive": False,
         },

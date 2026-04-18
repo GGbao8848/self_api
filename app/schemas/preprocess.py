@@ -170,18 +170,15 @@ class XmlToYoloResponse(BaseModel):
 
 
 class SplitYoloDatasetRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    """在 input_dir/images 与 input_dir/labels 上做 train/val/test 划分。"""
 
-    dataset_dir: str = Field(
-        description="Dataset root directory containing images and labels folders",
-        validation_alias=AliasChoices("dataset_dir", "input_dir"),
+    input_dir: str = Field(
+        description="数据集根目录，要求包含 images/ 与 labels/",
     )
     output_dir: str | None = Field(
         default=None,
-        description="Output directory; defaults to <dataset_dir>/split_dataset",
+        description="输出目录；缺省时为 <input_dir>/split_dataset",
     )
-    images_dir_name: str = Field(default="images", description="Image folder name")
-    labels_dir_name: str = Field(default="labels", description="Label folder name")
     recursive: bool = Field(default=True, description="Search image files recursively")
     extensions: list[str] | None = Field(
         default=None,
@@ -233,7 +230,7 @@ class SplitYoloFileDetail(BaseModel):
 
 class SplitYoloDatasetResponse(BaseModel):
     status: str = "ok"
-    dataset_dir: str
+    input_dir: str
     output_dir: str
     mode: str
     total_images: int
@@ -247,13 +244,10 @@ class SplitYoloDatasetResponse(BaseModel):
 
 
 class ZipFolderRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     input_dir: str = Field(description="Input folder path to package")
     output_zip_path: str | None = Field(
         default=None,
         description="Output zip path; defaults to <input_dir_parent>/<input_dir_name>.zip",
-        validation_alias=AliasChoices("output_zip_path", "output_dir"),
     )
     include_root_dir: bool = Field(
         default=True,
@@ -274,11 +268,8 @@ class ZipFolderResponse(BaseModel):
 
 
 class UnzipArchiveRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     archive_path: str = Field(
         description="Zip archive path to extract",
-        validation_alias=AliasChoices("archive_path", "input_dir"),
     )
     output_dir: str | None = Field(
         default=None,
@@ -299,16 +290,8 @@ class UnzipArchiveResponse(BaseModel):
 
 
 class MovePathRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    source_path: str = Field(
-        description="Source file or directory path",
-        validation_alias=AliasChoices("source_path", "input_dir"),
-    )
-    target_dir: str = Field(
-        description="Target directory path",
-        validation_alias=AliasChoices("target_dir", "output_dir"),
-    )
+    source_path: str = Field(description="Source file or directory path")
+    target_dir: str = Field(description="Target directory path")
     overwrite: bool = Field(
         default=False,
         description="Whether to overwrite target when name conflicts",
@@ -323,16 +306,8 @@ class MovePathResponse(BaseModel):
 
 
 class CopyPathRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    source_path: str = Field(
-        description="Source file or directory path",
-        validation_alias=AliasChoices("source_path", "input_dir"),
-    )
-    target_dir: str = Field(
-        description="Target directory path",
-        validation_alias=AliasChoices("target_dir", "output_dir"),
-    )
+    source_path: str = Field(description="Source file or directory path")
+    target_dir: str = Field(description="Target directory path")
     overwrite: bool = Field(
         default=False,
         description="Whether to overwrite target when name conflicts",
@@ -486,17 +461,13 @@ class RemoteSlurmYoloTrainResponse(BaseModel):
 
 
 class YoloSlidingWindowCropRequest(BaseModel):
-    """YOLO 正方形滑窗裁剪：窗口边长=图片高度，仅水平滑动。"""
+    """YOLO 滑窗裁剪：固定读取 input_dir/images，自动检测 input_dir/labels（存在则同步输出 labels/）。"""
 
-    images_dir: str = Field(
-        description="Input images folder path",
-    )
-    labels_dir: str | None = Field(
-        default=None,
-        description="Optional input YOLO labels folder path (txt files)",
+    input_dir: str = Field(
+        description="输入数据集根目录，其下需包含 images/ 子目录；若存在 labels/ 则同步输出裁剪后的标注",
     )
     output_dir: str = Field(
-        description="Output dataset folder; will create images/ and labels/ subdirs",
+        description="输出目录，将创建 images/ 子目录（有 labels 时同时创建 labels/）",
     )
     window_width: int | None = Field(
         default=None,
@@ -876,7 +847,7 @@ class YoloSlidingWindowCropDetail(BaseModel):
 
 class YoloSlidingWindowCropResponse(BaseModel):
     status: str = "ok"
-    images_dir: str
+    input_dir: str
     labels_dir: str | None
     output_dir: str
     input_images: int
@@ -1021,7 +992,9 @@ class YoloTrainResponse(BaseModel):
     stderr: str
 
 
-class YoloTxtAugmentRequest(BaseModel):
+class YoloAugmentRequest(BaseModel):
+    """在 input_dir/images 与 input_dir/labels 上做离线数据增强，输出到 output_dir。"""
+
     input_dir: str = Field(
         description="输入数据集根目录，目录下需包含 images/ 与 labels/ 子目录",
     )
@@ -1040,7 +1013,7 @@ class YoloTxtAugmentRequest(BaseModel):
     gaussian_blur: bool = Field(default=True, description="是否生成高斯模糊增强")
 
 
-class YoloTxtAugmentFileDetail(BaseModel):
+class YoloAugmentFileDetail(BaseModel):
     source_image: str
     source_label: str | None = None
     generated_images: list[str] = Field(default_factory=list)
@@ -1048,7 +1021,7 @@ class YoloTxtAugmentFileDetail(BaseModel):
     skipped_reason: str | None = None
 
 
-class YoloTxtAugmentResponse(BaseModel):
+class YoloAugmentResponse(BaseModel):
     status: str = "ok"
     input_dir: str
     output_dir: str
@@ -1056,10 +1029,10 @@ class YoloTxtAugmentResponse(BaseModel):
     skipped_images: int
     generated_images: int
     generated_labels: int
-    details: list[YoloTxtAugmentFileDetail]
+    details: list[YoloAugmentFileDetail]
 
 
-class YoloTxtAugmentAsyncRequest(YoloTxtAugmentRequest):
+class YoloAugmentAsyncRequest(YoloAugmentRequest):
     callback_url: AnyHttpUrl | None = Field(
         default=None,
         description="Optional webhook URL that receives task result when finished",
@@ -1106,8 +1079,7 @@ class ResetYoloLabelIndexAsyncRequest(ResetYoloLabelIndexRequest):
 class VocBarCropRequest(BaseModel):
     """横向条带 VOC 目标：以框高为边长裁正方形，目标居中；输出小图与对应 XML。"""
 
-    images_dir: str = Field(description="图像目录（与 xmls 按相对路径 stem 配对）")
-    xmls_dir: str = Field(description="Pascal VOC XML 目录")
+    input_dir: str = Field(description="输入数据集根目录，其下需包含 images/ 与 xmls/ 子目录")
     output_dir: str = Field(description="输出根目录，将创建 images/ 与 xmls/ 子目录")
     recursive: bool = Field(default=True, description="是否递归扫描 xml")
 
@@ -1125,8 +1097,7 @@ class VocBarCropDetail(BaseModel):
 
 class VocBarCropResponse(BaseModel):
     status: str = "ok"
-    images_dir: str
-    xmls_dir: str
+    input_dir: str
     output_dir: str
     processed_xml_files: int
     skipped_xml_files: int

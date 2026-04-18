@@ -601,7 +601,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$('base_config').item.json.self_api}}/api/v1/preprocess/yolo-txt-augment",
+        "url": "={{$('base_config').item.json.self_api}}/api/v1/preprocess/yolo-augment",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -658,12 +658,8 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "images_dir",
-              "value": "={{ $('split-yolo-dataset').item.json.output_dir }}/train/images"
-            },
-            {
-              "name": "labels_dir",
-              "value": "={{ $('split-yolo-dataset').item.json.output_dir }}/train/labels"
+              "name": "input_dir",
+              "value": "={{ $('split-yolo-dataset').item.json.output_dir }}/train"
             },
             {
               "name": "output_dir",
@@ -701,7 +697,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$('base_config').item.json.self_api}}/api/v1/preprocess/yolo-txt-augment",
+        "url": "={{$('base_config').item.json.self_api}}/api/v1/preprocess/yolo-augment",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -758,12 +754,8 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "images_dir",
-              "value": "={{$('split-yolo-dataset').item.json.output_dir}}/val/images"
-            },
-            {
-              "name": "labels_dir",
-              "value": "={{$('split-yolo-dataset').item.json.output_dir}}/val/labels"
+              "name": "input_dir",
+              "value": "={{$('split-yolo-dataset').item.json.output_dir}}/val"
             },
             {
               "name": "output_dir",

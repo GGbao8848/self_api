@@ -29,8 +29,7 @@ def test_yolo_sliding_window_crop_wide_image(
     response = client.post(
         "/api/v1/preprocess/yolo-sliding-window-crop",
         json={
-            "images_dir": str(images_dir),
-            "labels_dir": str(labels_dir),
+            "input_dir": str(case_dir),
             "output_dir": str(output_dir),
             "min_vis_ratio": 0.5,
             "stride_ratio": 0.25,
@@ -73,8 +72,7 @@ def test_yolo_sliding_window_crop_only_wide_skips_square(
     response = client.post(
         "/api/v1/preprocess/yolo-sliding-window-crop",
         json={
-            "images_dir": str(images_dir),
-            "labels_dir": str(labels_dir),
+            "input_dir": str(case_dir),
             "output_dir": str(output_dir),
             "only_wide": True,
         },
@@ -109,8 +107,7 @@ def test_yolo_sliding_window_crop_only_wide_false_processes_square(
     response = client.post(
         "/api/v1/preprocess/yolo-sliding-window-crop",
         json={
-            "images_dir": str(images_dir),
-            "labels_dir": str(labels_dir),
+            "input_dir": str(case_dir),
             "output_dir": str(output_dir),
             "only_wide": False,
         },
@@ -150,8 +147,7 @@ def test_yolo_sliding_window_crop_supports_manual_window_and_stride(
     response = client.post(
         "/api/v1/preprocess/yolo-sliding-window-crop",
         json={
-            "images_dir": str(images_dir),
-            "labels_dir": str(labels_dir),
+            "input_dir": str(case_dir),
             "output_dir": str(output_dir),
             "window_width": 4,
             "window_height": 4,
@@ -188,7 +184,7 @@ def test_yolo_sliding_window_crop_without_labels_only_writes_images(
     response = client.post(
         "/api/v1/preprocess/yolo-sliding-window-crop",
         json={
-            "images_dir": str(images_dir),
+            "input_dir": str(case_dir),
             "output_dir": str(output_dir),
             "window_width": 4,
             "window_height": 4,

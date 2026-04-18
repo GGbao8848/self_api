@@ -212,22 +212,19 @@ def _sliding_window_crop(
 
 
 def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloSlidingWindowCropResponse:
-    images_dir = resolve_safe_path(
-        request.images_dir,
-        field_name="images_dir",
+    input_dir = resolve_safe_path(
+        request.input_dir,
+        field_name="input_dir",
         must_exist=True,
         expect_directory=True,
     )
-    labels_dir = (
-        resolve_safe_path(
-            request.labels_dir,
-            field_name="labels_dir",
-            must_exist=True,
-            expect_directory=True,
-        )
-        if request.labels_dir
-        else None
-    )
+    images_dir = input_dir / "images"
+    if not images_dir.exists() or not images_dir.is_dir():
+        raise ValueError(f"images directory does not exist: {images_dir}")
+
+    labels_candidate = input_dir / "labels"
+    labels_dir = labels_candidate if labels_candidate.exists() and labels_candidate.is_dir() else None
+
     output_dir = resolve_safe_path(request.output_dir, field_name="output_dir")
 
     out_img_dir = output_dir / "images"
@@ -314,7 +311,7 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
             )
 
     return YoloSlidingWindowCropResponse(
-        images_dir=str(images_dir),
+        input_dir=str(input_dir),
         labels_dir=str(labels_dir) if labels_dir is not None else None,
         output_dir=str(output_dir),
         input_images=len(image_paths),

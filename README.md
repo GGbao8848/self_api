@@ -179,7 +179,7 @@ make run
 
 文档与接口说明以下面两条常用工作流为主线：
 
-- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-txt-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
+- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
 - 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> yolo-sliding-window-crop -> split-yolo-dataset 或直接 build-yolo-yaml -> zip/remote-transfer/remote-unzip -> yolo-train / remote-slurm-yolo-train`
 - 多层目录整理：`discover-leaf-dirs -> clean-nested-dataset -> xml-to-yolo -> aggregate-nested-dataset`
 
@@ -220,14 +220,14 @@ make run
 
 - `POST /api/v1/preprocess/split-yolo-dataset`
 
-把标准 YOLO 数据集划分为 `train/val/test`，供后续增强、滑窗或直接训练使用。
+把标准 YOLO 数据集划分为 `train/val/test`，供后续增强、滑窗或直接训练使用。只认 `input_dir` / `output_dir`，固定读取 `input_dir/images` 与 `input_dir/labels`；最小调用仅需 `input_dir`（`output_dir` 缺省为 `<input_dir>/split_dataset`）。
 
 ### 4.9 数据增强与滑窗裁剪
 
-- `POST /api/v1/preprocess/yolo-txt-augment`
+- `POST /api/v1/preprocess/yolo-augment`
 - `POST /api/v1/preprocess/yolo-sliding-window-crop`
 
-`yolo-txt-augment` 适合小图 baseline 的增强；`yolo-sliding-window-crop` 适合大图转小图训练，并可同步输出裁剪后的 labels。
+`yolo-augment` 适合小图 baseline 的增强；`yolo-sliding-window-crop` 适合大图转小图训练：传 `input_dir`（含 `images/`），若 `labels/` 存在则自动同步输出裁剪后的 YOLO 标注。
 
 ### 4.10 生成训练 YAML
 
