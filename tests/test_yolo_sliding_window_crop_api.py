@@ -205,3 +205,57 @@ def test_yolo_sliding_window_crop_without_labels_only_writes_images(
     out_labels_dir = output_dir / "labels"
     assert len(out_images) == 9
     assert not out_labels_dir.exists()
+
+
+def test_yolo_sliding_window_crop_supports_split_dataset_tree(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    input_dir = case_dir / "split_dataset"
+    output_dir = case_dir / "split_dataset_crop"
+
+    train_images = input_dir / "train" / "images"
+    train_labels = input_dir / "train" / "labels"
+    val_images = input_dir / "val" / "images"
+    val_labels = input_dir / "val" / "labels"
+
+    create_image(train_images / "train_a.png", color=(20, 20, 200), size=(8, 8))
+    train_labels.mkdir(parents=True, exist_ok=True)
+    (train_labels / "train_a.txt").write_text(
+        "0 0.500000 0.500000 0.400000 0.400000\n",
+        encoding="utf-8",
+    )
+
+    create_image(val_images / "val_a.png", color=(200, 20, 20), size=(8, 8))
+    val_labels.mkdir(parents=True, exist_ok=True)
+    (val_labels / "val_a.txt").write_text(
+        "0 0.500000 0.500000 0.400000 0.400000\n",
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/v1/preprocess/yolo-sliding-window-crop",
+        json={
+            "input_dir": str(input_dir),
+            "output_dir": str(output_dir),
+            "only_wide": False,
+        },
+    )
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["input_images"] == 2
+    assert data["processed_images"] == 2
+    assert data["generated_crops"] == 2
+    assert data["generated_labels"] == 2
+    assert data["labels_dir"] is None
+
+    train_out_images = list((output_dir / "train" / "images").rglob("*.png"))
+    train_out_labels = list((output_dir / "train" / "labels").rglob("*.txt"))
+    val_out_images = list((output_dir / "val" / "images").rglob("*.png"))
+    val_out_labels = list((output_dir / "val" / "labels").rglob("*.txt"))
+
+    assert len(train_out_images) == 1
+    assert len(train_out_labels) == 1
+    assert len(val_out_images) == 1
+    assert len(val_out_labels) == 1

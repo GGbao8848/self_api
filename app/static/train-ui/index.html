@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>训练任务提交 · self_api</title>
+  <link rel="stylesheet" href="/static/train-ui/css/train-ui.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳到主内容</a>
+  <div class="page">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>self_api · 训练启动</span>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" class="secondary topbar-btn" id="openSettingsBtn" aria-haspopup="dialog" aria-controls="settingsDialog" aria-expanded="false">设置</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell" id="main-content" tabindex="-1">
+      <section class="hero hero--compact" aria-labelledby="page-title">
+        <h1 id="page-title">模型训练任务提交台</h1>
+        <span class="hero-badge">POST · launch-training-workflow</span>
+        <p>日常只需填写下方任务参数并提交。API 根地址、工作区路径、远端 SSH 等低频项在「设置」中维护。</p>
+      </section>
+
+      <p class="run-summary" id="runSummaryBar" aria-live="polite">正在加载摘要…</p>
+
+      <div class="grid">
+        <div>
+          <section class="panel" aria-labelledby="task-section-title">
+            <h2 class="section-title" id="task-section-title">任务</h2>
+            <div class="section-note">选择项目与 detector，填写<strong>未处理数据路径</strong>；训练参数见下方「训练参数」。</div>
+            <div class="field-grid">
+              <div>
+                <label for="projectName">项目名称</label>
+                <select id="projectName"></select>
+              </div>
+              <div>
+                <label for="detectorName">detector</label>
+                <select id="detectorName"></select>
+              </div>
+            </div>
+
+            <details class="disclosure mt-3">
+              <summary class="disclosure__summary">管理项目与 detector<span class="disclosure__hint">（不常改）</span></summary>
+              <div class="disclosure__body">
+                <div class="row">
+                  <div>
+                    <label for="newProjectName">新增项目</label>
+                    <input id="newProjectName" placeholder="TVDS" autocomplete="off">
+                  </div>
+                  <button type="button" class="secondary mini" id="addProject">添加项目</button>
+                </div>
+                <div class="row mt-3">
+                  <div>
+                    <label for="newDetectorName">为当前项目新增 detector</label>
+                    <input id="newDetectorName" placeholder="nzxj_louyou" autocomplete="off">
+                  </div>
+                  <button type="button" class="ghost mini" id="addDetector">添加 detector</button>
+                </div>
+                <div class="row mt-3">
+                  <button type="button" class="danger mini" id="removeProject">删除当前项目</button>
+                  <button type="button" class="danger mini" id="removeDetector">删除当前 detector</button>
+                </div>
+                <div class="meta" id="projectMeta"></div>
+              </div>
+            </details>
+
+            <div class="field-grid one mt-3">
+              <div>
+                <label for="originalDatasetDir">未处理数据路径 <span class="req" aria-hidden="true">*</span></label>
+                <input id="originalDatasetDir" placeholder="/path/to/raw_dataset" autocomplete="off" required aria-required="true" enterkeyhint="done">
+                <div class="inline-note">必填；原始数据所在目录。</div>
+              </div>
+            </div>
+
+            <fieldset class="fieldset-plain mt-3">
+              <legend class="fieldset-plain__legend">训练参数</legend>
+              <div class="field-grid">
+                <div>
+                  <label for="trainEnv">训练环境</label>
+                  <input id="trainEnv" value="yolo_pose" autocomplete="off">
+                </div>
+                <div>
+                  <label for="trainModel">模型</label>
+                  <input id="trainModel" value="yolo11s.pt" autocomplete="off">
+                </div>
+                <div>
+                  <label for="trainEpochs">epochs</label>
+                  <input id="trainEpochs" type="number" min="1" value="5" inputmode="numeric" enterkeyhint="next">
+                </div>
+                <div>
+                  <label for="trainImgsz">imgsz</label>
+                  <input id="trainImgsz" type="number" min="1" value="640" inputmode="numeric" enterkeyhint="next">
+                </div>
+                <div>
+                  <label for="splitMode">split mode</label>
+                  <select id="splitMode">
+                    <option value="train_val">train_val</option>
+                    <option value="train_val_test">train_val_test</option>
+                    <option value="train_only">train_only</option>
+                  </select>
+                </div>
+              </div>
+            </fieldset>
+          </section>
+
+          <section class="panel" aria-labelledby="submit-mode-title">
+            <h2 class="section-title" id="submit-mode-title">本次提交</h2>
+            <div class="section-note">选「本地」时后端会将发往 n8n 的远端字段清空；SSH 凭据在「设置」中填写。</div>
+
+            <div class="run-target-wrap">
+              <span class="run-target-label" id="runTargetLegend">执行目标</span>
+              <fieldset class="run-target" role="radiogroup" aria-labelledby="runTargetLegend">
+                <legend class="sr-only">本次提交执行目标</legend>
+                <label class="choice">
+                  <input type="radio" name="runTarget" value="local" checked>
+                  <span>本地</span>
+                </label>
+                <label class="choice">
+                  <input type="radio" name="runTarget" value="remote_sftp" id="runTargetRemote">
+                  <span>远端 SFTP</span>
+                </label>
+              </fieldset>
+            </div>
+
+            <div class="meta">
+              <div class="meta-card">
+                <strong>workflow_mode（本次）</strong>
+                <div id="executionMode">local（本次提交）</div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div>
+          <section class="panel panel--sticky-actions" aria-labelledby="submit-panel-title">
+            <h2 class="section-title" id="submit-panel-title">提交</h2>
+            <div id="statusBox" class="status info" role="status" aria-live="polite"></div>
+            <div class="row submit-actions">
+              <button type="button" class="primary" id="launchButton">启动训练工作流</button>
+              <button type="button" class="secondary" id="copyPayload" aria-label="复制任务 JSON 到剪贴板">复制任务体</button>
+            </div>
+            <div class="inline-note mt-3">请求 JSON 含 <code>run_target</code>。</div>
+
+            <details class="disclosure disclosure--payload mt-3">
+              <summary class="disclosure__summary">查看或编辑预览 · 任务体 JSON</summary>
+              <label for="payloadPreview" class="label-above-json">任务体预览</label>
+              <textarea id="payloadPreview" readonly aria-label="任务体 JSON 预览" tabindex="0"></textarea>
+            </details>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="settingsDialog" class="settings-dialog" aria-labelledby="settingsDialogTitle">
+    <div class="settings-dialog__inner">
+      <header class="settings-dialog__head">
+        <div class="settings-dialog__head-row">
+          <h2 id="settingsDialogTitle">连接与路径</h2>
+          <button type="button" class="settings-dialog__close" id="closeSettingsX" aria-label="关闭设置">&times;</button>
+        </div>
+        <p class="settings-dialog__lede">self_api 根地址、工作区、远端路径与 SSH 修改频率低；改完后点「保存设置」写入本机浏览器。</p>
+      </header>
+
+      <div class="settings-dialog__body">
+      <section class="settings-section">
+        <h3 class="settings-section__title">API</h3>
+        <div class="field-grid one">
+          <div>
+            <label for="selfApiUrl">self_api_url</label>
+            <input id="selfApiUrl" type="url" inputmode="url" placeholder="http://192.168.x.x:8666" autocomplete="off" enterkeyhint="next">
+            <div class="inline-note">默认等于当前页面地址；仅当 workflow 需要请求<strong>别的机器</strong>上的 API 时再改。</div>
+            <div class="row mt-3">
+              <button type="button" class="ghost mini" id="resetSelfApiUrlBtn">恢复为当前页</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h3 class="settings-section__title">工作区</h3>
+        <div class="field-grid one">
+          <div>
+            <label for="workspaceRootDir">workspace_root_dir</label>
+            <input id="workspaceRootDir" placeholder="/data/workspace_root" autocomplete="off" enterkeyhint="next">
+          </div>
+        </div>
+        <div class="row mt-3">
+          <button type="button" class="secondary mini" id="saveWorkspace">记住工作区</button>
+          <button type="button" class="danger mini" id="clearWorkspaces">清空历史</button>
+        </div>
+        <div class="chips" id="workspaceChips"></div>
+      </section>
+
+      <section class="settings-section">
+        <h3 class="settings-section__title">远端 SSH 与远端根目录</h3>
+        <p class="credential-hint" id="sshCredentialHint"></p>
+        <div class="field-grid">
+          <div>
+            <label for="remoteHost">remote_host</label>
+            <input id="remoteHost" autocomplete="off" enterkeyhint="next">
+          </div>
+          <div>
+            <label for="remoteUsername">SSH 用户</label>
+            <input id="remoteUsername" placeholder="sk" autocomplete="off" enterkeyhint="next">
+          </div>
+          <div>
+            <label for="remoteKeyPath">SSH 私钥路径</label>
+            <input id="remoteKeyPath" placeholder="~/.ssh/id_rsa" autocomplete="off" enterkeyhint="next">
+          </div>
+          <div>
+            <label for="remoteWorkspaceRootDir">remote_workspace_root_dir</label>
+            <input id="remoteWorkspaceRootDir" placeholder="默认可与 workspace 相同" autocomplete="off" enterkeyhint="done">
+          </div>
+        </div>
+      </section>
+      </div>
+
+      <footer class="settings-dialog__footer">
+        <button type="button" class="primary" id="saveSettingsBtn">保存设置</button>
+        <button type="button" class="secondary" id="closeSettingsBtn">关闭</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <script type="module" src="/static/train-ui/js/main.js"></script>
+</body>
+</html>

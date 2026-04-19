@@ -47,6 +47,9 @@ from app.schemas.preprocess import (
     BuildYoloYamlAsyncRequest,
     BuildYoloYamlRequest,
     BuildYoloYamlResponse,
+    PublishYoloDatasetAsyncRequest,
+    PublishYoloDatasetRequest,
+    PublishYoloDatasetResponse,
     YoloTrainAsyncRequest,
     YoloTrainRequest,
     YoloTrainResponse,
@@ -83,6 +86,7 @@ from app.services.nested_dataset import (
 from app.services.split_yolo_dataset import run_split_yolo_dataset
 from app.services.task_manager import get_task, submit_task
 from app.services.build_yolo_yaml import run_build_yolo_yaml
+from app.services.publish_yolo_dataset import run_publish_yolo_dataset
 from app.services.yolo_train import run_yolo_train
 from app.services.yolo_augment import run_yolo_augment
 from app.services.annotation_visualize import run_annotate_visualize
@@ -737,6 +741,42 @@ def build_yolo_yaml_async(
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_build_yolo_yaml(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/publish-yolo-dataset", response_model=PublishYoloDatasetResponse)
+def publish_yolo_dataset(payload: PublishYoloDatasetRequest) -> PublishYoloDatasetResponse:
+    try:
+        return run_publish_yolo_dataset(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/publish-yolo-dataset/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def publish_yolo_dataset_async(
+    payload: PublishYoloDatasetAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "publish_yolo_dataset"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = PublishYoloDatasetRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_publish_yolo_dataset(sync_payload).model_dump(),
         callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )

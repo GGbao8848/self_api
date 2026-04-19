@@ -33,6 +33,8 @@ def run_yolo_train(request: YoloTrainRequest) -> YoloTrainResponse:
         f"project={request.project}",
         f"name={request.name}",
     ]
+    if request.batch is not None:
+        cmd.append(f"batch={request.batch}")
 
     proc = subprocess.run(
         cmd,

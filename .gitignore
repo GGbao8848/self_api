@@ -72,3 +72,5 @@ tmp_generate_datasets.py
 data/
 TVDS/
 app/services/_ignored/
+workspace_root/
+local_workspace_root/

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 import re
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -254,6 +256,42 @@ def _collect_images_dirs(
     return found
 
 
+def _collect_split_images_dirs_recursive(
+    *,
+    root: Path,
+    split_names: list[str],
+    images_subdir: str,
+    exts: set[str],
+) -> dict[str, list[Path]]:
+    split_set = set(split_names)
+    found: dict[str, list[Path]] = {split: [] for split in split_names}
+    seen: dict[str, set[Path]] = {split: set() for split in split_names}
+
+    def add(split: str, candidate: Path) -> None:
+        resolved = candidate.resolve()
+        if resolved in seen[split]:
+            return
+        if not _dir_has_images(resolved, exts):
+            return
+        seen[split].add(resolved)
+        found[split].append(resolved)
+
+    for candidate in sorted(root.rglob("*"), key=lambda path: path.as_posix()):
+        if not candidate.is_dir():
+            continue
+
+        # split_first style anywhere in the tree: .../<split>/images
+        if candidate.name == images_subdir and candidate.parent.name in split_set:
+            add(candidate.parent.name, candidate)
+            continue
+
+        # images_first style anywhere in the tree: .../images/<split>
+        if candidate.name in split_set and candidate.parent.name == images_subdir:
+            add(candidate.name, candidate)
+
+    return {split: paths for split, paths in found.items() if paths}
+
+
 def _scan_splits_for_layout(
     *,
     root: Path,
@@ -261,25 +299,53 @@ def _scan_splits_for_layout(
     images_subdir: str,
     layout: str,
     exts: set[str],
-) -> tuple[list[str], dict[str, list[Path]]]:
+) -> tuple[list[str], dict[str, list[Path]], int]:
     included: list[str] = []
     split_dirs: dict[str, list[Path]] = {}
+    direct_match_splits = 0
+    recursive_split_dirs = _collect_split_images_dirs_recursive(
+        root=root,
+        split_names=split_names,
+        images_subdir=images_subdir,
+        exts=exts,
+    )
+
     for sp in split_names:
         if layout == "split_first":
             split_root = root / sp
         else:
             split_root = root / images_subdir / sp
-        if not split_root.is_dir():
-            continue
-        matched = _collect_images_dirs(
-            split_root=split_root,
-            images_subdir=images_subdir,
-            exts=exts,
-        )
+
+        matched: list[Path] = []
+        seen: set[Path] = set()
+        had_direct_match = False
+
+        if split_root.is_dir():
+            for path in _collect_images_dirs(
+                split_root=split_root,
+                images_subdir=images_subdir,
+                exts=exts,
+            ):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                matched.append(resolved)
+                had_direct_match = True
+
+        for path in recursive_split_dirs.get(sp, []):
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            matched.append(resolved)
+
         if matched:
+            if had_direct_match:
+                direct_match_splits += 1
             included.append(sp)
             split_dirs[sp] = matched
-    return included, split_dirs
+    return included, split_dirs, direct_match_splits
 
 
 def _pick_effective_root_and_layout(
@@ -305,7 +371,7 @@ def _pick_effective_root_and_layout(
         if not cand.is_dir():
             continue
         for li, layout in enumerate(("split_first", "images_first")):
-            included, split_dirs = _scan_splits_for_layout(
+            included, split_dirs, direct_match_splits = _scan_splits_for_layout(
                 root=cand,
                 split_names=split_names,
                 images_subdir=images_subdir,
@@ -315,7 +381,7 @@ def _pick_effective_root_and_layout(
             score = len(included)
             if score == 0:
                 continue
-            key = (score, -prio, -li)
+            key = (score, direct_match_splits, -prio, -li)
             if best_key is None or key > best_key:
                 best_key = key
                 best = (cand, layout, included, split_dirs)
@@ -344,12 +410,51 @@ def _resolve_classes_file_optional(
     for p in (
         effective_root / "classes.txt",
         root_input / "classes.txt",
+        root_input.parent / "classes.txt",
         root_input / "yolo_split" / "classes.txt",
         root_input / "dataset" / "classes.txt",
     ):
         if p.is_file():
             return p.resolve()
     return None
+
+
+def _default_dataset_version(detector_name: str) -> str:
+    return f"{detector_name}_{datetime.now().strftime('%Y%m%d_%H%M')}"
+
+
+def _publish_dataset_tree(
+    *,
+    effective_root: Path,
+    root_input: Path,
+    split_dirs: dict[str, list[Path]],
+    classes_path: Path | None,
+    project_root_dir: Path,
+    detector_name: str,
+    dataset_version: str,
+) -> tuple[Path, dict[str, list[Path]], Path | None]:
+    dataset_dir = project_root_dir / detector_name / "datasets" / dataset_version
+    if dataset_dir.exists():
+        raise ValueError(f"published dataset directory already exists: {dataset_dir}")
+
+    dataset_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(effective_root, dataset_dir)
+
+    published_split_dirs: dict[str, list[Path]] = {}
+    for split, paths in split_dirs.items():
+        published_split_dirs[split] = [
+            (dataset_dir / path.relative_to(effective_root)).resolve()
+            for path in paths
+        ]
+
+    published_classes_path: Path | None = None
+    if classes_path is not None:
+        candidate = dataset_dir / classes_path.name
+        if classes_path.resolve() != candidate.resolve():
+            shutil.copy2(classes_path, candidate)
+        published_classes_path = candidate.resolve()
+
+    return dataset_dir.resolve(), published_split_dirs, published_classes_path
 
 
 def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
@@ -364,6 +469,17 @@ def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
     split_names = list(request.split_names) if request.split_names else list(_DEFAULT_SPLITS)
     images_subdir = request.images_subdir_name.strip() or "images"
     exts = normalize_extensions(None)
+    detector_name = request.detector_name.strip() if request.detector_name else None
+    dataset_version = request.dataset_version.strip() if request.dataset_version else None
+
+    if (request.project_root_dir is None) != (detector_name is None):
+        raise ValueError("project_root_dir and detector_name must be both set or both omitted")
+    if dataset_version and not (request.project_root_dir and detector_name):
+        raise ValueError("dataset_version requires project_root_dir and detector_name")
+    if request.project_root_dir and (request.path_prefix_replace_from or request.path_prefix_replace_to):
+        raise ValueError(
+            "path_prefix_replace_from/to cannot be used together with project_root_dir publishing mode"
+        )
 
     effective_root, _layout_mode, included, split_dirs = _pick_effective_root_and_layout(
         root_input,
@@ -411,6 +527,30 @@ def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
             "path_prefix_replace_from and path_prefix_replace_to must be both set or both omitted"
         )
 
+    published_dataset_dir: Path | None = None
+    recommended_train_project: str | None = None
+    recommended_train_name: str | None = None
+
+    if request.project_root_dir and detector_name:
+        project_root_dir = resolve_safe_path(
+            request.project_root_dir,
+            field_name="project_root_dir",
+            must_exist=False,
+        )
+        dataset_version = dataset_version or _default_dataset_version(detector_name)
+        published_dataset_dir, split_dirs, classes_path = _publish_dataset_tree(
+            effective_root=effective_root,
+            root_input=root_input,
+            split_dirs=split_dirs,
+            classes_path=classes_path,
+            project_root_dir=project_root_dir,
+            detector_name=detector_name,
+            dataset_version=dataset_version,
+        )
+        effective_root = published_dataset_dir
+        recommended_train_project = str((project_root_dir / detector_name / "runs" / "detect").resolve())
+        recommended_train_name = dataset_version
+
     split_abs_paths: dict[str, list[str]] = {}
     for sp in included:
         split_abs_paths[sp] = []
@@ -428,11 +568,23 @@ def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
         last_yaml_merged = bool(last_paths)
         included_order = _order_included_from_merged(split_abs_paths, split_names)
 
-    output_yaml = resolve_safe_path(
-        request.output_yaml_path,
-        field_name="output_yaml_path",
-        must_exist=False,
-    )
+    if request.output_yaml_path is None:
+        if not (published_dataset_dir and dataset_version):
+            raise ValueError("output_yaml_path is required unless project_root_dir + detector_name are provided")
+        output_yaml = published_dataset_dir / f"{dataset_version}.yaml"
+    else:
+        output_yaml = resolve_safe_path(
+            request.output_yaml_path,
+            field_name="output_yaml_path",
+            must_exist=False,
+        )
+        if published_dataset_dir and dataset_version:
+            expected_yaml = (published_dataset_dir / f"{dataset_version}.yaml").resolve()
+            if output_yaml != expected_yaml:
+                raise ValueError(
+                    "when project_root_dir + detector_name are provided, output_yaml_path must equal "
+                    f"{expected_yaml}"
+                )
     output_yaml.parent.mkdir(parents=True, exist_ok=True)
     content = _build_yaml_lines(
         split_abs_paths=split_abs_paths,
@@ -449,6 +601,10 @@ def run_build_yolo_yaml(request: BuildYoloYamlRequest) -> BuildYoloYamlResponse:
         dataset_root=str(effective_root.resolve()),
         splits_included=included_order,
         classes_count=len(class_names),
+        dataset_version=dataset_version,
+        published_dataset_dir=str(published_dataset_dir) if published_dataset_dir is not None else None,
+        recommended_train_project=recommended_train_project,
+        recommended_train_name=recommended_train_name,
         last_yaml_merged=last_yaml_merged,
         last_yaml_source=last_yaml_source,
     )

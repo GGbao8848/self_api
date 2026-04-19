@@ -25,6 +25,32 @@ _AUGMENTATION_SPECS: list[tuple[str, str]] = [
 ]
 
 
+def _discover_dataset_units(input_dir: Path) -> list[tuple[Path, Path, Path]]:
+    """Find dataset units as (relative_root, images_dir, labels_dir)."""
+    dataset_units: list[tuple[Path, Path, Path]] = []
+    seen_images_dirs: set[Path] = set()
+
+    direct_images_dir = input_dir / "images"
+    direct_labels_dir = input_dir / "labels"
+    if direct_images_dir.is_dir() and direct_labels_dir.is_dir():
+        dataset_units.append((Path("."), direct_images_dir, direct_labels_dir))
+        seen_images_dirs.add(direct_images_dir.resolve())
+
+    for images_dir in sorted(p for p in input_dir.rglob("images") if p.is_dir()):
+        resolved = images_dir.resolve()
+        if resolved in seen_images_dirs:
+            continue
+
+        dataset_root = images_dir.parent
+        labels_dir = dataset_root / "labels"
+        if not labels_dir.is_dir():
+            continue
+        dataset_units.append((dataset_root.relative_to(input_dir), images_dir, labels_dir))
+        seen_images_dirs.add(resolved)
+
+    return dataset_units
+
+
 def _load_yolo_labels(label_path: Path) -> list[tuple[int, float, float, float, float]]:
     if not label_path.exists():
         raise ValueError(f"label file not found: {label_path}")
@@ -108,21 +134,12 @@ def run_yolo_augment(request: YoloAugmentRequest) -> YoloAugmentResponse:
     if output_dir == input_dir:
         raise ValueError("output_dir cannot equal input_dir")
 
-    images_dir = input_dir / "images"
-    labels_dir = input_dir / "labels"
-    if not images_dir.is_dir():
-        raise ValueError(f"images directory not found: {images_dir}")
-    if not labels_dir.is_dir():
-        raise ValueError(f"labels directory not found: {labels_dir}")
-
-    output_images_dir = output_dir / "images"
-    output_labels_dir = output_dir / "labels"
-    output_images_dir.mkdir(parents=True, exist_ok=True)
-    output_labels_dir.mkdir(parents=True, exist_ok=True)
-
-    classes_file = labels_dir / "classes.txt"
-    if classes_file.exists():
-        shutil.copy2(classes_file, output_labels_dir / "classes.txt")
+    dataset_units = _discover_dataset_units(input_dir)
+    if not dataset_units:
+        raise ValueError(
+            f"no paired images/labels directories found under: {input_dir}; expected "
+            f"{input_dir / 'images'} and {input_dir / 'labels'} or nested */images + */labels"
+        )
 
     selected_augmentations = [
         suffix for field_name, suffix in _AUGMENTATION_SPECS if getattr(request, field_name)
@@ -130,60 +147,74 @@ def run_yolo_augment(request: YoloAugmentRequest) -> YoloAugmentResponse:
     if not selected_augmentations:
         raise ValueError("at least one augmentation option must be enabled")
 
-    image_paths = list_image_paths(images_dir, recursive=request.recursive)
-    details: list[YoloTxtAugmentFileDetail] = []
+    details: list[YoloAugmentFileDetail] = []
     processed_images = 0
     skipped_images = 0
     generated_images = 0
     generated_labels = 0
 
-    for image_path in image_paths:
+    for relative_root, images_dir, labels_dir in dataset_units:
         ensure_current_task_active()
-        rel_path = image_path.relative_to(images_dir)
-        label_path = (labels_dir / rel_path).with_suffix(".txt")
-        detail = YoloAugmentFileDetail(
-            source_image=str(image_path),
-            source_label=str(label_path),
-        )
+        output_base_dir = output_dir if relative_root == Path(".") else output_dir / relative_root
+        output_images_dir = output_base_dir / "images"
+        output_labels_dir = output_base_dir / "labels"
+        output_images_dir.mkdir(parents=True, exist_ok=True)
+        output_labels_dir.mkdir(parents=True, exist_ok=True)
 
-        if not label_path.exists():
-            detail.skipped_reason = "label file not found"
-            skipped_images += 1
+        classes_file = labels_dir / "classes.txt"
+        if classes_file.exists():
+            shutil.copy2(classes_file, output_labels_dir / "classes.txt")
+
+        image_paths = list_image_paths(images_dir, recursive=request.recursive)
+        for image_path in image_paths:
+            ensure_current_task_active()
+            rel_path = image_path.relative_to(images_dir)
+            label_path = (labels_dir / rel_path).with_suffix(".txt")
+            detail = YoloAugmentFileDetail(
+                source_image=str(image_path),
+                source_label=str(label_path),
+            )
+
+            if not label_path.exists():
+                detail.skipped_reason = "label file not found"
+                skipped_images += 1
+                details.append(detail)
+                continue
+
+            try:
+                labels = _load_yolo_labels(label_path)
+                with Image.open(image_path) as img:
+                    source_image = img.convert("RGB")
+                    for augmentation_name in selected_augmentations:
+                        augmented_image = _apply_image_transform(source_image, augmentation_name)
+                        augmented_labels = _apply_label_transform(labels, augmentation_name)
+
+                        target_rel = rel_path.with_name(
+                            f"{rel_path.stem}_{augmentation_name}{rel_path.suffix}"
+                        )
+                        target_image = output_images_dir / target_rel
+                        target_label = output_labels_dir / target_rel.with_suffix(".txt")
+
+                        if (target_image.exists() or target_label.exists()) and not request.overwrite:
+                            continue
+
+                        target_image.parent.mkdir(parents=True, exist_ok=True)
+                        target_label.parent.mkdir(parents=True, exist_ok=True)
+                        augmented_image.save(target_image)
+                        _save_yolo_labels(target_label, augmented_labels)
+
+                        generated_images += 1
+                        generated_labels += 1
+                        detail.generated_images.append(str(target_image))
+                        detail.generated_labels.append(str(target_label))
+            except (OSError, ValueError) as exc:
+                detail.skipped_reason = str(exc)
+                skipped_images += 1
+                details.append(detail)
+                continue
+
+            processed_images += 1
             details.append(detail)
-            continue
-
-        try:
-            labels = _load_yolo_labels(label_path)
-            with Image.open(image_path) as img:
-                source_image = img.convert("RGB")
-                for augmentation_name in selected_augmentations:
-                    augmented_image = _apply_image_transform(source_image, augmentation_name)
-                    augmented_labels = _apply_label_transform(labels, augmentation_name)
-
-                    target_rel = rel_path.with_name(f"{rel_path.stem}_{augmentation_name}{rel_path.suffix}")
-                    target_image = output_images_dir / target_rel
-                    target_label = output_labels_dir / target_rel.with_suffix(".txt")
-
-                    if (target_image.exists() or target_label.exists()) and not request.overwrite:
-                        continue
-
-                    target_image.parent.mkdir(parents=True, exist_ok=True)
-                    target_label.parent.mkdir(parents=True, exist_ok=True)
-                    augmented_image.save(target_image)
-                    _save_yolo_labels(target_label, augmented_labels)
-
-                    generated_images += 1
-                    generated_labels += 1
-                    detail.generated_images.append(str(target_image))
-                    detail.generated_labels.append(str(target_label))
-        except (OSError, ValueError) as exc:
-            detail.skipped_reason = str(exc)
-            skipped_images += 1
-            details.append(detail)
-            continue
-
-        processed_images += 1
-        details.append(detail)
 
     return YoloAugmentResponse(
         input_dir=str(input_dir),

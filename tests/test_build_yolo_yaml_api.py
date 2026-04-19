@@ -182,6 +182,40 @@ def test_build_yolo_yaml_multi_image_dirs_per_split(
     assert f"  - {val_aug}" in text
 
 
+def test_build_yolo_yaml_supports_split_anchor_under_named_parent(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    ds = case_dir / "crops"
+    for split in ("train", "val"):
+        base_images = ds / split / "images"
+        aug_images = ds / "augment" / split / "images"
+        base_images.mkdir(parents=True)
+        aug_images.mkdir(parents=True)
+        create_image(base_images / "a.png", color=(1, 2, 3), size=(16, 16))
+        create_image(aug_images / "b.png", color=(4, 5, 6), size=(16, 16))
+    (ds / "classes.txt").write_text("dog\n", encoding="utf-8")
+    out = ds / "nested_split_anchor.yaml"
+
+    r = client.post(
+        "/api/v1/preprocess/build-yolo-yaml",
+        json={"input_dir": str(ds), "output_yaml_path": str(out)},
+    )
+    assert r.status_code == 200
+
+    text = out.read_text(encoding="utf-8")
+    train_main = (ds / "train" / "images").resolve().as_posix()
+    train_aug = (ds / "augment" / "train" / "images").resolve().as_posix()
+    val_main = (ds / "val" / "images").resolve().as_posix()
+    val_aug = (ds / "augment" / "val" / "images").resolve().as_posix()
+    assert "train:" in text
+    assert f"  - {train_main}" in text
+    assert f"  - {train_aug}" in text
+    assert "val:" in text
+    assert f"  - {val_main}" in text
+    assert f"  - {val_aug}" in text
+
+
 def test_build_yolo_yaml_async(client: TestClient, case_dir: Path) -> None:
     import time
 
@@ -343,3 +377,63 @@ def test_build_yolo_yaml_last_yaml_remote_requires_sftp_fields(
     )
     assert r.status_code == 400
     assert "sftp_username" in r.json()["detail"]
+
+
+def test_build_yolo_yaml_can_publish_dataset_into_project_structure(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    source_root = case_dir / "tmp_dataset" / "crops"
+    project_root = case_dir / "workspace_root" / "TVDS"
+    for split in ("train", "val"):
+        base_images = source_root / split / "images"
+        aug_images = source_root / "augment" / split / "images"
+        base_labels = source_root / split / "labels"
+        aug_labels = source_root / "augment" / split / "labels"
+        base_images.mkdir(parents=True)
+        aug_images.mkdir(parents=True)
+        base_labels.mkdir(parents=True)
+        aug_labels.mkdir(parents=True)
+        create_image(base_images / "a.png", color=(1, 2, 3), size=(16, 16))
+        create_image(aug_images / "b.png", color=(4, 5, 6), size=(16, 16))
+        (base_labels / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+        (aug_labels / "b.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+    classes_file = source_root.parent / "classes.txt"
+    classes_file.write_text("dog\n", encoding="utf-8")
+
+    r = client.post(
+        "/api/v1/preprocess/build-yolo-yaml",
+        json={
+            "input_dir": str(source_root),
+            "project_root_dir": str(project_root),
+            "detector_name": "nzxj_louyou",
+            "dataset_version": "nzxj_louyou_20260419_1510",
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+
+    published_dir = (
+        project_root / "nzxj_louyou" / "datasets" / "nzxj_louyou_20260419_1510"
+    ).resolve()
+    yaml_path = published_dir / "nzxj_louyou_20260419_1510.yaml"
+    text = yaml_path.read_text(encoding="utf-8")
+
+    assert data["dataset_version"] == "nzxj_louyou_20260419_1510"
+    assert Path(data["published_dataset_dir"]) == published_dir
+    assert Path(data["output_yaml_path"]) == yaml_path
+    assert data["recommended_train_project"] == str(
+        (project_root / "nzxj_louyou" / "runs" / "detect").resolve()
+    )
+    assert data["recommended_train_name"] == "nzxj_louyou_20260419_1510"
+    assert (published_dir / "classes.txt").read_text(encoding="utf-8").strip() == "dog"
+
+    train_main = (published_dir / "train" / "images").resolve().as_posix()
+    train_aug = (published_dir / "augment" / "train" / "images").resolve().as_posix()
+    val_main = (published_dir / "val" / "images").resolve().as_posix()
+    val_aug = (published_dir / "augment" / "val" / "images").resolve().as_posix()
+    assert f"  - {train_main}" in text
+    assert f"  - {train_aug}" in text
+    assert f"  - {val_main}" in text
+    assert f"  - {val_aug}" in text

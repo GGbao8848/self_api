@@ -25,6 +25,47 @@ _SAVE_FORMAT_MAP = {
 }
 
 
+def _discover_dataset_units(input_dir: Path) -> list[tuple[Path, Path, Path | None]]:
+    """Find dataset units as (relative_root, images_dir, labels_dir).
+
+    Supported layouts:
+    - input_dir/images (+ optional input_dir/labels)
+    - input_dir/**/images (+ optional sibling labels)
+    """
+    dataset_units: list[tuple[Path, Path, Path | None]] = []
+    seen_images_dirs: set[Path] = set()
+
+    direct_images_dir = input_dir / "images"
+    if direct_images_dir.is_dir():
+        direct_labels_dir = input_dir / "labels"
+        dataset_units.append(
+            (
+                Path("."),
+                direct_images_dir,
+                direct_labels_dir if direct_labels_dir.is_dir() else None,
+            )
+        )
+        seen_images_dirs.add(direct_images_dir.resolve())
+
+    for images_dir in sorted(p for p in input_dir.rglob("images") if p.is_dir()):
+        resolved = images_dir.resolve()
+        if resolved in seen_images_dirs:
+            continue
+
+        dataset_root = images_dir.parent
+        labels_dir = dataset_root / "labels"
+        dataset_units.append(
+            (
+                dataset_root.relative_to(input_dir),
+                images_dir,
+                labels_dir if labels_dir.is_dir() else None,
+            )
+        )
+        seen_images_dirs.add(resolved)
+
+    return dataset_units
+
+
 def _yolo_to_xyxy(xc: float, yc: float, w: float, h: float, W: int, H: int) -> tuple[float, float, float, float]:
     """YOLO normalized -> absolute xyxy."""
     x1 = (xc - w / 2) * W
@@ -218,103 +259,114 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
         must_exist=True,
         expect_directory=True,
     )
-    images_dir = input_dir / "images"
-    if not images_dir.exists() or not images_dir.is_dir():
-        raise ValueError(f"images directory does not exist: {images_dir}")
-
-    labels_candidate = input_dir / "labels"
-    labels_dir = labels_candidate if labels_candidate.exists() and labels_candidate.is_dir() else None
+    dataset_units = _discover_dataset_units(input_dir)
+    if not dataset_units:
+        raise ValueError(
+            f"no images directories found under: {input_dir}; expected {input_dir / 'images'} "
+            "or nested */images directories"
+        )
 
     output_dir = resolve_safe_path(request.output_dir, field_name="output_dir")
-
-    out_img_dir = output_dir / "images"
-    out_lbl_dir = output_dir / "labels" if labels_dir is not None else None
-    out_img_dir.mkdir(parents=True, exist_ok=True)
-    if out_lbl_dir is not None:
-        out_lbl_dir.mkdir(parents=True, exist_ok=True)
-
-    image_paths = list_image_paths(
-        images_dir,
-        recursive=True,
-        extensions=list(_IMG_EXTS),
-    )
 
     details: list[YoloSlidingWindowCropDetail] = []
     processed_images = 0
     skipped_images = 0
     generated_crops = 0
     generated_labels = 0
+    input_images = 0
+    labels_dirs: list[Path] = []
 
-    for image_path in image_paths:
+    for relative_root, images_dir, labels_dir in dataset_units:
         ensure_current_task_active()
-        label_path: Path | None = None
-        if labels_dir is not None:
-            rel_image = image_path.relative_to(images_dir)
-            label_path = (labels_dir / rel_image).with_suffix(".txt")
+        out_base_dir = output_dir if relative_root == Path(".") else output_dir / relative_root
+        out_img_dir = out_base_dir / "images"
+        out_lbl_dir = out_base_dir / "labels" if labels_dir is not None else None
+        out_img_dir.mkdir(parents=True, exist_ok=True)
+        if out_lbl_dir is not None:
+            out_lbl_dir.mkdir(parents=True, exist_ok=True)
+            labels_dirs.append(labels_dir)
 
-        if label_path is not None and not label_path.exists():
-            skipped_images += 1
-            details.append(
-                YoloSlidingWindowCropDetail(
-                    source_image=str(image_path),
-                    source_label=str(label_path),
-                    skipped_reason="label file not found",
-                )
-            )
-            continue
+        image_paths = list_image_paths(
+            images_dir,
+            recursive=True,
+            extensions=list(_IMG_EXTS),
+        )
+        input_images += len(image_paths)
 
-        try:
-            saved, label_lines = _sliding_window_crop(
-                image_path=image_path,
-                label_path=label_path,
-                out_img_dir=out_img_dir,
-                out_lbl_dir=out_lbl_dir,
-                window_width=request.window_width,
-                window_height=request.window_height,
-                stride_x=request.stride_x,
-                stride_y=request.stride_y,
-                min_vis_ratio=request.min_vis_ratio,
-                stride_ratio=request.stride_ratio,
-                only_wide=request.only_wide,
-                ignore_vis_ratio=request.ignore_vis_ratio,
-            )
+        for image_path in image_paths:
+            ensure_current_task_active()
+            label_path: Path | None = None
+            if labels_dir is not None:
+                rel_image = image_path.relative_to(images_dir)
+                label_path = (labels_dir / rel_image).with_suffix(".txt")
 
-            if saved > 0:
-                processed_images += 1
-                generated_crops += saved
-                generated_labels += label_lines
-                details.append(
-                    YoloSlidingWindowCropDetail(
-                        source_image=str(image_path),
-                        source_label=str(label_path),
-                        crop_count=saved,
-                        label_count=label_lines,
-                    )
-                )
-            else:
+            if label_path is not None and not label_path.exists():
                 skipped_images += 1
                 details.append(
                     YoloSlidingWindowCropDetail(
                         source_image=str(image_path),
                         source_label=str(label_path),
-                        skipped_reason="no valid windows or only_wide skipped",
+                        skipped_reason="label file not found",
                     )
                 )
-        except (UnidentifiedImageError, OSError) as exc:
-            skipped_images += 1
-            details.append(
-                YoloSlidingWindowCropDetail(
-                    source_image=str(image_path),
-                    source_label=str(label_path),
-                    skipped_reason=f"failed to open/process: {exc}",
+                continue
+
+            try:
+                saved, label_lines = _sliding_window_crop(
+                    image_path=image_path,
+                    label_path=label_path,
+                    out_img_dir=out_img_dir,
+                    out_lbl_dir=out_lbl_dir,
+                    window_width=request.window_width,
+                    window_height=request.window_height,
+                    stride_x=request.stride_x,
+                    stride_y=request.stride_y,
+                    min_vis_ratio=request.min_vis_ratio,
+                    stride_ratio=request.stride_ratio,
+                    only_wide=request.only_wide,
+                    ignore_vis_ratio=request.ignore_vis_ratio,
                 )
-            )
+
+                if saved > 0:
+                    processed_images += 1
+                    generated_crops += saved
+                    generated_labels += label_lines
+                    details.append(
+                        YoloSlidingWindowCropDetail(
+                            source_image=str(image_path),
+                            source_label=str(label_path),
+                            crop_count=saved,
+                            label_count=label_lines,
+                        )
+                    )
+                else:
+                    skipped_images += 1
+                    details.append(
+                        YoloSlidingWindowCropDetail(
+                            source_image=str(image_path),
+                            source_label=str(label_path),
+                            skipped_reason="no valid windows or only_wide skipped",
+                        )
+                    )
+            except (UnidentifiedImageError, OSError) as exc:
+                skipped_images += 1
+                details.append(
+                    YoloSlidingWindowCropDetail(
+                        source_image=str(image_path),
+                        source_label=str(label_path),
+                        skipped_reason=f"failed to open/process: {exc}",
+                    )
+                )
+
+    labels_dir_value: str | None = None
+    if len(labels_dirs) == 1:
+        labels_dir_value = str(labels_dirs[0])
 
     return YoloSlidingWindowCropResponse(
         input_dir=str(input_dir),
-        labels_dir=str(labels_dir) if labels_dir is not None else None,
+        labels_dir=labels_dir_value,
         output_dir=str(output_dir),
-        input_images=len(image_paths),
+        input_images=input_images,
         processed_images=processed_images,
         skipped_images=skipped_images,
         generated_crops=generated_crops,

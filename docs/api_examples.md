@@ -15,9 +15,10 @@
 | `annotate-visualize` | `input_dir`、`output_dir`；要求 `input_dir/images` 存在，默认优先使用 `input_dir/labels`，若不存在再回退到 `input_dir/xmls`；可选 `recursive`、`extensions`、`include_difficult`（仅 XML）、`line_width`、`overwrite`；YOLO 类别名可选 `classes` 或 `classes_file`（二选一，**均可省略**；均不提供或 `classes_file` 为空字符串时，框上显示**类别 id 数字**） |
 | `reset-yolo-label-index` | `input_dir`（其下需有 `labels/`）；可选 `recursive`（默认 `true`）；**原地**将各 `.txt` 每行首列类别 id 改为 `0`（§8） |
 | `split-yolo-dataset` | `input_dir`（其下需有 `images/`、`labels/`）、`output_dir`（可选，默认 `<input_dir>/split_dataset`） |
-| `yolo-augment` | `input_dir`（其下需有 `images/`、`labels/`）、`output_dir`（可选，默认 `<input_dir>/augment`）、七个增强开关（默认全开）；仅支持 YOLO TXT |
-| `yolo-sliding-window-crop` | `input_dir`（其下需有 `images/`；若存在 `labels/` 则自动同步输出裁剪标注）、`output_dir`；可选 `window_width`、`window_height`、`stride_x`、`stride_y`（传入即覆盖默认）；以及 `min_vis_ratio`、`stride_ratio`、`ignore_vis_ratio`、`only_wide` |
+| `yolo-augment` | `input_dir`（支持根目录下直接有 `images/`、`labels/`，也支持递归发现 `*/images` 与同级 `labels/`，并保留相对目录层级输出）、`output_dir`（可选，默认 `<input_dir>/augment`）、七个增强开关（默认全开）；仅支持 YOLO TXT |
+| `yolo-sliding-window-crop` | `input_dir`（支持根目录下直接有 `images/`，也支持递归发现 `*/images`；若同级存在 `labels/` 则自动同步输出裁剪标注并保留相对目录层级）、`output_dir`；可选 `window_width`、`window_height`、`stride_x`、`stride_y`（传入即覆盖默认）；以及 `min_vis_ratio`、`stride_ratio`、`ignore_vis_ratio`、`only_wide` |
 | `build-yolo-yaml` | 同上；**`last_yaml`** 与当前扫描路径合并（旧路径在前、去重）。**`classes.txt` 有有效类别行时**：`nc`/`names` 以该文件为准。**`classes.txt` 为空或不存在时**：必须提供 **`last_yaml`**，且其中需含 **`names`**（及通常的 `nc`），类别表从该 YAML 读取；当前数据集各划分路径仍按扫描结果**追加**到对应 `train`/`val`/…。远程 `last_yaml` 需 **`sftp_username`**、**`sftp_private_key_path`** |
+| `publish-yolo-dataset` | `input_dir`、`project_root_dir`、`detector_name`；可选 `dataset_version`。`publish_mode=local` 时发布到本地规范目录并生成 yaml；`publish_mode=remote_sftp` 时额外需要 `remote_host`、`remote_project_root_dir`、`remote_username`、`remote_private_key_path`，内部走 zip + SFTP 上传 + 远端解压 |
 | `zip-folder` | `input_dir`、`output_zip_path`（可选，默认 `<input_dir_parent>/<input_dir_name>.zip`）、`include_root_dir`、`overwrite` |
 | `remote-transfer` | `source_path`、`target`；以及 `username`、`password` / `private_key_path`、`port`、`overwrite` |
 | `remote-unzip` | `archive_path`、`output_dir`；以及 `username`、`password` / `private_key_path`、`port`、`overwrite` |
@@ -351,15 +352,17 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/split-yolo-dataset/asyn
 - `POST /api/v1/preprocess/yolo-augment`
 - `POST /api/v1/preprocess/yolo-augment/async`
 
-仅支持 YOLO TXT 标注。输入目录固定为：
+仅支持 YOLO TXT 标注。输入目录支持两种布局：
 
 - `<input_dir>/images`
 - `<input_dir>/labels`
+- `<input_dir>/train/images`、`<input_dir>/train/labels`、`<input_dir>/val/images`、`<input_dir>/val/labels` 等任意 nested `*/images + */labels`
 
 输出目录默认写到：
 
 - `<input_dir>/augment/images`
 - `<input_dir>/augment/labels`
+- 若输入是多层 split 结构，则保留相对层级，例如 `<input_dir>/train/images -> <input_dir>/augment/train/images`
 
 默认启用以下七种增强：
 

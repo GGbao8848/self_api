@@ -151,26 +151,64 @@ Do not generate the final train payload or final CLI until these are clear.
 Core rule:
 
 - prefer asking over guessing whenever a required field for company-standard output generation is missing
+- NEVER silently default `batch`, `imgsz`, or `model` size without asking the user
 - if the required upstream fields are complete, derive `project` and `name` from the company rules for `train`, `val`, and `predict` instead of asking the user to spell them out again
 - for `export`, derive only what the official export CLI actually accepts and describe the artifact path separately
 
 ### For train
 
+**Phase 1 — Dataset readiness (MUST complete before Phase 2)**
+
+Check whether the input is a ready dataset YAML or a raw data path:
+
+- If the user provides an image folder, XML folder, or any directory without a `.yaml` file:
+  - STOP. Ask the following before any training field collection:
+    1. Has the dataset been split into train/val sets?
+    2. Are the images long horizontal strips or panoramic scenes? If yes, sliding-window crop is recommended — ask whether to enable it.
+    3. Are labels in XML/JSON format and need conversion to YOLO TXT?
+  - Route to `$data-preprocess` or `$sop-workflow` to complete data preparation.
+  - Do NOT proceed to Phase 2 until a valid dataset YAML is confirmed or will be produced.
+
+**Phase 2 — Training parameter collection (collect all in one message)**
+
 Must know:
 
-- execution target: `local` or `remote`
-- `root_dir`
-- `detector_name`
-- dataset YAML path
-- `task`
-- `model`
+- execution target: `local` or `remote`; MUST ask if ambiguous, never infer
+- `root_dir`: business project root; MUST ask if not given, never infer from file paths
+- `detector_name`: stable model family name; MUST ask if not given, never infer from dataset name
+- dataset YAML path: must be a confirmed `.yaml` file
+- `task`: infer from dataset labels if possible, otherwise ask
+- `model`: ask for size preference (nano/small/medium/large/x) or custom checkpoint path; never silently default
+- `batch`: ask the user; never silently default
+- `imgsz`: ask the user; note that strip/panoramic images often benefit from non-square sizes such as 1280×320 or 1920×384
+- `epochs`: ask or confirm a speed-vs-quality preference
 
 Then enforce:
 
 - `project` derived from `root_dir + detector_name + runs/<task-bucket>`
 - `name` equals dataset YAML stem
 
-Ask the user if any of these are missing.
+**Phase 3 — Pre-execution confirmation**
+
+Before calling any API or command, show the user a parameter summary:
+
+```
+detector_name : <value>
+root_dir      : <value>
+model         : <value>  → <what this means for speed/accuracy>
+batch         : <value>  → <GPU memory implication>
+imgsz         : <value>  → <resolution trade-off>
+epochs        : <value>
+execution     : local / remote
+project       : <derived value>
+name          : <derived value>
+```
+
+Explain consequences for each parameter. For example:
+- "batch=16 + imgsz=640 will fit on a single 8 GB GPU and run for ~N hours at 100 epochs"
+- "yolo11s.pt balances speed and accuracy for small-object detection"
+
+Ask the user to confirm. Only proceed after explicit confirmation.
 
 Output rule:
 
@@ -459,6 +497,12 @@ Do not generate a final company-standard output if any of these are true:
 - for train, missing execution target while still choosing local API, remote API, or CLI-only output
 - for train, `name` does not match the dataset YAML filename stem
 - for train, returning raw `yolo train ...` without an explicit CLI-only request
+- for train, `batch` was not asked and was silently defaulted
+- for train, `imgsz` was not asked and was silently defaulted
+- for train, `model` size was not asked and was silently defaulted
+- for train, user provided a raw data directory (not a YAML) and training was started without first completing dataset-readiness checks
+- for train, user's images are long horizontal strips but sliding-window crop was never mentioned
+- for train, proceeding without showing the pre-execution parameter summary and getting explicit confirmation
 - for predict or export, `imgsz` is guessed without first checking the sibling `args.yaml` when that path should exist
 - changing `imgsz` after tensor or shape mismatch style errors without asking the user
 - using mixed bucket names such as `runs/detect_predict`, `runs/detect_val`, or `runs/detect_export`

@@ -569,13 +569,19 @@ class RemoteSbatchYoloTrainResponse(BaseModel):
 
 
 class YoloSlidingWindowCropRequest(BaseModel):
-    """YOLO 滑窗裁剪：固定读取 input_dir/images，自动检测 input_dir/labels（存在则同步输出 labels/）。"""
+    """YOLO 滑窗裁剪：支持 input_dir/images 或递归发现 nested */images，并保留相对目录结构输出。"""
 
     input_dir: str = Field(
-        description="输入数据集根目录，其下需包含 images/ 子目录；若存在 labels/ 则同步输出裁剪后的标注",
+        description=(
+            "输入数据集根目录。支持直接包含 images/（可选 labels/），"
+            "也支持递归发现 nested */images（同级若有 labels/ 则同步输出裁剪标注）"
+        ),
     )
     output_dir: str = Field(
-        description="输出目录，将创建 images/ 子目录（有 labels 时同时创建 labels/）",
+        description=(
+            "输出目录。会在输出端保留输入相对层级，例如 input_dir/train/images -> output_dir/train/images；"
+            "有 labels 时同步输出到对应的 output_dir/.../labels"
+        ),
     )
     window_width: int | None = Field(
         default=None,
@@ -998,9 +1004,33 @@ class BuildYoloYamlRequest(BaseModel):
         default=None,
         description="Replacement prefix for train/val/test absolute paths (e.g. project root + detector)",
     )
-    output_yaml_path: str = Field(
-        ...,
-        description="Full path for the generated data.yaml (parent dirs are created if needed)",
+    output_yaml_path: str | None = Field(
+        default=None,
+        description=(
+            "Full path for the generated data.yaml. Optional when project_root_dir and detector_name "
+            "are provided together; then API auto-publishes dataset and writes "
+            "<project_root_dir>/<detector_name>/datasets/<dataset_version>/<dataset_version>.yaml"
+        ),
+    )
+    project_root_dir: str | None = Field(
+        default=None,
+        description=(
+            "Optional project workspace root. When set together with detector_name, API publishes "
+            "the dataset into the standard project dataset area and auto-generates dataset version naming"
+        ),
+    )
+    detector_name: str | None = Field(
+        default=None,
+        description=(
+            "Stable detector family name used for standard dataset version naming and project dataset placement"
+        ),
+    )
+    dataset_version: str | None = Field(
+        default=None,
+        description=(
+            "Optional dataset version name. Defaults to <detector_name>_YYYYMMDD_HHMM when "
+            "project_root_dir + detector_name are provided"
+        ),
     )
     last_yaml: str | None = Field(
         default=None,
@@ -1048,6 +1078,168 @@ class BuildYoloYamlResponse(BaseModel):
     )
     splits_included: list[str]
     classes_count: int
+    dataset_version: str | None = Field(
+        default=None,
+        description="Dataset version name when API published dataset into standard project structure",
+    )
+    published_dataset_dir: str | None = Field(
+        default=None,
+        description="Published dataset directory when project_root_dir + detector_name mode is used",
+    )
+    recommended_train_project: str | None = Field(
+        default=None,
+        description="Recommended local train project directory (<project_root_dir>/<detector_name>/runs/detect)",
+    )
+    recommended_train_name: str | None = Field(
+        default=None,
+        description="Recommended local train run name; equals dataset_version when published",
+    )
+    last_yaml_merged: bool = Field(
+        default=False,
+        description="Whether paths from last_yaml were merged into the output",
+    )
+    last_yaml_source: str | None = Field(
+        default=None,
+        description="none | local | sftp — how last_yaml was loaded when merged",
+    )
+
+
+class PublishYoloDatasetRequest(BaseModel):
+    input_dir: str = Field(
+        description=(
+            "Input dataset root to scan and publish. Supports the same split discovery rules as build-yolo-yaml"
+        ),
+    )
+    project_root_dir: str = Field(
+        description=(
+            "Local project workspace root. Published datasets land under "
+            "<project_root_dir>/<detector_name>/datasets/<dataset_version> in local mode, "
+            "or use this path as the local staging root in remote mode"
+        ),
+    )
+    detector_name: str = Field(
+        description="Stable detector family name used for dataset version naming and placement",
+    )
+    dataset_version: str | None = Field(
+        default=None,
+        description="Optional dataset version. Defaults to <detector_name>_YYYYMMDD_HHMM",
+    )
+    publish_mode: Literal["local", "remote_sftp"] = Field(
+        default="local",
+        description="Publish locally only, or stage locally then transfer to a remote SFTP target",
+    )
+    remote_host: str | None = Field(
+        default=None,
+        description="Required when publish_mode=remote_sftp",
+    )
+    remote_project_root_dir: str | None = Field(
+        default=None,
+        description=(
+            "Required when publish_mode=remote_sftp. Remote workspace root; final dataset lands under "
+            "<remote_project_root_dir>/<detector_name>/datasets/<dataset_version>"
+        ),
+    )
+    remote_username: str | None = Field(
+        default=None,
+        description="Required when publish_mode=remote_sftp",
+    )
+    remote_private_key_path: str | None = Field(
+        default=None,
+        description="Required when publish_mode=remote_sftp unless password auth is added later",
+    )
+    remote_port: int = Field(
+        default=22,
+        ge=1,
+        le=65535,
+        description="SSH port for remote publish",
+    )
+    last_yaml: str | None = Field(
+        default=None,
+        description=(
+            "Optional previous data.yaml. Split paths from last_yaml are prepended before current "
+            "scan paths (deduplicated). If classes.txt is missing or empty, last_yaml must contain names"
+        ),
+    )
+    sftp_username: str | None = Field(
+        default=None,
+        description="SSH username used only when last_yaml itself is a remote SFTP path",
+    )
+    sftp_private_key_path: str | None = Field(
+        default=None,
+        description="SSH private key path used only when last_yaml itself is remote",
+    )
+    sftp_port: int | None = Field(
+        default=None,
+        description="Optional SSH port used only when last_yaml itself is remote",
+    )
+
+    @model_validator(mode="after")
+    def _validate_remote_publish_fields(self) -> "PublishYoloDatasetRequest":
+        if self.publish_mode == "remote_sftp":
+            missing: list[str] = []
+            if not self.remote_host:
+                missing.append("remote_host")
+            if not self.remote_project_root_dir:
+                missing.append("remote_project_root_dir")
+            if not self.remote_username:
+                missing.append("remote_username")
+            if not self.remote_private_key_path:
+                missing.append("remote_private_key_path")
+            if missing:
+                raise ValueError(
+                    "publish_mode=remote_sftp requires: " + ", ".join(missing)
+                )
+        return self
+
+
+class PublishYoloDatasetAsyncRequest(PublishYoloDatasetRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class PublishYoloDatasetResponse(BaseModel):
+    status: str = "ok"
+    publish_mode: Literal["local", "remote_sftp"]
+    output_yaml_path: str = Field(
+        description="Train-consumable yaml path. Local path in local mode; remote path in remote mode",
+    )
+    dataset_root: str = Field(
+        description="Resolved dataset root on disk used to locate splits before publication",
+    )
+    splits_included: list[str]
+    classes_count: int
+    dataset_version: str
+    published_dataset_dir: str = Field(
+        description="Final published dataset directory. Local path in local mode; remote path in remote mode",
+    )
+    staging_published_dataset_dir: str | None = Field(
+        default=None,
+        description="Local staging dataset directory used before remote transfer",
+    )
+    staging_output_yaml_path: str | None = Field(
+        default=None,
+        description="Local staging yaml path used before remote transfer",
+    )
+    local_archive_path: str | None = Field(
+        default=None,
+        description="Local zip archive path used for remote transfer mode",
+    )
+    remote_target_host: str | None = None
+    remote_target_port: int | None = None
+    remote_archive_path: str | None = Field(
+        default=None,
+        description="Remote zip archive path created during remote publish mode",
+    )
+    recommended_train_project: str
+    recommended_train_name: str
     last_yaml_merged: bool = Field(
         default=False,
         description="Whether paths from last_yaml were merged into the output",
@@ -1082,6 +1274,11 @@ class YoloTrainRequest(BaseModel):
     model: str = Field(default="yolo11s.pt", description="Ultralytics model argument")
     epochs: int = Field(default=100, ge=1)
     imgsz: int = Field(default=640, ge=1)
+    batch: int | None = Field(
+        default=None,
+        ge=1,
+        description="YOLO batch size; omitted when None (Ultralytics default)",
+    )
 
     @model_validator(mode="after")
     def _validate_project_and_name(self) -> "YoloTrainRequest":
@@ -1118,14 +1315,20 @@ class YoloTrainResponse(BaseModel):
 
 
 class YoloAugmentRequest(BaseModel):
-    """在 input_dir/images 与 input_dir/labels 上做离线数据增强，输出到 output_dir。"""
+    """在 input_dir/images+labels 或递归发现 nested */images+labels 上做离线数据增强。"""
 
     input_dir: str = Field(
-        description="输入数据集根目录，目录下需包含 images/ 与 labels/ 子目录",
+        description=(
+            "输入数据集根目录。支持直接包含 images/ 与 labels/，"
+            "也支持递归发现 nested */images 与同级 labels/"
+        ),
     )
     output_dir: str | None = Field(
         default=None,
-        description="输出根目录；默认写入 <input_dir>/augment，并创建 images/ 与 labels/ 子目录",
+        description=(
+            "输出根目录；默认写入 <input_dir>/augment。若输入为多层 split/train|val|test 结构，"
+            "输出端会保留相对目录层级并在各层下创建 images/ 与 labels/"
+        ),
     )
     recursive: bool = Field(default=True, description="是否递归扫描 images/ 与 labels/")
     overwrite: bool = Field(default=True, description="目标文件已存在时是否覆盖")

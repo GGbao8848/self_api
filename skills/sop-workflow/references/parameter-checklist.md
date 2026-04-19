@@ -39,12 +39,31 @@ Collect these when routing to `$ultralytics-yolo-modes`:
 - model weights
 - output format if export is requested
 
-For `train`, always collect:
+For `train`, always collect (MUST NOT silently default any of these):
 
-- `project`
-- `name`
+- `detector_name`: stable model family name for directory structure
+- `root_dir`: business project root directory
+- `model`: ask for size preference (nano / small / medium / large / x) or custom checkpoint
+- `batch`: ask the user; do not default silently
+- `imgsz`: ask the user; remind that non-square sizes benefit strip or panoramic images
+- `epochs`: or speed-vs-quality preference
+- `project` and `name` (derived from rules once root_dir and detector_name are known)
 - local-only: `project_root_dir`, `yolo_train_env`
 - remote-only: `host`, `project_root_dir`, `yolo_train_env`, `username`, and SSH auth
+
+## Dataset readiness check (MUST run before model CLI route for raw data)
+
+When the user provides a raw dataset path (image folder, xml folder, or directory without YAML), always ask:
+
+1. **Train/val split**: Has the dataset been split into train and val sets? If not, route to `$data-preprocess` split step.
+2. **Image characteristics**: Are the images long horizontal strips or panoramic scenes?
+   - If yes: strongly recommend sliding-window crop before training.
+   - Explain: "Strip images trained at standard 640×640 will crop off context. Sliding-window crop produces small-image tiles that preserve spatial information for small-object detection."
+   - Ask: enable sliding-window crop? If yes, collect: tile size, overlap ratio, output directory.
+3. **Label format**: Are labels XML (VOC), JSON (COCO), or YOLO TXT? If XML or JSON, route to `$data-preprocess` for conversion first.
+4. **Class list**: Confirm the class names and count if not evident from `classes.txt` or label files.
+
+Do NOT proceed to training field collection until the user has confirmed or completed all applicable dataset-readiness steps.
 
 ## Combined workflow route
 
@@ -52,8 +71,9 @@ Collect the minimum fields for the next incomplete stage only.
 
 Examples:
 
-- If the dataset is still raw, start with preprocessing fields only.
+- If the dataset is still raw, start with dataset readiness checks, then preprocessing fields only.
 - If preprocessing is done and only training remains, switch to model CLI fields.
+- If images are long strips and split/sliding-window has not been done, complete those steps before any training parameter collection.
 
 ## Routing heuristics
 
@@ -62,3 +82,5 @@ Examples:
 - Mentions of both dataset prep and training indicate a combined workflow managed by this top-level skill.
 - Mentions like `先整理数据再训练`, `从原始数据一路做到训练`, `给我完整 SOP`, or `长 SOP` indicate this skill.
 - Mentions like `本地训练`, `远程训练`, `集群训练`, `sbatch`, or `提交任务到服务器` should force an explicit local-vs-remote training decision.
+- A raw image directory path or XML directory without a `.yaml` file always triggers dataset readiness checks before any training routing.
+- Mention of `横向长条图`, `条带图像`, `全景图`, `strip image`, or `panoramic` always triggers a sliding-window crop recommendation.
