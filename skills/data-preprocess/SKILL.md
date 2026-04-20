@@ -1,6 +1,6 @@
 ---
 name: data-preprocess
-description: Use this skill when the user wants to process datasets with this self_api project, especially dataset preprocessing, nested-dataset cleanup, XML-to-YOLO conversion, dataset aggregation, visualization, split, augmentation, sliding-window crop, YAML generation, zip/unzip, move/copy, or cross-server SFTP transfer. Prefer the project's synchronous preprocess API commands unless the user explicitly asks for async jobs, callbacks, or n8n orchestration.
+description: Use this skill when the user wants to process datasets with this self_api project, especially dataset preprocessing, nested-dataset cleanup, XML-to-YOLO conversion, dataset aggregation, visualization, split, augmentation, sliding-window crop, YAML generation, zip/unzip, move/copy, or cross-server SFTP transfer. Prefer the project's synchronous preprocess API commands unless the user explicitly asks for async jobs, callbacks, or LangGraph pipeline orchestration.
 ---
 
 # Self API Data Preprocess

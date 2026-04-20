@@ -1,18 +1,22 @@
 """Pipeline REST API。
 
 端点：
-  POST /pipeline/run          启动新的 pipeline 运行，返回 run_id
-  GET  /pipeline/{run_id}     查询运行状态（含当前暂停的审核点数据）
-  POST /pipeline/{run_id}/confirm  人工确认/中止当前审核点
-  POST /pipeline/{run_id}/abort    强制中止整条流程
+  POST /pipeline/run                启动新的 pipeline 运行，返回 run_id
+  GET  /pipeline/{run_id}           查询运行状态（含当前暂停的审核点数据）
+  POST /pipeline/{run_id}/confirm   人工确认/中止当前审核点
+  POST /pipeline/{run_id}/abort     强制中止整条流程
+  GET  /pipeline/{run_id}/events    Server-Sent Events 流，状态变化时推送快照
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
-from typing import Any
+from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 
 from app.core.security import require_api_auth
@@ -222,3 +226,79 @@ def abort_pipeline(run_id: str) -> PipelineStatusResponse:
             pass
 
     return _to_status_response(run_id)
+
+
+def _snapshot_signature(resp: PipelineStatusResponse) -> str:
+    """用于 SSE 去重：只有签名变化才发一条 event。"""
+    step_states = {name: s.status for name, s in resp.step_results.items()}
+    signature = {
+        "current_step": resp.current_step,
+        "completed": resp.completed,
+        "interrupted": resp.interrupted,
+        "error": resp.error,
+        "step_states": step_states,
+    }
+    return json.dumps(signature, sort_keys=True, ensure_ascii=False)
+
+
+@router.get("/{run_id}/events")
+async def stream_pipeline_events(
+    run_id: str,
+    request: Request,
+    poll_interval: float = 1.0,
+    max_duration: float = 3600.0,
+) -> StreamingResponse:
+    """Server-Sent Events：状态变化时推送一次快照，替代前端 HTTP 轮询。
+
+    Query params：
+      - poll_interval：服务端内部轮询周期（秒），默认 1.0
+      - max_duration：最长保持连接时间（秒），默认 3600；到期后自动关闭
+    """
+    gs = _get_graph_state(run_id)
+    if gs is None or not gs.values or not gs.values.get("run_id"):
+        raise HTTPException(status_code=404, detail=f"pipeline run not found: {run_id}")
+
+    poll_interval = max(0.1, min(poll_interval, 30.0))
+    max_duration = max(10.0, min(max_duration, 24 * 3600.0))
+
+    async def event_stream() -> AsyncIterator[bytes]:
+        last_sig: str | None = None
+        elapsed = 0.0
+        yield b": connected\n\n"  # SSE comment, 立即刷出
+
+        while elapsed < max_duration:
+            if await request.is_disconnected():
+                break
+
+            try:
+                resp = _to_status_response(run_id)
+            except HTTPException as exc:
+                payload = json.dumps({"error": exc.detail}, ensure_ascii=False)
+                yield f"event: error\ndata: {payload}\n\n".encode("utf-8")
+                break
+
+            sig = _snapshot_signature(resp)
+            if sig != last_sig:
+                last_sig = sig
+                body = resp.model_dump_json()
+                yield f"event: snapshot\ndata: {body}\n\n".encode("utf-8")
+
+            if resp.completed:
+                yield b"event: end\ndata: {\"reason\": \"completed\"}\n\n"
+                break
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        if elapsed >= max_duration:
+            yield b"event: end\ndata: {\"reason\": \"timeout\"}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # 禁用 nginx/反代 缓冲
+            "Connection": "keep-alive",
+        },
+    )

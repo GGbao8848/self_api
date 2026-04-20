@@ -38,5 +38,5 @@ Default to synchronous examples from this skill unless the user explicitly reque
 
 - async callbacks
 - task polling
-- n8n orchestration
+- LangGraph pipeline orchestration (`/api/v1/pipeline/*`)
 - long-running remote jobs

@@ -158,7 +158,7 @@ self_api/
 
 **关键变更**：
 
-- ✅ 删除 `docs/n8n/` 里所有“SOP 级别”工作流 JSON（仅保留 Webhook 触发版本作为对外兼容）。
+- ✅ **完全删除 `docs/n8n/` 目录**（所有 SOP 工作流 JSON 均已由 LangGraph 替代）。
 - ✅ 新增 `app/graph/` 作为唯一编排定义。
 - ✅ `app/api/v1/endpoints/pipeline.py` 成为**面向用户的主入口**；`preprocess.py` 退化为"给智能体/脚本用的原子能力面板"。
 
@@ -362,7 +362,7 @@ Client                             Server
 | **sop-workflow skill** | 给用户出"plan → confirm"的长 SOP 文字；confirm 后调 `POST /pipeline/run` |
 | **data-preprocess skill** | 单步调试 `/preprocess/*` 原子能力 |
 | **ultralytics-yolo-modes skill** | 生成 YOLO CLI 命令（纯本地训练/离线场景） |
-| **n8n-workflow-map 参考** | 仅保留 LangGraph 管线 + 可选 Webhook JSON |
+| **workflow-map 参考** | 只描述 LangGraph 管线（n8n 已移除） |
 
 智能体对接建议：
 
@@ -390,14 +390,13 @@ Client                             Server
 | 阶段 | 任务 | 状态 |
 |---|---|---|
 | **P0 打地基** | 新增 `app/graph/`、`/pipeline/*` 端点、`class_name_map`、`discover_xml_classes` | ✅ 已完成 |
-| P0 | 删除旧 n8n JSON（保留 Webhook 一份） | ✅ 已完成 |
+| P0 | 删除旧 n8n JSON | ✅ 已完成 |
 | **P1 测试** | `tests/test_pipeline_graph_api.py`（gate/interrupt/resume/abort/full_access）+ `test_discover_xml_classes_api.py` + `test_xml_to_yolo_class_name_map_api.py` | ✅ 已完成 |
 | **P2 前端** | `app/static/pipeline-ui/`（独立页 `/pipeline-ui`）：启动表单 + run 列表 + pending_review 卡片 + confirm/abort | ✅ 已完成 |
 | **P3 SOP 预设** | `app/graph/sops.py` 注册 4 个模板（local-small-baseline / local-large-sliding-window / remote-slurm-iter / full-auto-smoke），对外暴露 `GET /pipeline/sops` 与 `POST /pipeline/sops/{sop_id}/run`；前端 SOP 选择器 | ✅ 已完成 |
-| **P4 持久化** | 可选：把 `MemorySaver` 换成 SQLite/Postgres checkpointer，让 run 跨进程重启可恢复 | 🔴 规划 |
-| P4 | 可选：Server-Sent Events `/pipeline/{id}/events` 实时推送，替代轮询 | 🔴 规划 |
-| **P5 清理** | 彻底删除 `docs/n8n/模型训练工作流（Webhook）.json`（确认外部无依赖后） | 🔴 规划 |
-| P5 | Skill 文档统一以 LangGraph 为主叙事 | 🟡 部分 |
+| **P4 持久化** | `pipeline_checkpointer` 配置项可切换 `memory`/`sqlite`（默认 memory，选 sqlite 时使用 `langgraph-checkpoint-sqlite`，文件默认 `storage/pipeline_checkpoints.sqlite`）；配套 4 例测试覆盖默认、sqlite 创建、跨编译恢复、相对路径解析 | ✅ 已完成 |
+| P4 | SSE `GET /pipeline/{id}/events`：状态变化时推 `snapshot` 事件，结束时推 `end`；前端 EventSource 优先，失败降级轮询 | ✅ 已完成 |
+| **P5 清理** | `docs/n8n/` 整目录删除；`skills/sop-workflow/references/n8n-workflow-map.md` 重命名为 `workflow-map.md` 并重写内容；其他 skill 和 README 的 n8n 措辞全部替换为 LangGraph；`SELF_API_N8N_*` 环境变量保留但在 README 中标注为 "已废弃" | ✅ 已完成 |
 
 ---
 

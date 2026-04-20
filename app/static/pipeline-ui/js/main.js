@@ -58,6 +58,7 @@ let state = {
   runs: loadJson(STORAGE_KEY, []),
   activeRunId: null,
   pollTimer: null,
+  eventSource: null,
 };
 
 el.apiUrlLabel.textContent = API_BASE;
@@ -330,6 +331,30 @@ function renderDetail(data) {
 
 function startPolling(runId) {
   stopPolling();
+  if (typeof EventSource !== "undefined") {
+    try {
+      const es = new EventSource(`${API_BASE}/${runId}/events?poll_interval=1`);
+      state.eventSource = es;
+      es.addEventListener("snapshot", (ev) => {
+        if (runId !== state.activeRunId) return;
+        try {
+          renderDetail(JSON.parse(ev.data));
+        } catch { /* ignore */ }
+      });
+      es.addEventListener("end", () => stopPolling());
+      es.onerror = () => {
+        stopPolling();
+        fallbackPolling(runId);
+      };
+      return;
+    } catch {
+      /* EventSource 不可用时退回轮询 */
+    }
+  }
+  fallbackPolling(runId);
+}
+
+function fallbackPolling(runId) {
   state.pollTimer = setInterval(async () => {
     if (runId !== state.activeRunId) return;
     try {
@@ -346,6 +371,10 @@ function stopPolling() {
   if (state.pollTimer) {
     clearInterval(state.pollTimer);
     state.pollTimer = null;
+  }
+  if (state.eventSource) {
+    try { state.eventSource.close(); } catch { /* ignore */ }
+    state.eventSource = null;
   }
 }
 

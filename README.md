@@ -80,9 +80,10 @@ cp .env.example .env
 - `SELF_API_PUBLIC_BASE_URL`（必须改，自己主机的IP）
 - `SELF_API_FILE_ACCESS_ROOTS`（必须改，本API客户端可以读写的文件路径）
 - `SELF_API_STORAGE_ROOT`（必须改，本API客户端可以读写的文件路径）
-- `SELF_API_AUTH_ENABLED`（非必要，鉴权相关字段，不需要鉴权的时候，设置false，下面的账户密码注销掉）
-- `N8N_BASE_URL`（必须改，流程编排系统n8n部署的机器）
-- `N8N_API_KEY`(非必要，将n8n的api释放给智能体，就可以让智能体给你执行任务了)
+- `SELF_API_AUTH_ENABLED`（非必要，鉴权相关字段，不需要鉴权的时候，设置 false，下面的账户密码注释掉即可）
+- `SELF_API_PIPELINE_CHECKPOINTER`（可选，`memory`/`sqlite`，默认 `memory`；选 `sqlite` 则 run 跨进程重启可恢复）
+- `SELF_API_PIPELINE_SQLITE_PATH`（可选，SQLite checkpoint 文件路径，默认 `./storage/pipeline_checkpoints.sqlite`）
+- `SELF_API_N8N_BASE_URL` / `SELF_API_N8N_API_KEY`（**已废弃**：项目已切换到 LangGraph 管线，这两个变量仅保留用于向外部 n8n 实例发回调；日常使用可不填）
 
 ### 3.2 本地（不推荐此方式启动）
 

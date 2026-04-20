@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     n8n_base_url: str | None = None
     n8n_api_key: str | None = None
 
+    # LangGraph pipeline 持久化：
+    #   "memory"  → 进程内 MemorySaver（默认，重启丢失）
+    #   "sqlite"  → SqliteSaver，run 跨进程重启可恢复
+    pipeline_checkpointer: str = "memory"
+    pipeline_sqlite_path: str = "./storage/pipeline_checkpoints.sqlite"
+
     model_config = SettingsConfigDict(env_file=".env", env_prefix="SELF_API_")
 
     @property

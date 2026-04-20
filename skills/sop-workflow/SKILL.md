@@ -64,7 +64,7 @@ After routing:
 - Read [references/project-structure-kb.md](references/project-structure-kb.md) first for stable directory and naming rules.
 - Read [references/high-frequency-sops.md](references/high-frequency-sops.md) first.
 - Read [references/parameter-checklist.md](references/parameter-checklist.md) before deciding what information is still missing.
-- Read [references/n8n-workflow-map.md](references/n8n-workflow-map.md) if the user mentions n8n, orchestration, LangGraph pipeline, HITL, or wants the JSON workflow equivalents.
+- Read [references/workflow-map.md](references/workflow-map.md) whenever the user mentions orchestration, LangGraph pipeline, HITL, SOP templates, or asks how SOPs map to endpoints. (n8n is no longer used by this project.)
 
 ## Working rules
 
