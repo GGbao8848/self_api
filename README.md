@@ -180,8 +180,8 @@ make run
 
 文档与接口说明以下面两条常用工作流为主线：
 
-- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-sbatch-yolo-train`
-- 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> yolo-sliding-window-crop -> split-yolo-dataset 或直接 build-yolo-yaml -> zip/remote-transfer/remote-unzip -> yolo-train / remote-sbatch-yolo-train`
+- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> publish-yolo-dataset（发布并内置生成 yaml，可选 remote_sftp） -> yolo-train / remote-sbatch-yolo-train`
+- 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> split-yolo-dataset -> yolo-sliding-window-crop（对 split 后的 train/val 分别滑窗，防数据泄漏） -> yolo-augment（作用于 crop/train） -> publish-yolo-dataset -> yolo-train / remote-sbatch-yolo-train`
 - 多层目录整理：`discover-leaf-dirs -> clean-nested-dataset -> xml-to-yolo -> aggregate-nested-dataset`
 
 ### 4.3 多层目录叶子数据目录发现
@@ -232,9 +232,10 @@ make run
 
 ### 4.10 生成训练 YAML
 
-- `POST /api/v1/preprocess/build-yolo-yaml`（及 `/async`）
-
-根据数据集根目录与各划分下的 `images` 路径、`classes.txt` 生成 Ultralytics 风格 YAML；可选与上一版 `last_yaml` 合并路径。
+> 原 `POST /api/v1/preprocess/build-yolo-yaml`（及 `/async`）**已弃用并移除**。
+> 生成 YAML 的功能已整合进 `POST /api/v1/preprocess/publish-yolo-dataset`：
+> 在落盘数据集版本目录 `<project_root>/<detector>/datasets/<version>/` 的同时
+> 自动生成 `<version>.yaml`（含各划分 `images` 绝对路径、`nc`/`names`；支持 `last_yaml` 合并）。
 
 ### 4.11 数据投放与远程准备
 

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from copy import deepcopy
 from typing import Any
@@ -18,6 +19,8 @@ from urllib.request import urlopen
 from langgraph.types import interrupt
 
 from app.graph.state import DEFAULT_GATES, GateMode, PipelineState, StepGateConfig, StepResult
+
+logger = logging.getLogger(__name__)
 
 
 # ─── 辅助 ────────────────────────────────────────────────────────────────────
@@ -234,97 +237,160 @@ def node_split_dataset(state: PipelineState) -> dict[str, Any]:
 
 
 def node_crop_augment(state: PipelineState) -> dict[str, Any]:
-    """滑窗裁剪 + 数据增强（仅宽图执行裁剪；增强作用于 train split）。"""
+    """滑窗裁剪（train+val 切小图，避免数据泄漏）+ 对 crop/train 做增强。
+
+    原始 split 下是大图；此步完成后 crop/ 即构成实际的数据集版本来源：
+      {split_dir}/
+        classes.txt
+        train/{images,labels}              ← 原始大图 train（不参与训练）
+        val/{images,labels}                ← 原始大图 val
+        crop/
+          classes.txt                       ← 从 split_dir 复制
+          train/
+            images/, labels/                ← 原始 train 大图滑窗而来
+            augment/
+              images/, labels/              ← 对 crop/train 的离线增强
+          val/
+            images/, labels/                ← 原始 val 大图滑窗而来
+
+    数据泄漏防护：sliding_window 分别对 split_dir/train、split_dir/val 切窗口，
+    同一张大图的所有 patches 始终归属同一 split。
+    最终 publish_transfer 将以 {split_dir}/crop 为 input_dir 发布数据集版本。
+    """
+    import shutil as _shutil
+    from pathlib import Path as _Path
     from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
     from app.services.yolo_augment import run_yolo_augment
     from app.schemas.preprocess import YoloSlidingWindowCropRequest, YoloAugmentRequest
 
     split_dir = state.get("split_output_dir", "")
     summaries: list[str] = []
+    data_payload: dict[str, Any] = {"split_dir": split_dir}
 
-    for split in ("train", "val"):
-        input_split = f"{split_dir}/{split}"
-        output_split = f"{split_dir}/crop/{split}"
-        try:
-            run_yolo_sliding_window_crop(YoloSlidingWindowCropRequest(
-                images_dir=f"{input_split}/images",
-                labels_dir=f"{input_split}/labels",
-                output_dir=output_split,
-                only_wide=True,
-            ))
-            summaries.append(f"{split} 裁剪完成")
-        except (ValueError, OSError, FileNotFoundError):
-            summaries.append(f"{split} 无需裁剪（目录不存在或无宽图），跳过")
+    if not split_dir or not _Path(split_dir).is_dir():
+        return {
+            **_set_step_result(state, "crop_augment", StepResult(
+                status="failed",
+                summary=f"split_output_dir 不存在: {split_dir!r}",
+                data=data_payload,
+            )),
+            "error": f"crop_augment: invalid split_output_dir {split_dir!r}",
+            "completed": True,
+        }
+
+    crop_root = f"{split_dir}/crop"
+    data_payload["crop_root"] = crop_root
+
+    if _Path(crop_root).exists():
+        _shutil.rmtree(crop_root, ignore_errors=True)
 
     try:
-        run_yolo_augment(YoloAugmentRequest(
-            input_dir=f"{split_dir}/train",
+        crop_resp = run_yolo_sliding_window_crop(YoloSlidingWindowCropRequest(
+            input_dir=split_dir,
+            output_dir=crop_root,
+            only_wide=True,
         ))
-        summaries.append("train 增强完成")
-    except (ValueError, OSError) as exc:
-        summaries.append(f"train 增强跳过: {exc}")
+        summaries.append(
+            f"滑窗裁剪：{crop_resp.processed_images}/{crop_resp.input_images} 张处理，"
+            f"跳过 {crop_resp.skipped_images}，生成 {crop_resp.generated_crops} 个窗口"
+        )
+        data_payload["crop"] = {
+            "output_dir": crop_resp.output_dir,
+            "input_images": crop_resp.input_images,
+            "processed_images": crop_resp.processed_images,
+            "skipped_images": crop_resp.skipped_images,
+            "generated_crops": crop_resp.generated_crops,
+            "generated_labels": crop_resp.generated_labels,
+        }
+    except Exception as exc:
+        logger.warning("crop_augment: sliding_window 失败", exc_info=True)
+        return {
+            **_set_step_result(state, "crop_augment", StepResult(
+                status="failed",
+                summary=f"滑窗裁剪失败：{type(exc).__name__}: {exc}",
+                data=data_payload,
+            )),
+            "error": f"crop_augment sliding_window failed: {exc}",
+            "completed": True,
+        }
+
+    src_classes = _Path(split_dir) / "classes.txt"
+    dst_classes = _Path(crop_root) / "classes.txt"
+    if src_classes.exists():
+        try:
+            dst_classes.parent.mkdir(parents=True, exist_ok=True)
+            _shutil.copy2(src_classes, dst_classes)
+            data_payload["classes_copied_to"] = str(dst_classes)
+        except OSError as exc:
+            logger.warning("crop_augment: 复制 classes.txt 失败: %s", exc)
+            data_payload["classes_copy_error"] = str(exc)
+    else:
+        logger.warning("crop_augment: split_dir 下未找到 classes.txt: %s", src_classes)
+
+    train_crop_dir = f"{crop_root}/train"
+    if not _Path(f"{train_crop_dir}/images").is_dir():
+        summaries.append("train 增强跳过：crop/train/images 不存在（train 无宽图？）")
+        return _set_step_result(state, "crop_augment", StepResult(
+            status="ok",
+            summary="；".join(summaries),
+            data=data_payload,
+        ))
+
+    try:
+        aug_resp = run_yolo_augment(YoloAugmentRequest(
+            input_dir=train_crop_dir,
+            output_dir=f"{train_crop_dir}/augment",
+        ))
+        summaries.append(
+            f"train 增强：处理 {aug_resp.processed_images} 张，"
+            f"生成 {aug_resp.generated_images} 张（跳过 {aug_resp.skipped_images}）"
+        )
+        data_payload["augment"] = {
+            "output_dir": aug_resp.output_dir,
+            "processed_images": aug_resp.processed_images,
+            "skipped_images": aug_resp.skipped_images,
+            "generated_images": aug_resp.generated_images,
+            "generated_labels": aug_resp.generated_labels,
+        }
+    except Exception as exc:
+        logger.warning("crop_augment: augment 失败", exc_info=True)
+        summaries.append(f"train 增强跳过：{type(exc).__name__}: {exc}")
+        data_payload["augment_error"] = f"{type(exc).__name__}: {exc}"
 
     return _set_step_result(state, "crop_augment", StepResult(
         status="ok",
         summary="；".join(summaries),
-        data={"split_dir": split_dir},
+        data=data_payload,
     ))
-
-
-def node_build_yaml(state: PipelineState) -> dict[str, Any]:
-    """生成 Ultralytics data.yaml。"""
-    from app.services.build_yolo_yaml import run_build_yolo_yaml
-    from app.schemas.preprocess import BuildYoloYamlRequest
-
-    split_dir = state.get("split_output_dir", "")
-    version = state.get("dataset_version", "dataset")
-    detector_name = state.get("detector_name", "unknown")
-    project_root_dir = state.get("project_root_dir", "").rstrip("/")
-
-    yaml_path = f"{split_dir}/{version}.yaml"
-    replace_from = split_dir.rsplit("/", 1)[0] if "/" in split_dir else split_dir
-    replace_to = f"{project_root_dir}/{detector_name}/dataset"
-
-    req = BuildYoloYamlRequest(
-        input_dir=split_dir,
-        output_yaml_path=yaml_path,
-        path_prefix_replace_from=replace_from,
-        path_prefix_replace_to=replace_to,
-        classes_file=f"{state['original_dataset']}/classes.txt",
-    )
-    try:
-        resp = run_build_yolo_yaml(req)
-    except (ValueError, OSError) as exc:
-        return {
-            **_set_step_result(state, "build_yaml", StepResult(
-                status="failed", summary=str(exc), data={}
-            )),
-            "error": str(exc),
-            "completed": True,
-        }
-
-    return {
-        **_set_step_result(state, "build_yaml", StepResult(
-            status="ok",
-            summary=f"YAML 已生成: {resp.output_yaml_path}",
-            data=resp.model_dump(),
-        )),
-        "yaml_path": resp.output_yaml_path,
-    }
 
 
 def node_publish_transfer(state: PipelineState) -> dict[str, Any]:
     """数据发布/传输审核点 + 实际 publish 调用。
 
-    local 模式：仅执行 publish_yolo_dataset（在本地落盘）。
+    数据集版本 = 小图 + 增强（只发布 crop/，不含原始大图）：
+      input_dir 优先取 {split_output_dir}/crop，若不存在则退回 split_output_dir
+      （后一种仅用于 crop_augment 被跳过的异常路径）。
+
+    local 模式：publish_yolo_dataset 在本地生成 dataset_version.yaml（含 classes 与递归
+      发现的所有 images 路径）。此前的 build_yolo_yaml 独立节点已弃用，yaml 生成统一
+      由 publish_yolo_dataset 负责。
     remote 模式：zip → SFTP → 远端解压。
     """
+    from pathlib import Path as _Path
+
     execution_mode = state.get("execution_mode", "local")
+    split_output_dir = (state.get("split_output_dir") or "").rstrip("/")
+    crop_root = f"{split_output_dir}/crop" if split_output_dir else ""
+    publish_input_dir = crop_root if (crop_root and _Path(crop_root).is_dir()) else split_output_dir
 
     review_data = {
         "execution_mode": execution_mode,
-        "yaml_path": state.get("yaml_path"),
-        "split_output_dir": state.get("split_output_dir"),
+        "split_output_dir": split_output_dir,
+        "publish_input_dir": publish_input_dir,
+        "note": (
+            "数据集版本将由 publish_yolo_dataset 基于该目录生成 yaml 并落盘；"
+            "发布源为小图+增强的 crop/ 子目录。"
+        ),
         "hint": "确认数据集已就绪，即将发布/传输到训练目录。",
     }
     user_response = _maybe_interrupt(state, "publish_transfer", review_data)
@@ -341,7 +407,7 @@ def node_publish_transfer(state: PipelineState) -> dict[str, Any]:
     from app.schemas.preprocess import PublishYoloDatasetRequest
 
     req = PublishYoloDatasetRequest(
-        input_dir=state.get("split_output_dir", ""),
+        input_dir=publish_input_dir,
         project_root_dir=state.get("project_root_dir", ""),
         detector_name=state.get("detector_name", ""),
         publish_mode=execution_mode if execution_mode in ("local", "remote_sftp") else "local",
@@ -361,6 +427,9 @@ def node_publish_transfer(state: PipelineState) -> dict[str, Any]:
             "completed": True,
         }
 
+    new_version = resp.output_yaml_path.rsplit("/", 1)[-1].rsplit(".", 1)[0] \
+        if resp.output_yaml_path else state.get("dataset_version")
+
     return {
         **_set_step_result(state, "publish_transfer", StepResult(
             status="ok",
@@ -368,6 +437,7 @@ def node_publish_transfer(state: PipelineState) -> dict[str, Any]:
             data=resp.model_dump(),
         )),
         "yaml_path": resp.output_yaml_path,
+        "dataset_version": new_version,
     }
 
 

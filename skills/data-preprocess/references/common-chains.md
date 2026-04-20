@@ -9,23 +9,26 @@ Use when the input is already `images+xmls` and the goal is standard small-image
 1. `xml-to-yolo`
 2. `split-yolo-dataset`
 3. `yolo-augment` if augmentation is needed
-4. `build-yolo-yaml`
-5. `zip-folder` or `remote-transfer` / `remote-unzip`
-6. Hand off to `$ultralytics-yolo-modes` for training-stage parameter normalization
-7. Local execution injects `yolo-train`; remote execution injects `remote-sbatch-yolo-train`
+4. `publish-yolo-dataset` (lands the versioned dataset and emits `<version>.yaml` in one call; supports `publish_mode=local` or `remote_sftp`)
+5. Hand off to `$ultralytics-yolo-modes` for training-stage parameter normalization
+6. Local execution injects `yolo-train`; remote execution injects `remote-sbatch-yolo-train`
+
+> `build-yolo-yaml` has been removed; `publish-yolo-dataset` builds the yaml internally.
 
 ## Large-image frequent iteration
 
 Use when the source is large images and training depends on sliding-window crops.
+To avoid data leakage, split first, then crop each split independently.
 
 1. `clean-nested-dataset` if raw data is still scattered
 2. `xml-to-yolo`
 3. `reset-yolo-label-index` for single-class tasks
-4. `yolo-sliding-window-crop`
-5. `split-yolo-dataset` or directly `build-yolo-yaml`
-6. `zip-folder` or `remote-transfer` / `remote-unzip`
-7. Hand off to `$ultralytics-yolo-modes` for training-stage parameter normalization
-8. Local execution injects `yolo-train`; remote execution injects `remote-sbatch-yolo-train`
+4. `split-yolo-dataset` (split the original large images into train/val first)
+5. `yolo-sliding-window-crop` with `input_dir=<split_dir>` so train and val get cropped separately
+6. `yolo-augment` on `<split_dir>/crop/train` if augmentation is needed
+7. `publish-yolo-dataset` with `input_dir=<split_dir>/crop` (publishes the small-image + augmentation dataset version and emits yaml)
+8. Hand off to `$ultralytics-yolo-modes` for training-stage parameter normalization
+9. Local execution injects `yolo-train`; remote execution injects `remote-sbatch-yolo-train`
 
 ## Multi-layer directory consolidation
 

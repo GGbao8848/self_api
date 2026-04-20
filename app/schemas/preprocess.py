@@ -1080,19 +1080,6 @@ class BuildYoloYamlRequest(BaseModel):
     )
 
 
-class BuildYoloYamlAsyncRequest(BuildYoloYamlRequest):
-    callback_url: AnyHttpUrl | None = Field(
-        default=None,
-        description="Optional webhook URL that receives task result when finished",
-    )
-    callback_timeout_seconds: float = Field(
-        default=10.0,
-        ge=1.0,
-        le=120.0,
-        description="Callback HTTP timeout in seconds",
-    )
-
-
 class BuildYoloYamlResponse(BaseModel):
     status: str = "ok"
     output_yaml_path: str

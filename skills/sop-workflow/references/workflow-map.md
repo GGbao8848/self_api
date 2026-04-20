@@ -20,13 +20,12 @@
 2. `discover_classes`（HITL 审核点）— 扫描 XML，返回全部类名及频次；可在审核时填写 `class_name_map` / `final_classes`
 3. `xml_to_yolo` — XML → YOLO TXT 转换（含多对一重命名）
 4. `review_labels`（HITL 审核点）— 展示 label 分布，确认后才划分
-5. `split_dataset` — 按比例划分 train/val
-6. `crop_augment` — 滑窗裁剪 + 数据增强
-7. `build_yaml` — 生成 YOLO `data.yaml`
-8. `publish_transfer`（HITL 审核点）— 本地落盘 / zip + SFTP + 远端解压
-9. `train`（HITL 审核点）— 启动异步训练任务
-10. `poll_train` — 轮询训练任务状态（30 s 间隔，最长 12 h）
-11. `review_result`（HITL 审核点）— 查看训练结果，决定是否接受
+5. `split_dataset` — 原始大图按比例划分 train/val
+6. `crop_augment` — 对 `train/` 与 `val/` 分别滑窗切小图（防数据泄漏）→ 产物放在 `crop/{train,val}`；对 `crop/train` 做离线增强 → 产物放在 `crop/train/augment`
+7. `publish_transfer`（HITL 审核点）— 以 `crop/` 为发布源调用 `publish_yolo_dataset`：本地落盘 / zip + SFTP + 远端解压，并**内置生成 `<version>.yaml`**（原 `build_yolo_yaml` 节点已弃用并并入此步）
+8. `train`（HITL 审核点）— 启动异步训练任务
+9. `poll_train` — 轮询训练任务状态（30 s 间隔，最长 12 h）
+10. `review_result`（HITL 审核点）— 查看训练结果，决定是否接受
 
 每个节点都支持 **gate** 机制：`auto`（跳过确认）或 `manual`（等待人工点击确认后才执行）。设置 `full_access: true` 可跳过所有门控，全自动运行。
 

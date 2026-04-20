@@ -28,7 +28,7 @@ This pattern applies to ALL modes: `train`, `val`, `predict`, and `export`.
 
 The following count as **execution** and are **forbidden in the first assistant turn** (and forbidden before the user has replied to the preview with explicit confirmation):
 
-- Calling `POST` / `GET` to any `self_api` preprocess endpoint (including `xml-to-yolo`, `split-yolo-dataset`, `build-yolo-yaml`, `yolo-train`, `yolo-train/async`, etc.)
+- Calling `POST` / `GET` to any `self_api` preprocess endpoint (including `xml-to-yolo`, `split-yolo-dataset`, `publish-yolo-dataset`, `yolo-train`, `yolo-train/async`, etc.)
 - Running shell commands that invoke `curl`, `wget`, `httpie`, or Python `requests` against the local API
 - Running `conda run ... yolo train`, raw `yolo train`, or any subprocess that starts training
 - Editing or writing files under dataset or `runs/` directories when the intent is to **perform** the pipeline instead of only describing it

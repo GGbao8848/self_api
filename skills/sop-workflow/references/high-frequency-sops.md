@@ -24,17 +24,17 @@ Sequence:
 1. `xml-to-yolo`
 2. `split-yolo-dataset`
 3. `yolo-augment` if augmentation is needed
-4. `build-yolo-yaml`
-5. `zip-folder` or `remote-transfer -> remote-unzip` if the dataset must move
-6. Route the preprocessing stage to `$data-preprocess`
-7. Route the training stage to `$ultralytics-yolo-modes`
-8. If training is local, inject `yolo-train`
-9. If training is remote, inject `remote-sbatch-yolo-train`
+4. `publish-yolo-dataset` (lands the versioned dataset and emits `<version>.yaml` in one call; supports `publish_mode=local` or `remote_sftp` to push + unzip remotely)
+5. Route the preprocessing stage to `$data-preprocess`
+6. Route the training stage to `$ultralytics-yolo-modes`
+7. If training is local, inject `yolo-train`
+8. If training is remote, inject `remote-sbatch-yolo-train`
 
 Key decisions:
 
 - Skip `yolo-augment` if the dataset is already large enough or the user wants a clean baseline.
-- Use `remote-transfer` directly only when archive packaging is unnecessary.
+- Use `publish_mode=remote_sftp` instead of separate `zip-folder` + `remote-transfer` + `remote-unzip` when delivery + version pinning should be one step.
+- `build-yolo-yaml` (removed) is now subsumed by `publish-yolo-dataset`.
 
 ## SOP 2: Large-image `images+xmls` frequent iteration
 
@@ -49,18 +49,20 @@ Sequence:
 1. `clean-nested-dataset` if the original directory is messy
 2. `xml-to-yolo`
 3. `reset-yolo-label-index` for single-class training
-4. `yolo-sliding-window-crop`
-5. `split-yolo-dataset` or directly `build-yolo-yaml`
-6. `zip-folder` or `remote-transfer -> remote-unzip`
-7. Route the preprocessing stage to `$data-preprocess`
-8. Route the training stage to `$ultralytics-yolo-modes`
-9. If training is local, inject `yolo-train`
-10. If training is remote, inject `remote-sbatch-yolo-train`
+4. `split-yolo-dataset` (split the original large images into train/val first to prevent data leakage)
+5. `yolo-sliding-window-crop` with `input_dir=<split_dir>` so train and val crops stay in their own splits
+6. `yolo-augment` on `<split_dir>/crop/train` if augmentation is needed
+7. `publish-yolo-dataset` with `input_dir=<split_dir>/crop` (publishes the small-image + augmentation dataset version and emits yaml; choose `publish_mode=local` or `remote_sftp`)
+8. Route the preprocessing stage to `$data-preprocess`
+9. Route the training stage to `$ultralytics-yolo-modes`
+10. If training is local, inject `yolo-train`
+11. If training is remote, inject `remote-sbatch-yolo-train`
 
 Key decisions:
 
 - Use `clean-nested-dataset` with `flatten: true` when you want one merged crop source dataset.
-- If training consumes the crop dataset directly without split, go straight to `build-yolo-yaml`.
+- Cropping **after** `split-yolo-dataset` prevents the same source image contributing patches to both train and val.
+- `build-yolo-yaml` (removed) is now subsumed by `publish-yolo-dataset`.
 
 ## SOP 3: Multi-layer dataset consolidation
 

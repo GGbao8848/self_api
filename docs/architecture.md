@@ -69,8 +69,9 @@
   ┌──────────────────────────────────────────────────────────────────┐
   │                   app/services/   (原子能力)                    │
   │  xml_to_yolo · discover_xml_classes · split_yolo_dataset        │
-  │  yolo_sliding_window · yolo_augment · build_yolo_yaml           │
-  │  publish_yolo_dataset · yolo_train · remote_sbatch_yolo_train   │
+  │  yolo_sliding_window · yolo_augment                             │
+  │  publish_yolo_dataset（内置 yaml 生成）· yolo_train             │
+  │  remote_sbatch_yolo_train                                       │
   │  task_manager · remote_transfer · remote_unzip · ...            │
   └──────────────────────────────────────────────────────────────────┘
 ```
@@ -119,8 +120,8 @@ self_api/
 │   │   ├── split_yolo_dataset.py
 │   │   ├── yolo_sliding_window.py
 │   │   ├── yolo_augment.py
-│   │   ├── build_yolo_yaml.py
-│   │   ├── publish_yolo_dataset.py
+│   │   ├── build_yolo_yaml.py      # 内部工具（被 publish 复用；REST 端点已弃用）
+│   │   ├── publish_yolo_dataset.py # 发布数据集版本 + 内置生成 data.yaml
 │   │   ├── yolo_train.py
 │   │   ├── remote_sbatch_yolo_train.py
 │   │   ├── remote_transfer.py / remote_unzip.py
@@ -220,10 +221,9 @@ else:                            # auto
 | **discover_classes** | **manual** | 展示类名让用户配 `class_name_map` |
 | xml_to_yolo | auto | 纯转换 |
 | **review_labels** | **manual** | 审核转换结果 |
-| split_dataset | auto | |
-| crop_augment | auto | |
-| build_yaml | auto | |
-| **publish_transfer** | **manual** | 启动远程 SFTP 前确认 |
+| split_dataset | auto | 原始大图按 train/val 拆分 |
+| crop_augment | auto | 滑窗切小图（train/val 各自切，防数据泄漏）+ 对 crop/train 增强 |
+| **publish_transfer** | **manual** | 发布数据集版本（小图+增强），内置 yaml 生成；启动远程 SFTP 前确认 |
 | **train** | **manual** | 训练前最终确认（会消耗 GPU） |
 | **review_result** | **manual** | 训练完成后验收 |
 
@@ -272,19 +272,19 @@ def node_xxx(state: PipelineState) -> dict[str, Any]:
  └──────┬──────┘
         ▼
  ┌──────────────┐
- │ split_dataset│  train/val 拆分（时间戳版本）
+ │ split_dataset│  原始大图按 train/val 拆分（时间戳版本目录）
  └──────┬───────┘
         ▼
  ┌─────────────┐
- │ crop_augment│  滑窗裁剪 + train 增强
- └──────┬──────┘
-        ▼
- ┌─────────────┐
- │ build_yaml  │  生成 data.yaml（含路径前缀替换）
+ │ crop_augment│  1) 对 train/val 分别滑窗切小图 → crop/{train,val}
+ │             │  2) 对 crop/train 做离线增强 → crop/train/augment
+ │             │  （防数据泄漏：同一大图的 patches 只进同一 split）
  └──────┬──────┘
         ▼
  ┌─────────────────┐   manual
  │ publish_transfer│────→ interrupt → 用户确认发布（local/remote_sftp）
+ │                 │   发布源 = {split_dir}/crop（只含小图+增强，不含原始大图）
+ │                 │   内置生成 <version>.yaml（build_yolo_yaml 已并入此步）
  └──────┬──────────┘
         ▼
  ┌──────────┐   manual

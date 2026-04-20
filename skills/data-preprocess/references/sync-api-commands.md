@@ -121,16 +121,23 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-sliding-window-cro
   }'
 ```
 
-## Build YOLO YAML
+## Publish YOLO dataset (replaces removed `build-yolo-yaml`)
 
 ```bash
-curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/build-yolo-yaml" \
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/publish-yolo-dataset" \
   -H "Content-Type: application/json" \
   -d '{
     "input_dir": "/path/to/temp_dataset",
-    "output_yaml_path": "/path/to/temp_dataset/dataset.yaml"
+    "project_root_dir": "/mnt/training/TVDS",
+    "detector_name": "dog_cat_pig",
+    "publish_mode": "local"
   }'
 ```
+
+This lands the versioned dataset at `/mnt/training/TVDS/dog_cat_pig/datasets/<version>/`
+and emits `<version>.yaml` automatically. For remote push, set
+`"publish_mode": "remote_sftp"` plus `remote_host`, `remote_project_root_dir`,
+`remote_username`, `remote_private_key_path`.
 
 ## Zip folder
 

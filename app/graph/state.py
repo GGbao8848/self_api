@@ -20,13 +20,12 @@ GateMode = Literal["auto", "manual"]
 
 STEP_NAMES = [
     "healthcheck",
-    "discover_classes",    # 新增：转换前审核类别
+    "discover_classes",    # 转换前审核类别
     "xml_to_yolo",
-    "review_labels",       # 新增：转换后审核 label 分布
+    "review_labels",       # 转换后审核 label 分布
     "split_dataset",
     "crop_augment",
-    "build_yaml",
-    "publish_transfer",
+    "publish_transfer",    # 内置 data.yaml 生成（原 build_yaml 已并入此步）
     "train",
     "review_result",       # 训练完成后人工验收
 ]
@@ -38,8 +37,7 @@ DEFAULT_GATES: dict[str, GateMode] = {
     "review_labels":     "manual",   # 展示 label 统计，确认后才划分
     "split_dataset":     "auto",
     "crop_augment":      "auto",
-    "build_yaml":        "auto",
-    "publish_transfer":  "manual",   # 传输/发布前确认
+    "publish_transfer":  "manual",   # 传输/发布前确认（含 yaml 生成）
     "train":             "manual",   # 训练启动前最终确认
     "review_result":     "manual",   # 训练完成后人工验收
 }
@@ -100,7 +98,7 @@ class PipelineState(TypedDict, total=False):
     labels_dir: str | None
     dataset_version: str | None              # split 后版本目录名
     split_output_dir: str | None
-    yaml_path: str | None                    # build_yaml 输出
+    yaml_path: str | None                    # publish_transfer 内置生成
     train_task_id: str | None                # async train task id
 
     # ── 流程控制 ──────────────────────────────────────────────

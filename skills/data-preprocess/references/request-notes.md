@@ -21,11 +21,16 @@ These are the request-shaping rules that matter most when producing commands.
 - Use `flatten: true` when the user wants a single merged `images/` + `xmls/` output.
 - Use `include_backgrounds: false` when only labeled pairs should be kept.
 
-### `build-yolo-yaml`
+### `publish-yolo-dataset` (replaces removed `build-yolo-yaml`)
 
-- Prefer the minimal standard call with `input_dir` and `output_yaml_path`.
-- If `classes.txt` is empty or missing, `last_yaml` must provide `names`.
-- `path_prefix_replace_from` and `path_prefix_replace_to` must be passed together.
+- As of 2026-04, `POST /api/v1/preprocess/build-yolo-yaml` and its async variant are
+  **removed**. Use `POST /api/v1/preprocess/publish-yolo-dataset` instead — it lands the
+  dataset version at `<project_root_dir>/<detector_name>/datasets/<version>/` and
+  **emits `<version>.yaml` automatically** (train/val/test `images` absolute paths plus
+  `nc`/`names`).
+- If `classes.txt` is empty or missing, pass `last_yaml` so class names come from there.
+- `publish_mode="local"` writes on-disk only; `publish_mode="remote_sftp"` additionally
+  zips, SFTPs to `remote_host`, and unzips remotely.
 
 ### Transfer endpoints
 

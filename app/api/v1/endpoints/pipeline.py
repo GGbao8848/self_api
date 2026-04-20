@@ -12,12 +12,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import threading
+import time
 import uuid
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
+
+logger = logging.getLogger(__name__)
 
 from app.core.security import require_api_auth
 from app.graph.pipeline import compiled_graph
@@ -96,6 +101,22 @@ def _get_graph_state(run_id: str) -> Any:
         return None
 
 
+def _extract_pending_review(gs: Any) -> dict[str, Any] | None:
+    """从 LangGraph 快照中提取当前暂停的 interrupt payload（若有）。
+
+    LangGraph 把 interrupt(value) 的 value 存在 gs.tasks[*].interrupts[*].value。
+    这里只取第一个 pending task 的第一个 interrupt；对本项目管线（串行 11 节点）够用。
+    """
+    tasks = getattr(gs, "tasks", None) or ()
+    for task in tasks:
+        interrupts = getattr(task, "interrupts", None) or ()
+        for it in interrupts:
+            value = getattr(it, "value", None)
+            if isinstance(value, dict):
+                return value
+    return None
+
+
 def _to_status_response(run_id: str) -> PipelineStatusResponse:
     gs = _get_graph_state(run_id)
     # LangGraph 对未知 thread_id 也返回空 StateSnapshot，需要额外校验
@@ -113,28 +134,57 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
             data=result.get("data") or {},
         )
 
+    pending_review = state.get("pending_review")
+    if interrupted and not pending_review:
+        pending_review = _extract_pending_review(gs)
+
     return PipelineStatusResponse(
         run_id=run_id,
         current_step=state.get("current_step"),
         completed=state.get("completed", False),
         error=state.get("error"),
-        pending_review=state.get("pending_review"),
+        pending_review=pending_review,
         step_results=step_results,
         interrupted=interrupted,
     )
 
 
+def _wait_state_visible(run_id: str, timeout_s: float = 3.0) -> None:
+    """后台线程起步时，等待第一个节点至少写回一次 checkpoint。"""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        gs = _get_graph_state(run_id)
+        if gs and gs.values and gs.values.get("run_id"):
+            return
+        time.sleep(0.05)
+
+
 @router.post("/run", response_model=PipelineStatusResponse, status_code=202)
 def run_pipeline(req: PipelineRunRequest) -> PipelineStatusResponse:
-    """启动新的 pipeline 运行。立即返回 run_id，流程在后台推进直到第一个 interrupt。"""
+    """启动新的 pipeline 运行。
+
+    - `full_access=False`（HITL）：同步推进到第一个 interrupt 后返回。
+    - `full_access=True`：派出后台线程跑整条流程（含训练），立即返回 run_id；
+      调用方通过 GET /pipeline/{run_id} 或 SSE 查进度。
+    """
     run_id = str(uuid.uuid4())
     initial_state = _build_initial_state(req, run_id)
     config = _build_config(run_id)
 
-    try:
-        compiled_graph.invoke(initial_state, config)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"pipeline invoke error: {exc}") from exc
+    if req.full_access:
+        def _run_in_background() -> None:
+            try:
+                compiled_graph.invoke(initial_state, config)
+            except Exception:
+                logger.exception("pipeline background run %s failed", run_id)
+
+        threading.Thread(target=_run_in_background, daemon=True, name=f"pipeline-{run_id[:8]}").start()
+        _wait_state_visible(run_id)
+    else:
+        try:
+            compiled_graph.invoke(initial_state, config)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"pipeline invoke error: {exc}") from exc
 
     return _to_status_response(run_id)
 

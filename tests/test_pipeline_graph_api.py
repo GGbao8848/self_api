@@ -69,7 +69,6 @@ def patch_all_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
         "review_labels": "node_review_labels",
         "split_dataset": "node_split_dataset",
         "crop_augment": "node_crop_augment",
-        "build_yaml": "node_build_yaml",
         "publish_transfer": "node_publish_transfer",
         "train": "node_train",
         "poll_train": "node_poll_train",
@@ -92,8 +91,7 @@ def patch_all_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
         ("xml_to_yolo", "review_labels"),
         ("review_labels", "split_dataset"),
         ("split_dataset", "crop_augment"),
-        ("crop_augment", "build_yaml"),
-        ("build_yaml", "publish_transfer"),
+        ("crop_augment", "publish_transfer"),
         ("publish_transfer", "train"),
         ("train", "poll_train"),
         ("poll_train", "review_result"),
@@ -239,5 +237,4 @@ def test_pipeline_step_gate_override_to_auto(
     assert data["step_results"]["review_labels"]["status"] == "ok"
     assert data["step_results"]["split_dataset"]["status"] == "ok"
     assert data["step_results"]["crop_augment"]["status"] == "ok"
-    assert data["step_results"]["build_yaml"]["status"] == "ok"
     assert "publish_transfer" not in data["step_results"]

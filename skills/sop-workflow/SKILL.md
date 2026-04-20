@@ -27,7 +27,7 @@ Only after the user confirms — or explicitly says "直接跑" / "确认" / "go
 
 The following are **forbidden before** the user has seen the full multi-stage plan and explicitly confirmed:
 
-- Any HTTP call to `self_api` preprocess endpoints (`xml-to-yolo`, `split-yolo-dataset`, `build-yolo-yaml`, `yolo-train`, async variants, etc.)
+- Any HTTP call to `self_api` preprocess endpoints (`xml-to-yolo`, `split-yolo-dataset`, `publish-yolo-dataset`, `yolo-train`, async variants, etc.)
 - Shell commands such as `curl` / `wget` that hit those endpoints
 - Starting training or long-running jobs
 

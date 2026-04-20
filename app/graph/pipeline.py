@@ -2,8 +2,11 @@
 
 Graph 节点顺序：
   healthcheck → discover_classes → xml_to_yolo → review_labels
-  → split_dataset → crop_augment → build_yaml
+  → split_dataset → crop_augment
   → publish_transfer → train → poll_train → review_result
+
+注：data.yaml 由 publish_transfer 内部的 publish_yolo_dataset 服务生成，
+    不再单独走 build_yaml 节点（build_yolo_yaml API 已弃用）。
 
 Gate 系统（interrupt）由各节点内部通过 _maybe_interrupt() 触发；
 checkpointer 以 thread_id=run_id 保存断点状态。支持两种：
@@ -30,7 +33,6 @@ from langgraph.types import Command  # re-export for callers
 
 from app.core.config import get_settings
 from app.graph.nodes import (
-    node_build_yaml,
     node_crop_augment,
     node_discover_classes,
     node_healthcheck,
@@ -92,7 +94,6 @@ def build_graph() -> StateGraph:
     g.add_node("review_labels",     node_review_labels)
     g.add_node("split_dataset",     node_split_dataset)
     g.add_node("crop_augment",      node_crop_augment)
-    g.add_node("build_yaml",        node_build_yaml)
     g.add_node("publish_transfer",  node_publish_transfer)
     g.add_node("train",             node_train)
     g.add_node("poll_train",        node_poll_train)
@@ -106,8 +107,7 @@ def build_graph() -> StateGraph:
         ("xml_to_yolo",      "review_labels"),
         ("review_labels",    "split_dataset"),
         ("split_dataset",    "crop_augment"),
-        ("crop_augment",     "build_yaml"),
-        ("build_yaml",       "publish_transfer"),
+        ("crop_augment",     "publish_transfer"),
         ("publish_transfer", "train"),
         ("train",            "poll_train"),
         ("poll_train",       "review_result"),

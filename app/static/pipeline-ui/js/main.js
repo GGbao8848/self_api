@@ -263,7 +263,7 @@ function renderDetail(data) {
   el.stepList.innerHTML = "";
   const allSteps = [
     "healthcheck", "discover_classes", "xml_to_yolo", "review_labels",
-    "split_dataset", "crop_augment", "build_yaml", "publish_transfer",
+    "split_dataset", "crop_augment", "publish_transfer",
     "train", "poll_train", "review_result",
   ];
   for (const stepName of allSteps) {

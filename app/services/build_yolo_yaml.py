@@ -1,3 +1,13 @@
+"""YOLO data.yaml 构建工具（模块内部实现）。
+
+注意：对外 REST API `/api/v1/preprocess/build-yolo-yaml` 已于 2026-04 **弃用并移除**，
+请改用 `POST /api/v1/preprocess/publish-yolo-dataset`——该端点在落盘数据集版本的同时
+内置生成 `<version>.yaml`。
+
+本模块保留的原因是 `publish_yolo_dataset` 服务内部仍复用这里的工具函数
+（`_pick_effective_root_and_layout`、`_publish_dataset_tree`、`run_build_yolo_yaml` 等）。
+除非被 publish 调用，不要从新代码里 import 本模块。
+"""
 from __future__ import annotations
 
 import shutil

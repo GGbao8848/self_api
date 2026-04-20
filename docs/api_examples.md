@@ -17,8 +17,7 @@
 | `split-yolo-dataset` | `input_dir`（其下需有 `images/`、`labels/`）、`output_dir`（可选，默认 `<input_dir>/split_dataset`） |
 | `yolo-augment` | `input_dir`（支持根目录下直接有 `images/`、`labels/`，也支持递归发现 `*/images` 与同级 `labels/`，并保留相对目录层级输出）、`output_dir`（可选，默认 `<input_dir>/augment`）、七个增强开关（默认全开）；仅支持 YOLO TXT |
 | `yolo-sliding-window-crop` | `input_dir`（支持根目录下直接有 `images/`，也支持递归发现 `*/images`；若同级存在 `labels/` 则自动同步输出裁剪标注并保留相对目录层级）、`output_dir`；可选 `window_width`、`window_height`、`stride_x`、`stride_y`（传入即覆盖默认）；以及 `min_vis_ratio`、`stride_ratio`、`ignore_vis_ratio`、`only_wide` |
-| `build-yolo-yaml` | 同上；**`last_yaml`** 与当前扫描路径合并（旧路径在前、去重）。**`classes.txt` 有有效类别行时**：`nc`/`names` 以该文件为准。**`classes.txt` 为空或不存在时**：必须提供 **`last_yaml`**，且其中需含 **`names`**（及通常的 `nc`），类别表从该 YAML 读取；当前数据集各划分路径仍按扫描结果**追加**到对应 `train`/`val`/…。远程 `last_yaml` 需 **`sftp_username`**、**`sftp_private_key_path`** |
-| `publish-yolo-dataset` | `input_dir`、`project_root_dir`、`detector_name`；可选 `dataset_version`。`publish_mode=local` 时发布到本地规范目录并生成 yaml；`publish_mode=remote_sftp` 时额外需要 `remote_host`、`remote_project_root_dir`、`remote_username`、`remote_private_key_path`，内部走 zip + SFTP 上传 + 远端解压 |
+| `publish-yolo-dataset` | `input_dir`、`project_root_dir`、`detector_name`；可选 `dataset_version`、`last_yaml`（与当前扫描合并）。`publish_mode=local` 时发布到本地规范目录并**内置生成 `<version>.yaml`**（含 `train`/`val`/`test` 各划分下 `images` 绝对路径、`nc`/`names`）；`publish_mode=remote_sftp` 时额外需要 `remote_host`、`remote_project_root_dir`、`remote_username`、`remote_private_key_path`，内部走 zip + SFTP 上传 + 远端解压。**`classes.txt` 为空或不存在时**：必须提供 `last_yaml` 作为类别基准，当前数据仅**追加**各划分 images 路径。远程 `last_yaml` 需 `sftp_username`、`sftp_private_key_path`。取代已弃用的 `build-yolo-yaml` |
 | `zip-folder` | `input_dir`、`output_zip_path`（可选，默认 `<input_dir_parent>/<input_dir_name>.zip`）、`include_root_dir`、`overwrite` |
 | `remote-transfer` | `source_path`、`target`；以及 `username`、`password` / `private_key_path`、`port`、`overwrite` |
 | `remote-unzip` | `archive_path`、`output_dir`；以及 `username`、`password` / `private_key_path`、`port`、`overwrite` |
@@ -45,8 +44,8 @@ curl "http://192.168.2.26:8666/api/v1/healthz"
 
 以下顺序按你当前最常用的两条工作流整理：
 
-- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-sbatch-yolo-train`
-- 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> yolo-sliding-window-crop -> split-yolo-dataset 或直接 build-yolo-yaml -> zip/remote-transfer/remote-unzip -> yolo-train / remote-sbatch-yolo-train`
+- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> publish-yolo-dataset（落盘并生成 yaml；可选 remote_sftp） -> yolo-train / remote-sbatch-yolo-train`
+- 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> split-yolo-dataset -> yolo-sliding-window-crop（对 split 后的 train/val 分别滑窗，避免数据泄漏） -> yolo-augment（作用于 crop/train） -> publish-yolo-dataset -> yolo-train / remote-sbatch-yolo-train`
 - 多层目录数据整理：`discover-leaf-dirs -> clean-nested-dataset -> xml-to-yolo -> aggregate-nested-dataset`
 
 阅读建议也按这个顺序往下看：先看数据进入训练前的整理链路，再看投放与训练，最后看少用的 VOC 裁剪/回贴工具。
@@ -449,39 +448,12 @@ python yolo_square_sliding_crop.py \
 
 ## 12. 生成 YOLO `data.yaml`（Ultralytics）
 
-- `POST /api/v1/preprocess/build-yolo-yaml`
-- `POST /api/v1/preprocess/build-yolo-yaml/async`
-
-在 `input_dir` 下自动匹配数据集根（见 §0），扫描 `train` / `val` / `test` 等划分；各划分下需存在 `images` 子目录且含至少一张图片。生成的 YAML 中 **`train` / `val` / `test` 的值为各划分 `images` 目录的绝对路径**（POSIX），例如 `train: /Users/.../dataset1/dataset/train/images`，不再使用单独的 `path:` 与相对子路径。`path_prefix_replace_from` / `path_prefix_replace_to` 若成对填写，则对**当前扫描得到的**划分路径做前缀替换（`last_yaml` 里已有的路径**不会**再替换）。
-
-**`last_yaml`（可选）**：上一份数据 YAML。解析其中的划分路径，与本次从 `input_dir` 扫描得到的路径按划分**合并**（先 `last_yaml`、后本次扫描，路径去重）。**类别名 `nc`/`names`**：若 **`classes.txt` 存在且含至少一行有效类别**，则以该文件为准；若 **`classes.txt` 为空或不存在**，则**必须**提供 `last_yaml`，并从其中的 **`names`**（及行数决定 `nc`）读取，此时以 `last_yaml` 为类别基准，当前数据仅**追加**各划分下的 images 路径。
-
-远程 `last_yaml` 示例：`"last_yaml": "sftp://my.host/var/data.yaml"`，并设置 `"sftp_username": "me"`、`"sftp_private_key_path": "/home/me/.ssh/id_ed25519"`；可选 `"sftp_port": 22`。
-
-```bash
-curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/build-yolo-yaml" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_dir": "/path/to/temp_dataset",
-    "classes_file": "/path/to/temp_dataset/classes.txt",
-    "output_yaml_path": "/path/to/temp_dataset/dataset.yaml",
-    "path_prefix_replace_from": "/Users/me/tmp_datasets/dataset1",
-    "path_prefix_replace_to": "/mnt/training/TVDS/dog_cat_pig"
-  }'
-```
-
-`classes_file` 可省略，按 §0 在 `dataset` / `yolo_split` 等位置自动查找 `classes.txt`。`path_prefix_replace_*` 可省略；若填写则须成对出现，且每条**扫描得到的**划分路径须以 `path_prefix_replace_from` 为前缀。
-
-若只走标准模式，同步调用通常只需：
-
-```bash
-curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/build-yolo-yaml" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_dir": "/path/to/temp_dataset",
-    "output_yaml_path": "/path/to/temp_dataset/dataset.yaml"
-  }'
-```
+> **端点已弃用并移除（2026-04）。** 旧的 `POST /api/v1/preprocess/build-yolo-yaml` 与
+> `/build-yolo-yaml/async` 不再对外暴露，请改用 `POST /api/v1/preprocess/publish-yolo-dataset`
+> （见 §14）。该端点在落盘数据集版本目录 `<project_root>/<detector>/datasets/<version>/` 的
+> 同时**自动生成** `<version>.yaml`，包含 `train`/`val`/`test` 各划分 `images` 绝对路径、
+> `nc`/`names`，并支持 `last_yaml` 合并、远程 SFTP 发布等原能力。LangGraph pipeline 的
+> `publish_transfer` 节点走同一路径，原独立的 `build_yaml` 节点已并入 `publish_transfer`。
 
 ## 13. 目录打包为 ZIP
 
