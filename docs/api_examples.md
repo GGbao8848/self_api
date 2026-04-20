@@ -30,7 +30,7 @@
 
 **异步任务轮询**：`GET /api/v1/preprocess/tasks/{task_id}` 返回体中，业务结果在 **`result`** 对象内（例如 `result.output_dir`、`result.output_zip_path`），勿与顶层字段混淆。
 
-**n8n HTTP Request**：服务端要求 **`Content-Type: application/json`**。在节点里用「Body Parameters / 字段列表」维护时，请将 **Body Content Type** 设为 **JSON**，**Specify Body** 设为 **Using Fields Below（keypair）**，不要用整段 `JSON.stringify` 表达式，以便与下表字段一一对应、方便修改。
+**HTTP 请求约定**：服务端要求 **`Content-Type: application/json`**。无论你使用 curl、前端 fetch 还是其他 HTTP 客户端，都应直接发送 JSON 对象，不要把请求体再包一层字符串。
 
 ## 1. 健康检查
 

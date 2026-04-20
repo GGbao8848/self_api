@@ -1,6 +1,16 @@
-# self_api - 图像/数据集预处理 API
+# self_api - LangGraph Pipeline API
 
-用于图像与图像数据集预处理的最小可交付 API 服务，当前提供 12 个核心能力：
+当前主入口已经切换到 `LangGraph + HITL` 管线。
+
+- 端到端编排：`/api/v1/pipeline/*`
+- 原子能力调试：`/api/v1/preprocess/*`
+- 运行状态与异步任务：`/api/v1/tasks/*`
+- 前端控制台：`/pipeline-ui`
+- 设计说明：[docs/architecture.md](docs/architecture.md)
+- API 用法：[docs/pipeline-api.md](docs/pipeline-api.md)
+- 迁移说明：[docs/migration-from-n8n.md](docs/migration-from-n8n.md)
+
+用于图像与图像数据集预处理、数据发布和训练编排的 API 服务，当前提供 12 个核心原子能力：
 
 1. 指定目录图像按滑窗规则裁剪并保存
 2. Pascal VOC XML 标注转换为 YOLO 标注
@@ -83,7 +93,6 @@ cp .env.example .env
 - `SELF_API_AUTH_ENABLED`（非必要，鉴权相关字段，不需要鉴权的时候，设置 false，下面的账户密码注释掉即可）
 - `SELF_API_PIPELINE_CHECKPOINTER`（可选，`memory`/`sqlite`，默认 `memory`；选 `sqlite` 则 run 跨进程重启可恢复）
 - `SELF_API_PIPELINE_SQLITE_PATH`（可选，SQLite checkpoint 文件路径，默认 `./storage/pipeline_checkpoints.sqlite`）
-- `SELF_API_N8N_BASE_URL` / `SELF_API_N8N_API_KEY`（**已废弃**：项目已切换到 LangGraph 管线，这两个变量仅保留用于向外部 n8n 实例发回调；日常使用可不填）
 
 ### 3.2 本地（不推荐此方式启动）
 

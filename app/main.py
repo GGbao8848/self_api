@@ -14,8 +14,8 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description=(
-        "Image preprocessing API with async tasks, auth, artifact uploads, and "
-        "system probes"
+        "LangGraph pipeline orchestration API with HITL checkpoints, "
+        "dataset preprocess tools, task status, auth, and artifact downloads"
     ),
 )
 
@@ -45,11 +45,6 @@ app.mount(
     StaticFiles(directory=str(settings.project_root / "app" / "static")),
     name="static",
 )
-
-
-@app.get("/train-ui")
-def train_ui() -> FileResponse:
-    return FileResponse(settings.project_root / "app" / "static" / "train-ui" / "index.html")
 
 
 @app.get("/pipeline-ui")

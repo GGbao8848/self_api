@@ -149,14 +149,19 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
     )
 
 
-def _wait_state_visible(run_id: str, timeout_s: float = 3.0) -> None:
-    """后台线程起步时，等待第一个节点至少写回一次 checkpoint。"""
+def _wait_state_ready(run_id: str, timeout_s: float = 3.0) -> None:
+    """后台线程起步时，等待状态可见；快任务则尽量等到 completed/interrupted。"""
     deadline = time.monotonic() + timeout_s
+    seen_state = False
     while time.monotonic() < deadline:
         gs = _get_graph_state(run_id)
         if gs and gs.values and gs.values.get("run_id"):
-            return
+            seen_state = True
+            if gs.values.get("completed") or bool(getattr(gs, "next", ())):
+                return
         time.sleep(0.05)
+    if seen_state:
+        return
 
 
 @router.post("/run", response_model=PipelineStatusResponse, status_code=202)
@@ -179,7 +184,7 @@ def run_pipeline(req: PipelineRunRequest) -> PipelineStatusResponse:
                 logger.exception("pipeline background run %s failed", run_id)
 
         threading.Thread(target=_run_in_background, daemon=True, name=f"pipeline-{run_id[:8]}").start()
-        _wait_state_visible(run_id)
+        _wait_state_ready(run_id)
     else:
         try:
             compiled_graph.invoke(initial_state, config)

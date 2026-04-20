@@ -45,7 +45,7 @@
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                       前端 / 智能体 / CLI                              │
-│                 (train-ui · 外部 agent · curl)                         │
+│               (pipeline-ui · 外部 agent · curl)                        │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │ HTTP/JSON (JWT 鉴权)
           ┌─────────────────────────┼──────────────────────────┐
@@ -134,7 +134,8 @@ self_api/
 │   │   └── logging.py
 │   │
 │   └── static/
-│       └── train-ui/               # 轻量前端：可视化 pipeline + 审核点
+│       ├── pipeline-ui/            # 轻量前端：可视化 pipeline + 审核点
+│       └── shared/                 # 静态前端共享工具
 │
 ├── docs/
 │   ├── architecture.md             # ← 本文
@@ -396,7 +397,7 @@ Client                             Server
 | **P3 SOP 预设** | `app/graph/sops.py` 注册 4 个模板（local-small-baseline / local-large-sliding-window / remote-slurm-iter / full-auto-smoke），对外暴露 `GET /pipeline/sops` 与 `POST /pipeline/sops/{sop_id}/run`；前端 SOP 选择器 | ✅ 已完成 |
 | **P4 持久化** | `pipeline_checkpointer` 配置项可切换 `memory`/`sqlite`（默认 memory，选 sqlite 时使用 `langgraph-checkpoint-sqlite`，文件默认 `storage/pipeline_checkpoints.sqlite`）；配套 4 例测试覆盖默认、sqlite 创建、跨编译恢复、相对路径解析 | ✅ 已完成 |
 | P4 | SSE `GET /pipeline/{id}/events`：状态变化时推 `snapshot` 事件，结束时推 `end`；前端 EventSource 优先，失败降级轮询 | ✅ 已完成 |
-| **P5 清理** | `docs/n8n/` 整目录删除；`skills/sop-workflow/references/n8n-workflow-map.md` 重命名为 `workflow-map.md` 并重写内容；其他 skill 和 README 的 n8n 措辞全部替换为 LangGraph；`SELF_API_N8N_*` 环境变量保留但在 README 中标注为 "已废弃" | ✅ 已完成 |
+| **P5 清理** | `docs/n8n/` 整目录删除；`skills/sop-workflow/references/n8n-workflow-map.md` 重命名为 `workflow-map.md` 并重写内容；其他 skill、README 与 UI 的 n8n 入口全部替换为 LangGraph | ✅ 已完成 |
 
 ---
 

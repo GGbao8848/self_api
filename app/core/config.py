@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Image Preprocess API"
+    app_name: str = "self_api Pipeline API"
     app_version: str = "0.1.0"
     app_env: str = "dev"
     api_v1_prefix: str = "/api/v1"
@@ -26,17 +26,13 @@ class Settings(BaseSettings):
     redis_url: str | None = None
     s3_endpoint_url: str | None = None
     max_upload_size_mb: int = 512
-    # 供与 n8n 集成时使用（.env：SELF_API_N8N_BASE_URL / SELF_API_N8N_API_KEY）
-    n8n_base_url: str | None = None
-    n8n_api_key: str | None = None
-
     # LangGraph pipeline 持久化：
     #   "memory"  → 进程内 MemorySaver（默认，重启丢失）
     #   "sqlite"  → SqliteSaver，run 跨进程重启可恢复
     pipeline_checkpointer: str = "memory"
     pipeline_sqlite_path: str = "./storage/pipeline_checkpoints.sqlite"
 
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="SELF_API_")
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="SELF_API_", extra="ignore")
 
     @property
     def project_root(self) -> Path:

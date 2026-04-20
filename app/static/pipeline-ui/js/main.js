@@ -7,7 +7,7 @@
  *  - 轮询 run 状态，interrupted=true 时展示 pending_review，支持 confirm/abort
  */
 
-import { loadJson, saveJson } from "/static/train-ui/js/lib/jsonStorage.js";
+import { loadJson, saveJson } from "/static/shared/js/jsonStorage.js";
 
 const STORAGE_KEY = "self_api_pipeline_runs";
 const POLL_INTERVAL_MS = 3000;
