@@ -146,6 +146,19 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
         pending_review=pending_review,
         step_results=step_results,
         interrupted=interrupted,
+        initial_params={
+            "original_dataset": state.get("original_dataset"),
+            "detector_name": state.get("detector_name"),
+            "project_root_dir": state.get("project_root_dir"),
+            "execution_mode": state.get("execution_mode"),
+            "yolo_train_env": state.get("yolo_train_env"),
+            "yolo_train_model": state.get("yolo_train_model"),
+            "yolo_train_epochs": state.get("yolo_train_epochs"),
+            "yolo_train_imgsz": state.get("yolo_train_imgsz"),
+            "full_access": state.get("full_access"),
+            "class_name_map": state.get("class_name_map"),
+            "final_classes": state.get("final_classes"),
+        }
     )
 
 

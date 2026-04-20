@@ -93,6 +93,7 @@ class PipelineStatusResponse(BaseModel):
     pending_review: dict[str, Any] | None = None
     step_results: dict[str, PipelineStepStatus] = {}
     interrupted: bool = Field(description="是否在等待人工确认（interrupt 暂停中）")
+    initial_params: dict[str, Any] = Field(default_factory=dict, description="启动该 run 时的参数，用于复用")
 
 
 class SopSummary(BaseModel):

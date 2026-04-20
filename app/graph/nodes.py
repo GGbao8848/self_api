@@ -387,6 +387,8 @@ def node_publish_transfer(state: PipelineState) -> dict[str, Any]:
         "execution_mode": execution_mode,
         "split_output_dir": split_output_dir,
         "publish_input_dir": publish_input_dir,
+        "project_root_dir": state.get("project_root_dir", ""),
+        "detector_name": state.get("detector_name", ""),
         "note": (
             "数据集版本将由 publish_yolo_dataset 基于该目录生成 yaml 并落盘；"
             "发布源为小图+增强的 crop/ 子目录。"
@@ -402,20 +404,25 @@ def node_publish_transfer(state: PipelineState) -> dict[str, Any]:
             "error": "用户在 publish_transfer 中止流程",
             "completed": True,
         }
+    override = (user_response or {}).get("params_override") or {}
+    publish_params = _merge_override(
+        {
+            "input_dir": publish_input_dir,
+            "project_root_dir": state.get("project_root_dir", ""),
+            "detector_name": state.get("detector_name", ""),
+            "publish_mode": execution_mode if execution_mode in ("local", "remote_sftp") else "local",
+            "remote_host": state.get("remote_host"),
+            "remote_username": state.get("remote_username"),
+            "remote_private_key_path": state.get("remote_private_key_path"),
+            "remote_project_root_dir": state.get("remote_project_root_dir"),
+        },
+        override,
+    )
 
     from app.services.publish_yolo_dataset import run_publish_yolo_dataset
     from app.schemas.preprocess import PublishYoloDatasetRequest
 
-    req = PublishYoloDatasetRequest(
-        input_dir=publish_input_dir,
-        project_root_dir=state.get("project_root_dir", ""),
-        detector_name=state.get("detector_name", ""),
-        publish_mode=execution_mode if execution_mode in ("local", "remote_sftp") else "local",
-        remote_host=state.get("remote_host"),
-        remote_username=state.get("remote_username"),
-        remote_private_key_path=state.get("remote_private_key_path"),
-        remote_project_root_dir=state.get("remote_project_root_dir"),
-    )
+    req = PublishYoloDatasetRequest(**publish_params)
     try:
         resp = run_publish_yolo_dataset(req)
     except (ValueError, OSError) as exc:

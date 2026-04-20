@@ -4,179 +4,225 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>LangGraph Pipeline · self_api</title>
+  <title>Pipeline Agent · self_api</title>
   <link rel="stylesheet" href="/static/pipeline-ui/css/pipeline-ui.css">
 </head>
 <body>
-  <div class="page">
-    <header class="topbar">
-      <div class="topbar-inner">
-        <div class="brand">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <span>self_api · LangGraph Pipeline</span>
-        </div>
-        <div class="topbar-actions">
-          <span class="api-url-label" id="apiUrlLabel"></span>
-        </div>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <button type="button" class="btn-new-run" id="newRunBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          新建 Run
+        </button>
       </div>
-    </header>
-
-    <main class="shell">
-      <section class="hero">
-        <h1>LangGraph 训练管线控制台</h1>
-        <p>以人工审核点（HITL）为核心的端到端 SOP。启动 run 后，流程会在每个 manual 审核点自动暂停，点击 <strong>确认</strong> 继续、<strong>中止</strong> 退出，或勾选 <strong>Full Access</strong> 让全部审核点自动放行。</p>
-      </section>
-
-      <div class="grid">
-        <section class="panel panel--launch" aria-labelledby="launch-title">
-          <h2 class="section-title" id="launch-title">启动新 run</h2>
-
-          <fieldset class="fieldset-plain">
-            <legend>SOP 模板（可选，选中后自动填充默认值）</legend>
-            <div class="field-grid">
-              <div>
-                <label for="sopSelect">sop_id</label>
-                <select id="sopSelect">
-                  <option value="">（不使用 SOP，手动填参）</option>
-                </select>
-              </div>
-              <div>
-                <label>说明</label>
-                <div class="inline-note" id="sopDescription">选择上方 SOP 查看详情。</div>
-              </div>
-            </div>
-          </fieldset>
-
-          <div class="field-grid">
-            <div>
-              <label for="originalDataset">original_dataset <span class="req">*</span></label>
-              <input id="originalDataset" placeholder="/data/raw_dataset" autocomplete="off">
-            </div>
-            <div>
-              <label for="detectorName">detector_name <span class="req">*</span></label>
-              <input id="detectorName" placeholder="zxj_louyou" autocomplete="off">
-            </div>
-          </div>
-
-          <div class="field-grid">
-            <div>
-              <label for="projectRootDir">project_root_dir <span class="req">*</span></label>
-              <input id="projectRootDir" placeholder="/data/workspace" autocomplete="off">
-            </div>
-            <div>
-              <label for="executionMode">execution_mode</label>
-              <select id="executionMode">
-                <option value="local">local</option>
-                <option value="remote_sftp">remote_sftp</option>
-                <option value="remote_slurm">remote_slurm</option>
-              </select>
-            </div>
-          </div>
-
-          <fieldset class="fieldset-plain">
-            <legend>训练参数</legend>
-            <div class="field-grid">
-              <div>
-                <label for="trainEnv">yolo_train_env <span class="req">*</span></label>
-                <input id="trainEnv" value="yolo_pose" autocomplete="off">
-              </div>
-              <div>
-                <label for="trainModel">model</label>
-                <input id="trainModel" value="yolo11s.pt" autocomplete="off">
-              </div>
-              <div>
-                <label for="trainEpochs">epochs</label>
-                <input id="trainEpochs" type="number" min="1" value="100">
-              </div>
-              <div>
-                <label for="trainImgsz">imgsz</label>
-                <input id="trainImgsz" type="number" min="1" value="640">
-              </div>
-            </div>
-          </fieldset>
-
-          <fieldset class="fieldset-plain">
-            <legend>Gate 配置</legend>
-            <label class="choice-row">
-              <input type="checkbox" id="fullAccess">
-              <span>Full Access（跳过所有人工审核点，自动跑完）</span>
-            </label>
-            <div class="inline-note">关闭时使用默认 gate：discover_classes / review_labels / publish_transfer / train / review_result 需人工确认。</div>
-          </fieldset>
-
-          <fieldset class="fieldset-plain" id="classMapFieldset">
-            <legend>类别映射（可选，也可在 discover_classes 审核点填）</legend>
-            <label for="classNameMap">class_name_map（JSON）</label>
-            <textarea id="classNameMap" rows="3" placeholder='{"louyou1": "louyou", "louyou2": "louyou"}'></textarea>
-            <label for="finalClasses">final_classes（JSON 数组）</label>
-            <input id="finalClasses" placeholder='["louyou"]' autocomplete="off">
-          </fieldset>
-
-          <div class="row submit-actions">
-            <button type="button" class="primary" id="runBtn">启动 run</button>
-            <button type="button" class="secondary" id="previewBtn">预览请求体</button>
-          </div>
-
-          <div id="statusBox" class="status info" role="status" aria-live="polite">准备就绪。填好字段后点击启动。</div>
-
-          <details class="disclosure">
-            <summary>请求体预览</summary>
-            <textarea id="previewText" readonly rows="10"></textarea>
-          </details>
-        </section>
-
-        <section class="panel panel--runs" aria-labelledby="runs-title">
-          <h2 class="section-title" id="runs-title">Run 列表</h2>
-          <div class="inline-note">最近启动的 run 记录在本机浏览器，点击可查看详情。</div>
-          <ul class="run-list" id="runList"></ul>
-          <div class="row">
-            <button type="button" class="ghost mini" id="refreshAllBtn">刷新全部状态</button>
-            <button type="button" class="danger mini" id="clearRunsBtn">清空本地记录</button>
-          </div>
-        </section>
+      <div class="sidebar-list-wrap">
+        <div class="sidebar-tabs">
+          <button type="button" class="sidebar-tab active" id="tabLocal">本地工作区</button>
+          <button type="button" class="sidebar-tab" id="tabRemote">远程工作区</button>
+        </div>
+        <ul class="run-list" id="runList"></ul>
       </div>
+      <div class="sidebar-footer">
+        <button type="button" class="ghost mini" id="settingsBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          设置
+        </button>
+        <button type="button" class="ghost mini" id="refreshAllBtn">刷新状态</button>
+        <button type="button" class="ghost mini danger-text" id="clearRunsBtn">清空本地</button>
+      </div>
+    </aside>
 
-      <section class="panel panel--detail" id="detailPanel" hidden aria-labelledby="detail-title">
-        <div class="detail-head">
-          <h2 class="section-title" id="detail-title">Run 详情</h2>
-          <code class="run-id" id="detailRunId"></code>
+    <!-- Main Content -->
+    <main class="main-view">
+      <header class="main-header">
+        <div class="header-title" id="headerTitle">新建 Run</div>
+        <div class="header-actions" id="headerActions" hidden>
           <span class="pill" id="detailStatusPill"></span>
           <button type="button" class="ghost mini" id="detailRefreshBtn">刷新</button>
-          <button type="button" class="danger mini" id="detailAbortBtn">中止 run</button>
+          <button type="button" class="ghost mini" id="detailCopyBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            复用参数
+          </button>
+          <button type="button" class="danger mini" id="detailAbortBtn">中止</button>
         </div>
+      </header>
 
-        <div class="detail-body">
-          <div class="detail-left">
-            <h3>步骤进度</h3>
-            <ol class="step-list" id="stepList"></ol>
-          </div>
-
-          <div class="detail-right">
-            <div id="reviewCard" class="review-card" hidden>
-              <h3>等待人工审核</h3>
-              <div class="review-meta">
-                <span class="review-step-label">当前步骤</span>
-                <code id="reviewStep"></code>
+      <div class="scroll-area" id="scrollArea">
+        
+        <!-- Launch Form View -->
+        <div class="launch-view" id="launchView">
+          <div class="launch-container">
+            <div class="launch-hero">
+              <div class="brand-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
               </div>
-              <p class="review-hint" id="reviewHint"></p>
-              <details class="disclosure" open>
-                <summary>审核数据</summary>
-                <pre class="review-data" id="reviewData"></pre>
-              </details>
-              <label for="reviewOverride">params_override（JSON，可选）</label>
-              <textarea id="reviewOverride" rows="5" placeholder='{"class_name_map": {"louyou1": "louyou"}, "final_classes": ["louyou"]}'></textarea>
-              <div class="row">
-                <button type="button" class="primary" id="confirmBtn">确认并继续</button>
-                <button type="button" class="danger" id="abortStepBtn">中止 run</button>
-              </div>
-              <div id="reviewStatus" class="status info" role="status" aria-live="polite"></div>
+              <h1>Pipeline Agent</h1>
+              <p>配置参数并启动新的管线任务</p>
             </div>
 
-            <div id="noReviewNote" class="inline-note">当前没有待人工审核的步骤。</div>
+            <div class="form-section">
+              <fieldset class="fieldset-plain">
+                <legend>SOP 模板（可选）</legend>
+                <div class="field-grid">
+                  <div>
+                    <label for="sopSelect">sop_id</label>
+                    <select id="sopSelect">
+                      <option value="">（不使用 SOP，手动填参）</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>说明</label>
+                    <div class="inline-note" id="sopDescription">选择上方 SOP 查看详情。</div>
+                  </div>
+                </div>
+              </fieldset>
+
+              <div class="field-grid">
+                <div>
+                  <label for="originalDataset">original_dataset <span class="req">*</span></label>
+                  <input id="originalDataset" placeholder="/data/raw_dataset" autocomplete="off">
+                </div>
+                <div>
+                  <label for="detectorName">detector_name <span class="req">*</span></label>
+                  <input id="detectorName" placeholder="zxj_louyou" autocomplete="off">
+                </div>
+              </div>
+
+              <div class="field-grid">
+                <div>
+                  <label for="projectRootDir">project_root_dir <span class="req">*</span></label>
+                  <input id="projectRootDir" placeholder="/data/workspace" autocomplete="off">
+                </div>
+                <div>
+                  <label for="executionMode">execution_mode</label>
+                  <select id="executionMode">
+                    <option value="local">local</option>
+                    <option value="remote_sftp">remote_sftp</option>
+                    <option value="remote_slurm">remote_slurm</option>
+                  </select>
+                </div>
+              </div>
+
+              <fieldset class="fieldset-plain">
+                <legend>训练参数</legend>
+                <div class="field-grid">
+                  <div>
+                    <label for="trainEnv">yolo_train_env <span class="req">*</span></label>
+                    <input id="trainEnv" value="yolo_pose" autocomplete="off">
+                  </div>
+                  <div>
+                    <label for="trainModel">model</label>
+                    <input id="trainModel" value="yolo11s.pt" autocomplete="off">
+                  </div>
+                  <div>
+                    <label for="trainEpochs">epochs</label>
+                    <input id="trainEpochs" type="number" min="1" value="100">
+                  </div>
+                  <div>
+                    <label for="trainImgsz">imgsz</label>
+                    <input id="trainImgsz" type="number" min="1" value="640">
+                  </div>
+                </div>
+              </fieldset>
+
+              <fieldset class="fieldset-plain">
+                <legend>Gate 配置</legend>
+                <label class="choice-row">
+                  <input type="checkbox" id="fullAccess">
+                  <span>Full Access（跳过所有人工审核点，自动跑完）</span>
+                </label>
+                <div class="inline-note">关闭时使用默认 gate 需人工确认。</div>
+              </fieldset>
+
+              <fieldset class="fieldset-plain" id="classMapFieldset">
+                <legend>类别映射（可选，也可在 discover_classes 审核点填）</legend>
+                <label for="classNameMap">class_name_map（JSON）</label>
+                <textarea id="classNameMap" rows="2" placeholder='{"louyou1": "louyou", "louyou2": "louyou"}'></textarea>
+                <label for="finalClasses">final_classes（JSON 数组）</label>
+                <input id="finalClasses" placeholder='["louyou"]' autocomplete="off">
+              </fieldset>
+
+              <div class="row submit-actions">
+                <button type="button" class="primary large" id="runBtn">启动 Run</button>
+                <button type="button" class="secondary large" id="previewBtn">预览请求体</button>
+              </div>
+
+              <div id="statusBox" class="status info" role="status" aria-live="polite" hidden></div>
+
+              <details class="disclosure">
+                <summary>请求体预览</summary>
+                <textarea id="previewText" readonly rows="10"></textarea>
+              </details>
+            </div>
           </div>
         </div>
-      </section>
+
+        <!-- Detail View (Timeline) -->
+        <div class="detail-view" id="detailView" hidden>
+          <div class="timeline" id="stepList"></div>
+          <div id="noReviewNote" class="inline-note text-center" style="margin-top: 20px;"></div>
+        </div>
+
+      </div>
+
+      <!-- Bottom Action Area (Review Form) -->
+      <div class="bottom-action-area" id="bottomActionArea" hidden>
+        <div class="review-panel" id="reviewCard">
+          <div class="review-header">
+            <h3>等待人工审核: <code id="reviewStep"></code></h3>
+            <p class="review-hint" id="reviewHint"></p>
+          </div>
+          <div class="review-content">
+            <div id="reviewFacts" class="review-facts"></div>
+            <div id="reviewOverrideForm" class="review-override-form" hidden></div>
+            
+            <details class="disclosure">
+              <summary>高级参数：手动编辑 params_override（JSON）</summary>
+              <textarea id="reviewOverride" rows="3" placeholder='{"class_name_map": {"louyou1": "louyou"}}'></textarea>
+            </details>
+            <details class="disclosure">
+              <summary>高级信息：审核原始数据（JSON）</summary>
+              <pre class="review-data" id="reviewData"></pre>
+            </details>
+          </div>
+          <div class="review-actions">
+            <button type="button" class="primary" id="confirmBtn">确认并继续</button>
+            <button type="button" class="danger ghost" id="abortStepBtn">中止 Run</button>
+          </div>
+          <div id="reviewStatus" class="status info" role="status" aria-live="polite" hidden></div>
+        </div>
+      </div>
+
     </main>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal-overlay" hidden>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>工作区设置</h3>
+        <button type="button" class="ghost mini" id="closeSettingsBtn">关闭</button>
+      </div>
+      <div class="modal-body">
+        <fieldset class="fieldset-plain">
+          <div class="field-grid" style="grid-template-columns: 1fr;">
+            <div>
+              <label for="settingLocalPath">本地训练工作区路径</label>
+              <input id="settingLocalPath" placeholder="/data/local_workspace" autocomplete="off">
+            </div>
+            <div>
+              <label for="settingRemotePath">远程训练工作区路径</label>
+              <input id="settingRemotePath" placeholder="/data/remote_workspace" autocomplete="off">
+            </div>
+          </div>
+        </fieldset>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="primary" id="saveSettingsBtn">保存</button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/static/pipeline-ui/js/main.js"></script>
