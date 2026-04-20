@@ -50,3 +50,10 @@ app.mount(
 @app.get("/train-ui")
 def train_ui() -> FileResponse:
     return FileResponse(settings.project_root / "app" / "static" / "train-ui" / "index.html")
+
+
+@app.get("/pipeline-ui")
+def pipeline_ui() -> FileResponse:
+    return FileResponse(
+        settings.project_root / "app" / "static" / "pipeline-ui" / "index.html",
+    )

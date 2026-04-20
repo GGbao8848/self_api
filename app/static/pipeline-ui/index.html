@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>LangGraph Pipeline · self_api</title>
+  <link rel="stylesheet" href="/static/pipeline-ui/css/pipeline-ui.css">
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>self_api · LangGraph Pipeline</span>
+        </div>
+        <div class="topbar-actions">
+          <span class="api-url-label" id="apiUrlLabel"></span>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <h1>LangGraph 训练管线控制台</h1>
+        <p>以人工审核点（HITL）为核心的端到端 SOP。启动 run 后，流程会在每个 manual 审核点自动暂停，点击 <strong>确认</strong> 继续、<strong>中止</strong> 退出，或勾选 <strong>Full Access</strong> 让全部审核点自动放行。</p>
+      </section>
+
+      <div class="grid">
+        <section class="panel panel--launch" aria-labelledby="launch-title">
+          <h2 class="section-title" id="launch-title">启动新 run</h2>
+
+          <div class="field-grid">
+            <div>
+              <label for="originalDataset">original_dataset <span class="req">*</span></label>
+              <input id="originalDataset" placeholder="/data/raw_dataset" autocomplete="off">
+            </div>
+            <div>
+              <label for="detectorName">detector_name <span class="req">*</span></label>
+              <input id="detectorName" placeholder="zxj_louyou" autocomplete="off">
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <div>
+              <label for="projectRootDir">project_root_dir <span class="req">*</span></label>
+              <input id="projectRootDir" placeholder="/data/workspace" autocomplete="off">
+            </div>
+            <div>
+              <label for="executionMode">execution_mode</label>
+              <select id="executionMode">
+                <option value="local">local</option>
+                <option value="remote_sftp">remote_sftp</option>
+                <option value="remote_slurm">remote_slurm</option>
+              </select>
+            </div>
+          </div>
+
+          <fieldset class="fieldset-plain">
+            <legend>训练参数</legend>
+            <div class="field-grid">
+              <div>
+                <label for="trainEnv">yolo_train_env <span class="req">*</span></label>
+                <input id="trainEnv" value="yolo_pose" autocomplete="off">
+              </div>
+              <div>
+                <label for="trainModel">model</label>
+                <input id="trainModel" value="yolo11s.pt" autocomplete="off">
+              </div>
+              <div>
+                <label for="trainEpochs">epochs</label>
+                <input id="trainEpochs" type="number" min="1" value="100">
+              </div>
+              <div>
+                <label for="trainImgsz">imgsz</label>
+                <input id="trainImgsz" type="number" min="1" value="640">
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="fieldset-plain">
+            <legend>Gate 配置</legend>
+            <label class="choice-row">
+              <input type="checkbox" id="fullAccess">
+              <span>Full Access（跳过所有人工审核点，自动跑完）</span>
+            </label>
+            <div class="inline-note">关闭时使用默认 gate：discover_classes / review_labels / publish_transfer / train / review_result 需人工确认。</div>
+          </fieldset>
+
+          <fieldset class="fieldset-plain" id="classMapFieldset">
+            <legend>类别映射（可选，也可在 discover_classes 审核点填）</legend>
+            <label for="classNameMap">class_name_map（JSON）</label>
+            <textarea id="classNameMap" rows="3" placeholder='{"louyou1": "louyou", "louyou2": "louyou"}'></textarea>
+            <label for="finalClasses">final_classes（JSON 数组）</label>
+            <input id="finalClasses" placeholder='["louyou"]' autocomplete="off">
+          </fieldset>
+
+          <div class="row submit-actions">
+            <button type="button" class="primary" id="runBtn">启动 run</button>
+            <button type="button" class="secondary" id="previewBtn">预览请求体</button>
+          </div>
+
+          <div id="statusBox" class="status info" role="status" aria-live="polite">准备就绪。填好字段后点击启动。</div>
+
+          <details class="disclosure">
+            <summary>请求体预览</summary>
+            <textarea id="previewText" readonly rows="10"></textarea>
+          </details>
+        </section>
+
+        <section class="panel panel--runs" aria-labelledby="runs-title">
+          <h2 class="section-title" id="runs-title">Run 列表</h2>
+          <div class="inline-note">最近启动的 run 记录在本机浏览器，点击可查看详情。</div>
+          <ul class="run-list" id="runList"></ul>
+          <div class="row">
+            <button type="button" class="ghost mini" id="refreshAllBtn">刷新全部状态</button>
+            <button type="button" class="danger mini" id="clearRunsBtn">清空本地记录</button>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel panel--detail" id="detailPanel" hidden aria-labelledby="detail-title">
+        <div class="detail-head">
+          <h2 class="section-title" id="detail-title">Run 详情</h2>
+          <code class="run-id" id="detailRunId"></code>
+          <span class="pill" id="detailStatusPill"></span>
+          <button type="button" class="ghost mini" id="detailRefreshBtn">刷新</button>
+          <button type="button" class="danger mini" id="detailAbortBtn">中止 run</button>
+        </div>
+
+        <div class="detail-body">
+          <div class="detail-left">
+            <h3>步骤进度</h3>
+            <ol class="step-list" id="stepList"></ol>
+          </div>
+
+          <div class="detail-right">
+            <div id="reviewCard" class="review-card" hidden>
+              <h3>等待人工审核</h3>
+              <div class="review-meta">
+                <span class="review-step-label">当前步骤</span>
+                <code id="reviewStep"></code>
+              </div>
+              <p class="review-hint" id="reviewHint"></p>
+              <details class="disclosure" open>
+                <summary>审核数据</summary>
+                <pre class="review-data" id="reviewData"></pre>
+              </details>
+              <label for="reviewOverride">params_override（JSON，可选）</label>
+              <textarea id="reviewOverride" rows="5" placeholder='{"class_name_map": {"louyou1": "louyou"}, "final_classes": ["louyou"]}'></textarea>
+              <div class="row">
+                <button type="button" class="primary" id="confirmBtn">确认并继续</button>
+                <button type="button" class="danger" id="abortStepBtn">中止 run</button>
+              </div>
+              <div id="reviewStatus" class="status info" role="status" aria-live="polite"></div>
+            </div>
+
+            <div id="noReviewNote" class="inline-note">当前没有待人工审核的步骤。</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/static/pipeline-ui/js/main.js"></script>
+</body>
+</html>
