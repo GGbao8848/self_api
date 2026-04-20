@@ -93,3 +93,50 @@ class PipelineStatusResponse(BaseModel):
     pending_review: dict[str, Any] | None = None
     step_results: dict[str, PipelineStepStatus] = {}
     interrupted: bool = Field(description="是否在等待人工确认（interrupt 暂停中）")
+
+
+class SopSummary(BaseModel):
+    """SOP 预设模板摘要。"""
+
+    id: str
+    name: str
+    description: str
+    defaults: dict[str, Any]
+    step_gates: dict[str, GateMode] = {}
+    required_fields: list[str] = []
+
+
+class SopListResponse(BaseModel):
+    sops: list[SopSummary]
+
+
+class SopRunRequest(BaseModel):
+    """使用 SOP 启动 run；用户仅需填写 SOP 默认值中未覆盖的字段。
+
+    用户字段会覆盖 SOP 默认值；step_gates 深合并（以用户优先）。
+    """
+
+    original_dataset: str = Field(description="原始数据集根目录")
+    detector_name: str = Field(description="检测器名称")
+    project_root_dir: str = Field(description="项目根目录")
+    yolo_train_env: str = Field(description="conda 训练环境名")
+
+    execution_mode: Literal["local", "remote_sftp", "remote_slurm"] | None = None
+    yolo_train_model: str | None = None
+    yolo_train_epochs: int | None = Field(default=None, ge=1)
+    yolo_train_imgsz: int | None = Field(default=None, ge=1)
+    split_mode: Literal["train_val", "train_val_test", "train_only"] | None = None
+    train_ratio: float | None = Field(default=None, gt=0.0, le=1.0)
+    val_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    remote_host: str | None = None
+    remote_username: str | None = None
+    remote_private_key_path: str | None = None
+    remote_project_root_dir: str | None = None
+
+    class_name_map: dict[str, str] | None = None
+    final_classes: list[str] | None = None
+
+    full_access: bool | None = None
+    step_gates: dict[str, StepGateInput] | None = None
+    self_api_url: str | None = None

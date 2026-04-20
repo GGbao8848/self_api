@@ -106,7 +106,7 @@ self_api/
 │   │   ├── state.py                # PipelineState + Gate 定义
 │   │   ├── nodes.py                # 11 个节点函数
 │   │   ├── pipeline.py             # build_graph() + compiled_graph 单例
-│   │   └── sops.py                 # (规划) 预设 SOP 模板，减少用户填参
+│   │   └── sops.py                 # 预设 SOP 模板（4 个），减少用户填参
 │   │
 │   ├── schemas/
 │   │   ├── pipeline.py             # PipelineRunRequest / Confirm / Status
@@ -391,10 +391,9 @@ Client                             Server
 |---|---|---|
 | **P0 打地基** | 新增 `app/graph/`、`/pipeline/*` 端点、`class_name_map`、`discover_xml_classes` | ✅ 已完成 |
 | P0 | 删除旧 n8n JSON（保留 Webhook 一份） | ✅ 已完成 |
-| **P1 测试** | 补 `tests/test_pipeline_graph.py`：gate/interrupt/resume 快照测试 | 🔴 待做 |
-| P1 | 补 `tests/test_discover_xml_classes.py` | 🔴 待做 |
-| **P2 前端** | `train-ui` 增加 `/pipeline` 页：运行列表 + pending_review 卡片 + confirm 表单 | 🔴 待做 |
-| **P3 SOP 预设** | `app/graph/sops.py` 预设 "local-small-baseline" / "remote-slurm-iter" 等模板，一键生成 `PipelineRunRequest` | 🔴 待做 |
+| **P1 测试** | `tests/test_pipeline_graph_api.py`（gate/interrupt/resume/abort/full_access）+ `test_discover_xml_classes_api.py` + `test_xml_to_yolo_class_name_map_api.py` | ✅ 已完成 |
+| **P2 前端** | `app/static/pipeline-ui/`（独立页 `/pipeline-ui`）：启动表单 + run 列表 + pending_review 卡片 + confirm/abort | ✅ 已完成 |
+| **P3 SOP 预设** | `app/graph/sops.py` 注册 4 个模板（local-small-baseline / local-large-sliding-window / remote-slurm-iter / full-auto-smoke），对外暴露 `GET /pipeline/sops` 与 `POST /pipeline/sops/{sop_id}/run`；前端 SOP 选择器 | ✅ 已完成 |
 | **P4 持久化** | 可选：把 `MemorySaver` 换成 SQLite/Postgres checkpointer，让 run 跨进程重启可恢复 | 🔴 规划 |
 | P4 | 可选：Server-Sent Events `/pipeline/{id}/events` 实时推送，替代轮询 | 🔴 规划 |
 | **P5 清理** | 彻底删除 `docs/n8n/模型训练工作流（Webhook）.json`（确认外部无依赖后） | 🔴 规划 |

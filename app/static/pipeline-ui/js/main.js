@@ -17,6 +17,8 @@ const qs = (id) => document.getElementById(id);
 
 const el = {
   apiUrlLabel: qs("apiUrlLabel"),
+  sopSelect: qs("sopSelect"),
+  sopDescription: qs("sopDescription"),
   originalDataset: qs("originalDataset"),
   detectorName: qs("detectorName"),
   projectRootDir: qs("projectRootDir"),
@@ -59,6 +61,41 @@ let state = {
 };
 
 el.apiUrlLabel.textContent = API_BASE;
+
+let sopCache = [];
+
+async function loadSops() {
+  try {
+    const resp = await fetchJson(`${API_BASE}/sops`);
+    sopCache = resp.sops || [];
+    for (const sop of sopCache) {
+      const opt = document.createElement("option");
+      opt.value = sop.id;
+      opt.textContent = `${sop.name} (${sop.id})`;
+      el.sopSelect.appendChild(opt);
+    }
+  } catch (exc) {
+    setStatus(el.statusBox, `加载 SOP 失败：${exc.message}`, "warn");
+  }
+}
+
+function onSopChange() {
+  const sopId = el.sopSelect.value;
+  if (!sopId) {
+    el.sopDescription.textContent = "选择上方 SOP 查看详情。";
+    return;
+  }
+  const sop = sopCache.find((s) => s.id === sopId);
+  if (!sop) return;
+  el.sopDescription.textContent = sop.description;
+  const d = sop.defaults || {};
+  if (d.execution_mode) el.executionMode.value = d.execution_mode;
+  if (d.yolo_train_model) el.trainModel.value = d.yolo_train_model;
+  if (d.yolo_train_epochs) el.trainEpochs.value = d.yolo_train_epochs;
+  if (d.yolo_train_imgsz) el.trainImgsz.value = d.yolo_train_imgsz;
+  if (typeof d.full_access === "boolean") el.fullAccess.checked = d.full_access;
+}
+
 
 function setStatus(target, text, kind = "info") {
   target.textContent = text;
@@ -135,8 +172,10 @@ async function startRun() {
 
   setStatus(el.statusBox, "正在启动 run...", "info");
   el.runBtn.disabled = true;
+  const sopId = el.sopSelect.value;
+  const runUrl = sopId ? `${API_BASE}/sops/${encodeURIComponent(sopId)}/run` : `${API_BASE}/run`;
   try {
-    const resp = await fetchJson(`${API_BASE}/run`, {
+    const resp = await fetchJson(runUrl, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -387,6 +426,7 @@ function clearRuns() {
 
 el.runBtn.addEventListener("click", startRun);
 el.previewBtn.addEventListener("click", previewRun);
+el.sopSelect.addEventListener("change", onSopChange);
 el.refreshAllBtn.addEventListener("click", refreshAll);
 el.clearRunsBtn.addEventListener("click", clearRuns);
 el.detailRefreshBtn.addEventListener("click", () => {
@@ -397,6 +437,7 @@ el.confirmBtn.addEventListener("click", confirmStep);
 el.abortStepBtn.addEventListener("click", abortCurrentStep);
 
 renderRunList();
+loadSops();
 if (state.runs[0]) {
   openRun(state.runs[0].run_id);
 }

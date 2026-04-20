@@ -17,12 +17,16 @@ from langgraph.types import Command
 
 from app.core.security import require_api_auth
 from app.graph.pipeline import compiled_graph
+from app.graph.sops import apply_sop_defaults, list_sops
 from app.graph.state import DEFAULT_GATES, PipelineState, StepGateConfig
 from app.schemas.pipeline import (
     PipelineConfirmRequest,
     PipelineRunRequest,
     PipelineStatusResponse,
     PipelineStepStatus,
+    SopListResponse,
+    SopRunRequest,
+    SopSummary,
 )
 
 router = APIRouter(
@@ -129,6 +133,47 @@ def run_pipeline(req: PipelineRunRequest) -> PipelineStatusResponse:
         raise HTTPException(status_code=500, detail=f"pipeline invoke error: {exc}") from exc
 
     return _to_status_response(run_id)
+
+
+@router.get("/sops", response_model=SopListResponse)
+def list_pipeline_sops() -> SopListResponse:
+    """列出所有预设 SOP 模板。"""
+    sops = [SopSummary(**item) for item in list_sops()]
+    return SopListResponse(sops=sops)
+
+
+@router.post(
+    "/sops/{sop_id}/run",
+    response_model=PipelineStatusResponse,
+    status_code=202,
+)
+def run_pipeline_from_sop(sop_id: str, req: SopRunRequest) -> PipelineStatusResponse:
+    """用 SOP 默认值 + 用户 overrides 启动 pipeline run。
+
+    用户字段优先覆盖 SOP defaults；step_gates 深合并（用户优先）。
+    """
+    user_payload = req.model_dump(exclude_none=True)
+    if "step_gates" in user_payload and user_payload["step_gates"]:
+        user_payload["step_gates"] = {
+            step: gate.model_dump() if hasattr(gate, "model_dump") else gate
+            for step, gate in user_payload["step_gates"].items()
+        }
+    try:
+        merged, missing = apply_sop_defaults(sop_id, user_payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"SOP {sop_id} requires fields: {missing}",
+        )
+
+    try:
+        merged_req = PipelineRunRequest(**merged)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"invalid merged payload: {exc}") from exc
+
+    return run_pipeline(merged_req)
 
 
 @router.get("/{run_id}", response_model=PipelineStatusResponse)

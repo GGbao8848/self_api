@@ -31,6 +31,22 @@
         <section class="panel panel--launch" aria-labelledby="launch-title">
           <h2 class="section-title" id="launch-title">启动新 run</h2>
 
+          <fieldset class="fieldset-plain">
+            <legend>SOP 模板（可选，选中后自动填充默认值）</legend>
+            <div class="field-grid">
+              <div>
+                <label for="sopSelect">sop_id</label>
+                <select id="sopSelect">
+                  <option value="">（不使用 SOP，手动填参）</option>
+                </select>
+              </div>
+              <div>
+                <label>说明</label>
+                <div class="inline-note" id="sopDescription">选择上方 SOP 查看详情。</div>
+              </div>
+            </div>
+          </fieldset>
+
           <div class="field-grid">
             <div>
               <label for="originalDataset">original_dataset <span class="req">*</span></label>
