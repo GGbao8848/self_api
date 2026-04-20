@@ -41,6 +41,8 @@ from app.schemas.preprocess import (
     UnzipArchiveAsyncRequest,
     UnzipArchiveRequest,
     UnzipArchiveResponse,
+    DiscoverXmlClassesRequest,
+    DiscoverXmlClassesResponse,
     XmlToYoloAsyncRequest,
     XmlToYoloRequest,
     XmlToYoloResponse,
@@ -91,6 +93,7 @@ from app.services.yolo_train import run_yolo_train
 from app.services.yolo_augment import run_yolo_augment
 from app.services.annotation_visualize import run_annotate_visualize
 from app.services.xml_to_yolo import run_xml_to_yolo
+from app.services.discover_xml_classes import run_discover_xml_classes
 from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
 from app.services.voc_bar_crop import run_voc_bar_crop
 from app.services.restore_voc_crops_batch import run_restore_voc_crops_batch
@@ -896,3 +899,14 @@ def yolo_augment_async(
         task_type=task_type,
         callback_url=callback_url,
     )
+
+
+@router.post("/discover-xml-classes", response_model=DiscoverXmlClassesResponse)
+def discover_xml_classes(payload: DiscoverXmlClassesRequest) -> DiscoverXmlClassesResponse:
+    """扫描 xmls_dir 下所有 XML，返回全部唯一类名及出现频次。
+    用于在 xml-to-yolo 转换前了解标注类别，并规划 class_name_map 映射。
+    """
+    try:
+        return run_discover_xml_classes(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -142,8 +142,10 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
         parsed_entries.append((xml_path, width, height, objects, error))
         if error:
             continue
+        name_map = request.class_name_map or {}
         for class_name, _ in objects:
-            discovered_classes.add(class_name)
+            mapped = name_map.get(class_name, class_name)
+            discovered_classes.add(mapped)
 
     if request.classes:
         ordered_classes = []
@@ -205,7 +207,9 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
             continue
 
         lines: list[str] = []
+        name_map = request.class_name_map or {}
         for class_name, (xmin, ymin, xmax, ymax) in objects:
+            class_name = name_map.get(class_name, class_name)
             if class_name not in class_to_id:
                 continue
 

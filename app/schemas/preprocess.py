@@ -190,6 +190,24 @@ class AnnotateVisualizeAsyncRequest(AnnotateVisualizeRequest):
     )
 
 
+class DiscoverXmlClassesRequest(BaseModel):
+    input_dir: str = Field(description="数据集根目录，需含 xmls_dir_name 子目录")
+    xmls_dir_name: str = Field(default="xmls", description="XML 子目录名")
+    recursive: bool = Field(default=True, description="是否递归扫描")
+    include_difficult: bool = Field(default=False, description="是否统计 difficult=1 的标注")
+
+
+class DiscoverXmlClassesResponse(BaseModel):
+    status: str = "ok"
+    input_dir: str
+    xmls_dir: str
+    total_xml_files: int
+    parse_errors: int
+    total_classes: int
+    class_names: list[str]
+    class_counts: dict[str, int]
+
+
 class XmlToYoloRequest(BaseModel):
     input_dir: str = Field(
         description="Dataset root directory containing images and xmls folders",
@@ -201,6 +219,14 @@ class XmlToYoloRequest(BaseModel):
     classes: list[str] | None = Field(
         default=None,
         description="Optional fixed class list; when omitted, classes are inferred",
+    )
+    class_name_map: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Optional many-to-one rename map applied before class indexing. "
+            "Key = original XML label name, value = target name. "
+            "Example: {\"louyou1\": \"louyou\", \"louyou2\": \"louyou\"} merges all variants into one class."
+        ),
     )
     include_difficult: bool = Field(
         default=False,
