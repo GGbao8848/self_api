@@ -90,7 +90,8 @@ def _get_graph_state(run_id: str) -> Any:
 
 def _to_status_response(run_id: str) -> PipelineStatusResponse:
     gs = _get_graph_state(run_id)
-    if gs is None:
+    # LangGraph 对未知 thread_id 也返回空 StateSnapshot，需要额外校验
+    if gs is None or not gs.values or not gs.values.get("run_id"):
         raise HTTPException(status_code=404, detail=f"pipeline run not found: {run_id}")
 
     state: PipelineState = gs.values
@@ -140,7 +141,7 @@ def get_pipeline_status(run_id: str) -> PipelineStatusResponse:
 def confirm_pipeline_step(run_id: str, body: PipelineConfirmRequest) -> PipelineStatusResponse:
     """人工确认（或中止）当前审核点，流程继续推进到下一个 interrupt 或结束。"""
     gs = _get_graph_state(run_id)
-    if gs is None:
+    if gs is None or not gs.values or not gs.values.get("run_id"):
         raise HTTPException(status_code=404, detail=f"pipeline run not found: {run_id}")
     if not gs.next:
         raise HTTPException(status_code=409, detail="pipeline is not waiting for confirmation")
@@ -162,7 +163,7 @@ def confirm_pipeline_step(run_id: str, body: PipelineConfirmRequest) -> Pipeline
 def abort_pipeline(run_id: str) -> PipelineStatusResponse:
     """强制中止 pipeline（等效于在当前审核点发送 abort decision）。"""
     gs = _get_graph_state(run_id)
-    if gs is None:
+    if gs is None or not gs.values or not gs.values.get("run_id"):
         raise HTTPException(status_code=404, detail=f"pipeline run not found: {run_id}")
 
     config = _build_config(run_id)
