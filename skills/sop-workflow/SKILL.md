@@ -64,7 +64,7 @@ After routing:
 - Read [references/project-structure-kb.md](references/project-structure-kb.md) first for stable directory and naming rules.
 - Read [references/high-frequency-sops.md](references/high-frequency-sops.md) first.
 - Read [references/parameter-checklist.md](references/parameter-checklist.md) before deciding what information is still missing.
-- Read [references/n8n-workflow-map.md](references/n8n-workflow-map.md) if the user mentions n8n, orchestration, or wants the JSON workflow equivalents.
+- Read [references/n8n-workflow-map.md](references/n8n-workflow-map.md) if the user mentions n8n, orchestration, LangGraph pipeline, HITL, or wants the JSON workflow equivalents.
 
 ## Working rules
 
@@ -80,8 +80,9 @@ After routing:
 - If the task spans both stages, first route through `$data-preprocess`, then hand off to `$ultralytics-yolo-modes`.
 - Always present the full multi-stage plan in one message before executing any stage.
 - Before the training stage, decide whether execution is local or remote.
-- If training is local, the final injected API target is `POST /api/v1/preprocess/yolo-train`.
+- If training is local, the final injected API target is `POST /api/v1/preprocess/yolo-train/async`（轮询 `/api/v1/tasks/{task_id}`）.
 - If training is remote, the final injected API target is `POST /api/v1/preprocess/remote-sbatch-yolo-train`.
+- For end-to-end orchestration with HITL, prefer the LangGraph pipeline: `POST /api/v1/pipeline/run`.
 - Do not leave this decision implicit. Training-stage requests must state or collect whether execution is local or remote.
 
 ## Output style
