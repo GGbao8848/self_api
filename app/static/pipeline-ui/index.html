@@ -92,8 +92,9 @@
 
               <div class="field-grid">
                 <div>
-                  <label for="projectRootDir">project_root_dir <span class="req">*</span></label>
-                  <input id="projectRootDir" placeholder="/data/workspace" autocomplete="off">
+                  <label for="projectOwner">项目归属 <span class="req">*</span></label>
+                  <input id="projectOwner" placeholder="TEDS / TVDS" autocomplete="off">
+                  <div class="inline-note">将与工作区路径自动拼接成 project_root_dir。</div>
                 </div>
                 <div>
                   <label for="executionMode">execution_mode</label>
@@ -102,6 +103,14 @@
                     <option value="remote_sftp">remote_sftp</option>
                     <option value="remote_slurm">remote_slurm</option>
                   </select>
+                  <div class="inline-note warn-note" id="executionModeHint" hidden></div>
+                </div>
+              </div>
+
+              <div class="field-grid">
+                <div>
+                  <label for="projectRootDir">project_root_dir（自动生成） <span class="req">*</span></label>
+                  <input id="projectRootDir" placeholder="/data/workspace/TEDS" autocomplete="off" readonly>
                 </div>
               </div>
 

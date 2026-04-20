@@ -437,6 +437,27 @@ textarea:focus {
   border-color: var(--accent);
 }
 
+@keyframes breathe-missing-setting {
+  0% {
+    border-color: var(--error-text);
+    box-shadow: 0 0 0 0 rgb(185 28 28 / 0.35);
+  }
+  70% {
+    border-color: var(--error-text);
+    box-shadow: 0 0 0 8px rgb(185 28 28 / 0);
+  }
+  100% {
+    border-color: var(--error-text);
+    box-shadow: 0 0 0 0 rgb(185 28 28 / 0);
+  }
+}
+
+select.needs-setting-pulse {
+  border-color: var(--error-text);
+  background: linear-gradient(0deg, rgb(254 242 242 / 0.7), rgb(254 242 242 / 0.7)), #fff;
+  animation: breathe-missing-setting 1.5s ease-out infinite;
+}
+
 .field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -469,6 +490,11 @@ textarea:focus {
   color: var(--muted);
   font-size: 12px;
   margin: 4px 0;
+}
+
+.warn-note {
+  color: var(--error-text);
+  font-weight: 500;
 }
 
 .text-center {

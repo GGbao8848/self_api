@@ -20,8 +20,10 @@ const el = {
   sopDescription: qs("sopDescription"),
   originalDataset: qs("originalDataset"),
   detectorName: qs("detectorName"),
+  projectOwner: qs("projectOwner"),
   projectRootDir: qs("projectRootDir"),
   executionMode: qs("executionMode"),
+  executionModeHint: qs("executionModeHint"),
   trainEnv: qs("trainEnv"),
   trainModel: qs("trainModel"),
   trainEpochs: qs("trainEpochs"),
@@ -106,6 +108,7 @@ function onSopChange() {
   const sopId = el.sopSelect.value;
   if (!sopId) {
     el.sopDescription.textContent = "选择上方 SOP 查看详情。";
+    updateExecutionModeSettingHint();
     return;
   }
   const sop = sopCache.find((s) => s.id === sopId);
@@ -117,6 +120,7 @@ function onSopChange() {
   if (d.yolo_train_epochs) el.trainEpochs.value = d.yolo_train_epochs;
   if (d.yolo_train_imgsz) el.trainImgsz.value = d.yolo_train_imgsz;
   if (typeof d.full_access === "boolean") el.fullAccess.checked = d.full_access;
+  updateProjectRootDirPreview();
 }
 
 
@@ -129,11 +133,55 @@ function persistRuns() {
   saveJson(STORAGE_KEY, state.runs);
 }
 
+function normalizePathJoin(base, child) {
+  const b = String(base || "").trim().replace(/\/+$|\\+$/g, "");
+  const c = String(child || "").trim().replace(/^\/+|^\\+/, "");
+  if (!b) return c;
+  if (!c) return b;
+  return `${b}/${c}`;
+}
+
+function getWorkspaceBasePathByMode(mode) {
+  return mode === "local" ? (state.settings.localPath || "") : (state.settings.remotePath || "");
+}
+
+function modeNeedsWorkspacePath(mode) {
+  const basePath = getWorkspaceBasePathByMode(mode);
+  return !String(basePath || "").trim();
+}
+
+function updateExecutionModeSettingHint() {
+  const mode = el.executionMode.value;
+  const needsSetting = modeNeedsWorkspacePath(mode);
+  el.executionMode.classList.toggle("needs-setting-pulse", needsSetting);
+  if (needsSetting) {
+    const target = mode === "local" ? "本地训练工作区路径" : "远程训练工作区路径";
+    el.executionMode.title = `当前模式缺少配置：${target}。请先到“设置”中填写。`;
+    el.executionModeHint.textContent = `当前 ${mode} 缺少 ${target}，请先到左下角“设置”中填写。`;
+    el.executionModeHint.hidden = false;
+  } else {
+    el.executionMode.title = "";
+    el.executionModeHint.hidden = true;
+  }
+}
+
+function updateProjectRootDirPreview() {
+  const owner = el.projectOwner.value.trim();
+  const basePath = getWorkspaceBasePathByMode(el.executionMode.value);
+  el.projectRootDir.value = normalizePathJoin(basePath, owner);
+  updateExecutionModeSettingHint();
+}
+
 function buildRunPayload() {
+  const owner = el.projectOwner.value.trim();
+  const basePath = getWorkspaceBasePathByMode(el.executionMode.value);
+  const projectRootDir = normalizePathJoin(basePath, owner);
+  el.projectRootDir.value = projectRootDir;
+
   const payload = {
     original_dataset: el.originalDataset.value.trim(),
     detector_name: el.detectorName.value.trim(),
-    project_root_dir: el.projectRootDir.value.trim(),
+    project_root_dir: projectRootDir,
     execution_mode: el.executionMode.value,
     yolo_train_env: el.trainEnv.value.trim(),
     yolo_train_model: el.trainModel.value.trim(),
@@ -156,6 +204,12 @@ function buildRunPayload() {
 
 function validatePayload(payload) {
   const required = ["original_dataset", "detector_name", "project_root_dir", "yolo_train_env"];
+  if (!el.projectOwner.value.trim()) {
+    throw new Error("字段 项目归属 必填");
+  }
+  if (modeNeedsWorkspacePath(el.executionMode.value)) {
+    throw new Error("当前 execution_mode 对应工作区路径未设置，请先到设置里填写");
+  }
   for (const key of required) {
     if (!payload[key]) {
       throw new Error(`字段 ${key} 必填`);
@@ -488,14 +542,13 @@ function showLaunchView() {
   el.bottomActionArea.hidden = true;
   el.statusBox.hidden = true;
 
-  // Auto-fill projectRootDir based on active tab
-  if (state.activeTab === "local" && state.settings.localPath) {
-    el.projectRootDir.value = state.settings.localPath;
+  // 根据当前 tab 选择默认 execution_mode，再按项目归属拼接 project_root_dir
+  if (state.activeTab === "local") {
     el.executionMode.value = "local";
-  } else if (state.activeTab === "remote" && state.settings.remotePath) {
-    el.projectRootDir.value = state.settings.remotePath;
-    el.executionMode.value = "remote_sftp"; // Default remote mode
+  } else if (state.activeTab === "remote") {
+    el.executionMode.value = "remote_sftp";
   }
+  updateProjectRootDirPreview();
 }
 
 async function openRun(runId, prefetched = null) {
@@ -773,10 +826,22 @@ function copyRunParams() {
   if (!data || !data.initial_params) return;
 
   const p = data.initial_params;
+  const mode = p.execution_mode || "local";
+  state.activeTab = mode === "local" ? "local" : "remote";
+  showLaunchView();
+
   if (p.original_dataset) el.originalDataset.value = p.original_dataset;
   if (p.detector_name) el.detectorName.value = p.detector_name;
-  if (p.project_root_dir) el.projectRootDir.value = p.project_root_dir;
   if (p.execution_mode) el.executionMode.value = p.execution_mode;
+  if (p.project_root_dir) {
+    const basePath = getWorkspaceBasePathByMode(el.executionMode.value);
+    const fullPath = String(p.project_root_dir);
+    if (basePath && fullPath.startsWith(basePath)) {
+      el.projectOwner.value = fullPath.slice(basePath.length).replace(/^\/+/, "") || "";
+    } else {
+      el.projectOwner.value = fullPath.split("/").filter(Boolean).pop() || "";
+    }
+  }
   if (p.yolo_train_env) el.trainEnv.value = p.yolo_train_env;
   if (p.yolo_train_model) el.trainModel.value = p.yolo_train_model;
   if (p.yolo_train_epochs) el.trainEpochs.value = p.yolo_train_epochs;
@@ -790,7 +855,7 @@ function copyRunParams() {
     el.finalClasses.value = JSON.stringify(p.final_classes);
   }
 
-  showLaunchView();
+  updateProjectRootDirPreview();
   setStatus(el.statusBox, "已将该 run 的参数填入表单，可修改后重新启动。", "info");
   el.statusBox.hidden = false;
 }
@@ -821,7 +886,11 @@ el.saveSettingsBtn.addEventListener("click", () => {
   saveJson("pipeline_settings", state.settings);
   el.settingsModal.hidden = true;
   showLaunchView(); // Update form if needed
+  updateExecutionModeSettingHint();
 });
+
+el.projectOwner.addEventListener("input", updateProjectRootDirPreview);
+el.executionMode.addEventListener("change", updateProjectRootDirPreview);
 
 el.runBtn.addEventListener("click", startRun);
 el.previewBtn.addEventListener("click", previewRun);
@@ -843,3 +912,4 @@ if (state.runs[0]) {
 } else {
   showLaunchView();
 }
+updateExecutionModeSettingHint();
