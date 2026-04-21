@@ -98,9 +98,8 @@ def node_discover_classes(state: PipelineState) -> dict[str, Any]:
         "class_names": resp.class_names,
         "class_counts": resp.class_counts,
         "hint": (
-            "如需合并类名（多→一），请在确认时提供 class_name_map，"
-            "例如 {\"louyou1\": \"louyou\", \"louyou2\": \"louyou\"}，"
-            "以及 final_classes（目标类列表，决定索引顺序），例如 [\"louyou\"]。"
+            "在下方表单中填写：XML 类名重命名/合并、再选择「按列表顺序」或「显式类别 id」；"
+            "也可展开高级 JSON 覆盖。与 xml-to-yolo API 一致。"
         ),
     }
 
@@ -118,8 +117,15 @@ def node_discover_classes(state: PipelineState) -> dict[str, Any]:
             }
         override = user_response.get("params_override") or {}
 
-    class_name_map: dict[str, str] | None = override.get("class_name_map") or state.get("class_name_map")
-    final_classes: list[str] | None = override.get("final_classes") or state.get("final_classes")
+    def _pick_ov(key: str) -> Any:
+        if key in override:
+            return override[key]
+        return state.get(key)
+
+    class_name_map = _pick_ov("class_name_map")
+    final_classes = _pick_ov("final_classes")
+    class_index_map = _pick_ov("class_index_map")
+    training_names = _pick_ov("training_names")
 
     return {
         **_set_step_result(state, "discover_classes", StepResult(
@@ -130,6 +136,8 @@ def node_discover_classes(state: PipelineState) -> dict[str, Any]:
         "discovered_classes": resp.class_names,
         "class_name_map": class_name_map,
         "final_classes": final_classes,
+        "class_index_map": class_index_map,
+        "training_names": training_names,
     }
 
 
@@ -138,10 +146,25 @@ def node_xml_to_yolo(state: PipelineState) -> dict[str, Any]:
     from app.services.xml_to_yolo import run_xml_to_yolo
     from app.schemas.preprocess import XmlToYoloRequest
 
+    final_classes = state.get("final_classes")
+    class_index_map = state.get("class_index_map")
+    if final_classes is not None and class_index_map is not None:
+        return {
+            **_set_step_result(state, "xml_to_yolo", StepResult(
+                status="failed",
+                summary="final_classes 与 class_index_map 不能同时设置",
+                data={},
+            )),
+            "error": "final_classes 与 class_index_map 互斥",
+            "completed": True,
+        }
+
     req = XmlToYoloRequest(
         input_dir=state["original_dataset"],
-        classes=state.get("final_classes"),
+        classes=final_classes,
         class_name_map=state.get("class_name_map"),
+        class_index_map=class_index_map,
+        training_names=state.get("training_names"),
         recursive=True,
         write_classes_file=True,
     )
@@ -169,13 +192,21 @@ def node_xml_to_yolo(state: PipelineState) -> dict[str, Any]:
 def node_review_labels(state: PipelineState) -> dict[str, Any]:
     """xml_to_yolo 之后的人工审核：展示 label 统计，确认后进入数据集划分。"""
     xml_result = (state.get("step_results") or {}).get("xml_to_yolo", {})
+    xml_data = xml_result.get("data", {}) if isinstance(xml_result, dict) else {}
 
     review_data = {
         "xml_to_yolo_summary": xml_result.get("summary", ""),
-        "classes": xml_result.get("data", {}).get("classes", []),
-        "class_to_id": xml_result.get("data", {}).get("class_to_id", {}),
+        "classes": xml_data.get("classes", []),
+        "class_to_id": xml_data.get("class_to_id", {}),
+        "class_name_map": state.get("class_name_map"),
+        "final_classes": state.get("final_classes"),
+        "class_index_map": state.get("class_index_map"),
+        "training_names": state.get("training_names"),
         "labels_dir": state.get("labels_dir"),
-        "hint": "确认 label 转换结果无误后继续；如有问题可中止后调整 class_name_map 再重新运行。",
+        "hint": (
+            "确认当前 classes.txt（类别名与索引）是否正确；如需调整可直接修改，"
+            "确认后将自动重建 labels 与 classes.txt。"
+        ),
     }
 
     user_response = _maybe_interrupt(state, "review_labels", review_data)
@@ -188,9 +219,87 @@ def node_review_labels(state: PipelineState) -> dict[str, Any]:
             "completed": True,
         }
 
-    return _set_step_result(state, "review_labels", StepResult(
-        status="ok", summary="label 审核通过", data={}
-    ))
+    override: dict[str, Any] = user_response.get("params_override") if user_response else {}
+    override = override or {}
+    touched_mapping = any(
+        key in override
+        for key in ("class_name_map", "final_classes", "class_index_map", "training_names")
+    )
+
+    if not touched_mapping:
+        return _set_step_result(state, "review_labels", StepResult(
+            status="ok", summary="label 审核通过", data={}
+        ))
+
+    from app.schemas.preprocess import XmlToYoloRequest
+    from app.services.xml_to_yolo import run_xml_to_yolo
+
+    def _pick_ov(key: str) -> Any:
+        if key in override:
+            return override[key]
+        return state.get(key)
+
+    class_name_map = _pick_ov("class_name_map")
+    final_classes = _pick_ov("final_classes")
+    class_index_map = _pick_ov("class_index_map")
+    training_names = _pick_ov("training_names")
+
+    if final_classes is not None and class_index_map is not None:
+        return {
+            **_set_step_result(state, "review_labels", StepResult(
+                status="failed",
+                summary="final_classes 与 class_index_map 不能同时设置",
+                data={},
+            )),
+            "error": "review_labels 参数冲突：final_classes 与 class_index_map 互斥",
+            "completed": True,
+        }
+
+    req = XmlToYoloRequest(
+        input_dir=state["original_dataset"],
+        classes=final_classes,
+        class_name_map=class_name_map,
+        class_index_map=class_index_map,
+        training_names=training_names,
+        recursive=True,
+        write_classes_file=True,
+    )
+    try:
+        resp = run_xml_to_yolo(req)
+    except (ValueError, OSError) as exc:
+        return {
+            **_set_step_result(state, "review_labels", StepResult(
+                status="failed", summary=f"重建 labels 失败: {exc}", data={}
+            )),
+            "error": str(exc),
+            "completed": True,
+        }
+
+    step_results = dict(state.get("step_results") or {})
+    step_results["xml_to_yolo"] = StepResult(
+        status="ok",
+        summary=f"转换 {resp.converted_files}/{resp.total_xml_files} 个文件，共 {resp.total_boxes} 个框",
+        data=resp.model_dump(exclude={"details"}),
+    )
+    step_results["review_labels"] = StepResult(
+        status="ok",
+        summary="已按审核修改重建 labels/classes.txt",
+        data={
+            "classes": resp.classes,
+            "class_to_id": resp.class_to_id,
+            "classes_file": resp.classes_file,
+        },
+    )
+
+    return {
+        "step_results": step_results,
+        "current_step": "review_labels",
+        "labels_dir": resp.labels_dir,
+        "class_name_map": class_name_map,
+        "final_classes": final_classes,
+        "class_index_map": class_index_map,
+        "training_names": training_names,
+    }
 
 
 def node_split_dataset(state: PipelineState) -> dict[str, Any]:
@@ -501,7 +610,11 @@ def node_train(state: PipelineState) -> dict[str, Any]:
     def _runner() -> dict:
         return run_yolo_train(YoloTrainRequest(**final_params)).model_dump()
 
-    task_id = submit_task(task_type="yolo_train", runner=_runner)
+    task_id = submit_task(
+        task_type="yolo_train",
+        runner=_runner,
+        queue_key="local_yolo_train",
+    )
 
     return {
         **_set_step_result(state, "train", StepResult(
@@ -545,12 +658,14 @@ def node_poll_train(state: PipelineState) -> dict[str, Any]:
 def node_review_result(state: PipelineState) -> dict[str, Any]:
     """训练完成后人工验收审核点。"""
     train_result = (state.get("step_results") or {}).get("poll_train", {})
+    train_data = train_result.get("data", {}) if isinstance(train_result, dict) else {}
 
     review_data = {
         "train_summary": train_result.get("summary", ""),
-        "train_data": train_result.get("data", {}),
+        "train_data": train_data,
         "train_task_id": state.get("train_task_id"),
         "yaml_path": state.get("yaml_path"),
+        "yolo_export_after_train": bool(state.get("yolo_export_after_train", False)),
         "hint": "请确认训练结果，通过后流程结束；如需重训请中止后调整参数重新运行。",
     }
     user_response = _maybe_interrupt(state, "review_result", review_data)
@@ -562,9 +677,145 @@ def node_review_result(state: PipelineState) -> dict[str, Any]:
             "completed": True,
         }
 
+    export_payload: dict[str, Any] = {}
+    if (
+        state.get("execution_mode") == "local"
+        and state.get("yolo_export_after_train", False)
+        and train_result.get("status") == "ok"
+    ):
+        from app.schemas.preprocess import YoloExportRequest
+        from app.services.yolo_export import run_yolo_export
+
+        project = str(train_data.get("project") or "").rstrip("/")
+        run_name = str(train_data.get("name") or "").strip()
+        best_pt_path = f"{project}/{run_name}/weights/best.pt" if project and run_name else ""
+        try:
+            export_resp = run_yolo_export(
+                YoloExportRequest(
+                    best_pt_path=best_pt_path,
+                    project_root_dir=state.get("project_root_dir", ""),
+                    yolo_train_env=state.get("yolo_train_env", ""),
+                    overwrite=True,
+                )
+            )
+            export_payload = {
+                "export_status": export_resp.status,
+                "export_file_path": export_resp.export_file_path,
+                "dataset_yaml": export_resp.dataset_yaml,
+                "imgsz": export_resp.imgsz,
+                "exit_code": export_resp.exit_code,
+            }
+        except Exception as exc:
+            export_payload = {"export_status": "failed", "error": str(exc)}
+
     return {
         **_set_step_result(state, "review_result", StepResult(
-            status="ok", summary="训练结果验收通过", data={}
+            status="ok", summary="训练结果验收通过", data=export_payload
+        )),
+    }
+
+
+def node_model_infer(state: PipelineState) -> dict[str, Any]:
+    """模型导出后推理：人工确认参数后执行批量推理。"""
+    from app.schemas.preprocess import YoloInferRequest
+    from app.services.yolo_infer import run_yolo_infer
+
+    export_result = (state.get("step_results") or {}).get("review_result", {})
+    export_data = export_result.get("data", {}) if isinstance(export_result, dict) else {}
+    default_model_path = str(export_data.get("export_file_path") or "").strip()
+    if not default_model_path:
+        train_result = (state.get("step_results") or {}).get("poll_train", {})
+        train_data = train_result.get("data", {}) if isinstance(train_result, dict) else {}
+        run_project = str(train_data.get("project") or "").rstrip("/")
+        run_name = str(train_data.get("name") or "").strip()
+        if run_project and run_name:
+            from pathlib import Path
+
+            weights_dir = Path(run_project) / run_name / "weights"
+            if weights_dir.is_dir():
+                ts_files = sorted(weights_dir.glob("*.torchscript"))
+                prefer_non_best = [p for p in ts_files if p.name != "best.torchscript"]
+                if prefer_non_best:
+                    default_model_path = str(prefer_non_best[0].resolve())
+                elif ts_files:
+                    default_model_path = str(ts_files[0].resolve())
+    export_imgsz = export_data.get("imgsz")
+    default_infer_imgsz = int(export_imgsz) if isinstance(export_imgsz, int) else int(state.get("yolo_train_imgsz", 640))
+
+    review_data = {
+        "yolo_train_env": state.get("yolo_train_env", ""),
+        "model_path": default_model_path,
+        "source_path": state.get("original_dataset", ""),
+        "project": f"{state.get('project_root_dir', '').rstrip('/')}/{state.get('detector_name', 'unknown')}/runs/infer",
+        "name": str(state.get("dataset_version") or "infer_latest"),
+        "imgsz": default_infer_imgsz,
+        "conf": 0.4,
+        "iou": 0.1,
+        "classes": [0, 1],
+        "recursive": True,
+        "save_labels": True,
+        "save_no_detect": True,
+        "add_conf_prefix": True,
+        "draw_label": True,
+        "hint": "可修改推理输入与阈值参数，确认后执行批量推理。",
+    }
+    user_response = _maybe_interrupt(state, "model_infer", review_data)
+    if user_response and user_response.get("decision") == "abort":
+        return {
+            **_set_step_result(state, "model_infer", StepResult(
+                status="skipped", summary="用户跳过模型推理", data={}
+            )),
+            "completed": True,
+        }
+
+    override = (user_response or {}).get("params_override") or {}
+    final_params = _merge_override(
+        {
+            "yolo_train_env": review_data["yolo_train_env"],
+            "model_path": review_data["model_path"],
+            "source_path": review_data["source_path"],
+            "project": review_data["project"],
+            "name": review_data["name"],
+            "imgsz": review_data["imgsz"],
+            "conf": review_data["conf"],
+            "iou": review_data["iou"],
+            "classes": review_data["classes"],
+            "recursive": review_data["recursive"],
+            "save_labels": review_data["save_labels"],
+            "save_no_detect": review_data["save_no_detect"],
+            "add_conf_prefix": review_data["add_conf_prefix"],
+            "draw_label": review_data["draw_label"],
+            "overwrite": True,
+        },
+        override,
+    )
+    if not final_params.get("model_path"):
+        return {
+            **_set_step_result(state, "model_infer", StepResult(
+                status="failed",
+                summary="缺少 model_path（未找到导出模型，请在参数中手动填写）",
+                data=final_params,
+            )),
+            "error": "model_infer 缺少 model_path",
+            "completed": True,
+        }
+
+    try:
+        infer_resp = run_yolo_infer(YoloInferRequest(**final_params))
+    except Exception as exc:
+        return {
+            **_set_step_result(state, "model_infer", StepResult(
+                status="failed", summary=f"模型推理失败：{exc}", data=final_params
+            )),
+            "error": f"model_infer failed: {exc}",
+            "completed": True,
+        }
+
+    return {
+        **_set_step_result(state, "model_infer", StepResult(
+            status="ok",
+            summary=f"模型推理完成：{infer_resp.detected_images}/{infer_resp.total_images} 张命中",
+            data=infer_resp.model_dump(),
         )),
         "completed": True,
     }

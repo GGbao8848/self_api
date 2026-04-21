@@ -90,3 +90,100 @@ def test_class_name_map_partial_merge_keeps_others(
     assert label_1.startswith(f"{id_louyou} ")
     assert label_2.startswith(f"{id_louyou} ")
     assert label_3.startswith(f"{id_louyou3} ")
+
+
+def test_class_index_map_explicit_ids_and_training_names(
+    client: TestClient, case_dir: Path
+) -> None:
+    """class_index_map：多源合并到同一 id；training_names 作为 yaml / classes.txt 显示名。"""
+    dataset_dir = case_dir / "voc_idx"
+    images_dir = dataset_dir / "images"
+    xmls_dir = dataset_dir / "xmls"
+
+    for idx, orig in enumerate(["type_a", "type_b", "type_c"], start=1):
+        create_image(images_dir / f"i_{idx}.jpg", color=(40, 40, idx * 20), size=(80, 80))
+        create_voc_xml(
+            xmls_dir / f"i_{idx}.xml",
+            filename=f"i_{idx}.jpg",
+            size=(80, 80),
+            objects=[(orig, (5, 5, 40, 60))],
+        )
+
+    response = client.post(
+        "/api/v1/preprocess/xml-to-yolo",
+        json={
+            "input_dir": str(dataset_dir),
+            "class_index_map": {"type_a": 0, "type_b": 0, "type_c": 1},
+            "training_names": ["merged_ab", "single_c"],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["classes"] == ["merged_ab", "single_c"]
+    assert data["class_to_id"] == {"type_a": 0, "type_b": 0, "type_c": 1}
+
+    for idx in (1, 2):
+        t = (dataset_dir / "labels" / f"i_{idx}.txt").read_text(encoding="utf-8").strip()
+        assert t.startswith("0 "), f"i_{idx} 应为 id 0"
+    t3 = (dataset_dir / "labels" / f"i_3.txt").read_text(encoding="utf-8").strip()
+    assert t3.startswith("1 ")
+
+    classes_txt = (dataset_dir / "classes.txt").read_text(encoding="utf-8").splitlines()
+    assert classes_txt == ["merged_ab", "single_c"]
+
+
+def test_classes_with_training_names_only_changes_display_file(
+    client: TestClient, case_dir: Path
+) -> None:
+    """保留 classes 决定索引；training_names 仅改变 classes.txt 与响应 classes（yaml 用名）。"""
+    dataset_dir = case_dir / "voc_disp"
+    images_dir = dataset_dir / "images"
+    xmls_dir = dataset_dir / "xmls"
+
+    create_image(images_dir / "x.jpg", color=(1, 2, 3), size=(50, 50))
+    create_voc_xml(
+        xmls_dir / "x.xml",
+        filename="x.jpg",
+        size=(50, 50),
+        objects=[("raw_cat", (5, 5, 30, 40))],
+    )
+
+    response = client.post(
+        "/api/v1/preprocess/xml-to-yolo",
+        json={
+            "input_dir": str(dataset_dir),
+            "classes": ["raw_cat"],
+            "training_names": ["猫"],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["class_to_id"] == {"raw_cat": 0}
+    assert data["classes"] == ["猫"]
+    lines = (dataset_dir / "classes.txt").read_text(encoding="utf-8").splitlines()
+    assert lines == ["猫"]
+    label = (dataset_dir / "labels" / "x.txt").read_text(encoding="utf-8").strip()
+    assert label.startswith("0 ")
+
+
+def test_class_index_map_non_contiguous_rejected(client: TestClient, case_dir: Path) -> None:
+    dataset_dir = case_dir / "voc_bad"
+    (dataset_dir / "images").mkdir(parents=True)
+    (dataset_dir / "xmls").mkdir(parents=True)
+    create_image(dataset_dir / "images" / "a.jpg", color=(1, 1, 1), size=(10, 10))
+    create_voc_xml(
+        dataset_dir / "xmls" / "a.xml",
+        filename="a.jpg",
+        size=(10, 10),
+        objects=[("c", (1, 1, 5, 5))],
+    )
+    response = client.post(
+        "/api/v1/preprocess/xml-to-yolo",
+        json={
+            "input_dir": str(dataset_dir),
+            "class_index_map": {"c": 0, "d": 2},
+        },
+    )
+    assert response.status_code == 400

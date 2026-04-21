@@ -28,6 +28,7 @@ STEP_NAMES = [
     "publish_transfer",    # 内置 data.yaml 生成（原 build_yaml 已并入此步）
     "train",
     "review_result",       # 训练完成后人工验收
+    "model_infer",         # 模型导出后执行批量推理
 ]
 
 DEFAULT_GATES: dict[str, GateMode] = {
@@ -40,6 +41,7 @@ DEFAULT_GATES: dict[str, GateMode] = {
     "publish_transfer":  "manual",   # 传输/发布前确认（含 yaml 生成）
     "train":             "manual",   # 训练启动前最终确认
     "review_result":     "manual",   # 训练完成后人工验收
+    "model_infer":       "manual",   # 推理参数确认
 }
 
 
@@ -72,6 +74,7 @@ class PipelineState(TypedDict, total=False):
     yolo_train_model: str
     yolo_train_epochs: int
     yolo_train_imgsz: int
+    yolo_export_after_train: bool
     split_mode: Literal["train_val", "train_val_test", "train_only"]
     train_ratio: float
     val_ratio: float
@@ -89,7 +92,9 @@ class PipelineState(TypedDict, total=False):
     # ── 类别映射（discover_classes → xml_to_yolo 之间填写） ──
     discovered_classes: list[str] | None        # discover 步骤扫描出的原始类名
     class_name_map: dict[str, str] | None       # 用户填写的映射，e.g. {louyou1: louyou}
-    final_classes: list[str] | None             # 映射后的目标类列表，e.g. [louyou]
+    final_classes: list[str] | None             # 映射后的目标类列表，e.g. [louyou]（与 class_index_map 二选一）
+    class_index_map: dict[str, int] | None      # 逻辑类名 → YOLO 索引（与 final_classes/classes 二选一）
+    training_names: list[str] | None            # 写入 classes.txt / yaml 的显示名（可选）
 
     # ── 各阶段输出 ────────────────────────────────────────────
     step_results: dict[str, StepResult]

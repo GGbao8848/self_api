@@ -50,3 +50,25 @@ def test_readiness_degraded_in_production_without_public_base_url(
         component_by_name = {item["name"]: item for item in payload["components"]}
         assert component_by_name["public_base_url"]["status"] == "degraded"
         assert "SELF_API_PUBLIC_BASE_URL" in component_by_name["public_base_url"]["detail"]
+
+
+def test_validate_yolo_env_endpoint(monkeypatch, isolated_runtime) -> None:
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.system.validate_yolo_env",
+        lambda env: {
+            "status": "ok",
+            "mode": "python_path",
+            "resolved_python": "/tmp/fake/python",
+            "command": "python -c ...",
+            "exit_code": 0,
+            "stdout": "ok\n",
+            "stderr": "",
+        },
+    )
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/validate-yolo-env", json={"yolo_train_env": "/tmp/fake/env"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["mode"] == "python_path"

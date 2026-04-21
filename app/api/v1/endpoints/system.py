@@ -1,11 +1,18 @@
 import socket
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
-from app.schemas.system import SystemComponentStatus, SystemInfoResponse, SystemStatusResponse
+from app.schemas.system import (
+    SystemComponentStatus,
+    SystemInfoResponse,
+    SystemStatusResponse,
+    ValidateYoloEnvRequest,
+    ValidateYoloEnvResponse,
+)
+from app.services.yolo_env import validate_yolo_env
 
 router = APIRouter(tags=["system"])
 
@@ -164,4 +171,16 @@ def info() -> SystemInfoResponse:
         storage_root=str(settings.resolved_storage_root),
         file_access_roots=[str(path) for path in settings.resolved_file_access_roots],
         cors_allow_origins=settings.cors_allow_origin_list,
+    )
+
+
+@router.post("/validate-yolo-env", response_model=ValidateYoloEnvResponse)
+def validate_yolo_runtime(payload: ValidateYoloEnvRequest) -> ValidateYoloEnvResponse:
+    try:
+        result = validate_yolo_env(payload.yolo_train_env)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ValidateYoloEnvResponse(
+        yolo_train_env=payload.yolo_train_env,
+        **result,
     )

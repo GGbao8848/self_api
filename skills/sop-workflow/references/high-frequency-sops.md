@@ -56,7 +56,11 @@ Sequence:
 8. Route the preprocessing stage to `$data-preprocess`
 9. Route the training stage to `$ultralytics-yolo-modes`
 10. If training is local, inject `yolo-train`
-11. If training is remote, inject `remote-sbatch-yolo-train`
+11. For local large-image SOP, inject `yolo-export` right after `yolo-train`:
+   - read `imgsz` from `args.yaml` (same run dir as `weights/`)
+   - export torchscript with `half=True`
+   - rename output to dataset-yaml stem from `args.data` (not `best.torchscript`)
+12. If training is remote, inject `remote-sbatch-yolo-train`
 
 Key decisions:
 

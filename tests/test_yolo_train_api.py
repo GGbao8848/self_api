@@ -1,10 +1,11 @@
 from __future__ import annotations
-
 from subprocess import CompletedProcess
 
 import pytest
 from fastapi.testclient import TestClient
 from pathlib import Path
+
+from app.main import app
 
 
 def test_yolo_train_sync_mocked(
@@ -148,6 +149,63 @@ def test_yolo_train_async_accepts(client: TestClient, case_dir) -> None:
     )
     assert r.status_code == 202
     assert r.json()["task_type"] == "yolo_train"
+
+
+def test_yolo_train_async_uses_serial_queue(
+    case_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.api.v1.endpoints.preprocess import yolo_train_async
+    from app.schemas.preprocess import YoloTrainAsyncRequest
+
+    detector_dir = case_dir / "nzxj_louyou"
+    yaml_path = detector_dir / "datasets" / "nzxj_louyou_20260417_1430" / "nzxj_louyou_20260417_1430.yaml"
+    yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    yaml_path.write_text("names: []\n", encoding="utf-8")
+
+    cwd = case_dir / "work"
+    cwd.mkdir()
+    project = detector_dir / "runs" / "detect"
+
+    captured: dict[str, object] = {}
+
+    def fake_submit_task(
+        task_type: str,
+        runner: object,
+        *,
+        callback_url: str | None = None,
+        callback_timeout_seconds: float = 10.0,
+        queue_key: str | None = None,
+    ) -> str:
+        captured["task_type"] = task_type
+        captured["callback_url"] = callback_url
+        captured["callback_timeout_seconds"] = callback_timeout_seconds
+        captured["queue_key"] = queue_key
+        captured["runner"] = runner
+        return "queued-task-1"
+
+    monkeypatch.setattr("app.api.v1.endpoints.preprocess.submit_task", fake_submit_task)
+
+    class _FakeRequest:
+        app = app
+
+        @staticmethod
+        def url_for(route_name: str, **path_params: str) -> str:
+            return f"http://testserver{app.url_path_for(route_name, **path_params)}"
+
+    submit_resp = yolo_train_async(
+        YoloTrainAsyncRequest(
+            yaml_path=str(yaml_path.resolve()),
+            project_root_dir=str(cwd.resolve()),
+            project=str(project.resolve()),
+            name="nzxj_louyou_20260417_1430",
+            yolo_train_env="yolo_pose",
+        ),
+        _FakeRequest(),
+    )
+
+    assert submit_resp.task_id == "queued-task-1"
+    assert captured["task_type"] == "yolo_train"
+    assert captured["queue_key"] == "local_yolo_train"
 
 
 def test_yolo_train_requires_explicit_project_and_name(

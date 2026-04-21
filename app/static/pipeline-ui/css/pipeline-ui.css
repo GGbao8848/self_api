@@ -350,6 +350,22 @@ body {
   gap: 12px;
 }
 
+.step-guide {
+  display: grid;
+  gap: 8px;
+}
+
+.step-guide-text {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--neutral-text);
+}
+
 /* Bottom Action Area */
 .bottom-action-area {
   flex-shrink: 0;
@@ -374,12 +390,18 @@ body {
 }
 
 .review-header h3 {
-  margin: 0 0 4px;
-  font-size: 15px;
+  margin: 0 0 6px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--pending-text);
-  display: flex;
-  align-items: center;
-  gap: 8px;
+}
+
+.review-step-name {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .review-hint {
@@ -390,6 +412,56 @@ body {
 
 .review-content {
   margin-bottom: 16px;
+}
+
+.review-brief-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.review-brief-card {
+  border: 1px solid rgb(67 56 202 / 0.18);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 0.72);
+  padding: 12px 14px;
+}
+
+.review-brief-card--full {
+  grid-column: 1 / -1;
+}
+
+.review-brief-label,
+.review-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pending-text);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.review-brief-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.review-section {
+  margin-bottom: 14px;
+}
+
+.review-checklist {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.review-checklist li {
+  margin-bottom: 6px;
+  line-height: 1.6;
 }
 
 .review-actions {
@@ -603,6 +675,8 @@ button:disabled {
 .pill.failed, .pill.error { background: var(--error-text); color: #ffffff; }
 .pill.interrupted, .pill.pending, .pill.waiting { background: var(--pending-text); color: #ffffff; }
 .pill.running { background: var(--accent); color: #ffffff; }
+.pill.model-running { background: var(--accent); color: #ffffff; }
+.pill.queued { background: var(--warn-text); color: #ffffff; }
 .pill.skipped { background: var(--warn-text); color: #ffffff; }
 
 /* Disclosure */
@@ -622,6 +696,12 @@ button:disabled {
 .disclosure textarea,
 .disclosure pre {
   margin-top: 8px;
+}
+
+.review-focus-toggle {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 /* Key-Value Facts */
@@ -704,6 +784,20 @@ button:disabled {
   color: var(--text);
 }
 
+.review-panel.focus-mode .review-override-form {
+  padding: 12px;
+}
+
+.review-panel.focus-mode .review-override-form h4 {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.review-panel.focus-mode .disclosure > summary {
+  font-size: 12px;
+}
+
 .review-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -714,11 +808,136 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+/* 类别映射表单（与 self_tools 类似的行编辑） */
+#classMappingLaunch,
+.review-class-mapping-host {
+  grid-column: 1 / -1;
+}
+
+.class-mapping-intro {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.class-map-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.class-map-row {
+  display: grid;
+  grid-template-columns: 1fr 24px 1fr 52px;
+  gap: 8px;
+  align-items: center;
+}
+
+.class-map-row--header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.class-map-row--header span:nth-child(2),
+.class-map-row--header span:nth-child(4) {
+  visibility: hidden;
+}
+
+.class-map-arrow {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.class-map-row input[type="text"],
+.class-map-row input[type="number"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.class-map-add {
+  margin-bottom: 16px;
+}
+
+.class-index-mode {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.class-index-mode-label {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.mode-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-bottom: 10px;
+}
+
+.mode-pills label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.mode-panel {
+  margin-top: 8px;
+}
+
+.mode-panel label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.mode-panel textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  resize: vertical;
+  min-height: 72px;
+}
+
+#classMapFieldset.sop-large-sliding {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-ring);
+}
+
+#classMapFieldset.sop-large-sliding legend {
+  color: var(--accent);
+}
+
 @media (max-width: 860px) {
   .field-grid,
   .kv-list,
-  .review-form-grid {
+  .review-form-grid,
+  .review-brief-grid {
     grid-template-columns: 1fr;
+  }
+
+  .review-brief-card--full {
+    grid-column: auto;
   }
 }
 

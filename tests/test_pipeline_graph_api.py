@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -52,7 +53,7 @@ def _make_stub(step: str) -> Any:
             step,
             {"status": "ok", "summary": f"{step} stub done", "data": dict(override)},
         )
-        if step == "review_result":
+        if step == "model_infer":
             update["completed"] = True
         return update
 
@@ -73,6 +74,7 @@ def patch_all_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
         "train": "node_train",
         "poll_train": "node_poll_train",
         "review_result": "node_review_result",
+        "model_infer": "node_model_infer",
     }
     for step, attr in step_to_attr.items():
         monkeypatch.setattr(graph_nodes, attr, _make_stub(step))
@@ -95,6 +97,7 @@ def patch_all_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
         ("publish_transfer", "train"),
         ("train", "poll_train"),
         ("poll_train", "review_result"),
+        ("review_result", "model_infer"),
     ]
     for src, dst in edges:
         g.add_conditional_edges(
@@ -102,7 +105,7 @@ def patch_all_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
             pipeline_module._should_abort,
             {"end": END, "continue": dst},
         )
-    g.add_edge("review_result", END)
+    g.add_edge("model_infer", END)
 
     new_compiled = g.compile(checkpointer=MemorySaver())
 
@@ -238,3 +241,55 @@ def test_pipeline_step_gate_override_to_auto(
     assert data["step_results"]["split_dataset"]["status"] == "ok"
     assert data["step_results"]["crop_augment"]["status"] == "ok"
     assert "publish_transfer" not in data["step_results"]
+
+
+def test_pipeline_status_includes_model_task_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.api.v1.endpoints.pipeline as pipeline_endpoint
+
+    run_id = "run-model-task"
+    gs = SimpleNamespace(
+        values={
+            "run_id": run_id,
+            "current_step": "poll_train",
+            "completed": False,
+            "error": None,
+            "pending_review": None,
+            "step_results": {},
+            "train_task_id": "task-123",
+            "original_dataset": "/tmp/raw",
+            "detector_name": "det",
+            "project_root_dir": "/tmp/workspace",
+            "execution_mode": "local",
+            "yolo_train_env": "yolo_pose",
+            "yolo_train_model": "yolo11s.pt",
+            "yolo_train_epochs": 100,
+            "yolo_train_imgsz": 640,
+            "full_access": True,
+            "class_name_map": None,
+            "final_classes": None,
+        },
+        next=(),
+        tasks=(),
+    )
+
+    monkeypatch.setattr(pipeline_endpoint, "_get_graph_state", lambda _: gs)
+    monkeypatch.setattr(
+        pipeline_endpoint,
+        "get_task",
+        lambda _: {
+            "task_id": "task-123",
+            "task_type": "yolo_train",
+            "state": "pending",
+            "queue_position": 2,
+        },
+    )
+
+    status = pipeline_endpoint._to_status_response(run_id)
+
+    assert status.model_task is not None
+    assert status.model_task.task_id == "task-123"
+    assert status.model_task.task_type == "yolo_train"
+    assert status.model_task.state == "pending"
+    assert status.model_task.queue_position == 2

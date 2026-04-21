@@ -29,6 +29,10 @@ class PipelineRunRequest(BaseModel):
     yolo_train_model: str = Field(default="yolo11s.pt", description="YOLO 底模")
     yolo_train_epochs: int = Field(default=100, ge=1)
     yolo_train_imgsz: int = Field(default=640, ge=1)
+    yolo_export_after_train: bool = Field(
+        default=False,
+        description="训练成功后是否自动导出 torchscript（走 yolo-export 逻辑）",
+    )
     split_mode: Literal["train_val", "train_val_test", "train_only"] = Field(default="train_val")
     train_ratio: float = Field(default=0.85, gt=0.0, le=1.0)
     val_ratio: float = Field(default=0.15, ge=0.0, le=1.0)
@@ -47,6 +51,14 @@ class PipelineRunRequest(BaseModel):
     final_classes: list[str] | None = Field(
         default=None,
         description="目标类列表（决定索引顺序），e.g. [\"louyou\"]",
+    )
+    class_index_map: dict[str, int] | None = Field(
+        default=None,
+        description="逻辑类名 → YOLO 类 id（与 final_classes 二选一）；可与 training_names 配合",
+    )
+    training_names: list[str] | None = Field(
+        default=None,
+        description="写入 classes.txt / data.yaml 的显示名（按 id 顺序）；可选",
     )
 
     # Gate 配置
@@ -85,6 +97,13 @@ class PipelineStepStatus(BaseModel):
     data: dict[str, Any] = {}
 
 
+class PipelineLinkedTaskStatus(BaseModel):
+    task_id: str
+    task_type: str
+    state: Literal["pending", "running", "succeeded", "failed", "cancelled"]
+    queue_position: int | None = None
+
+
 class PipelineStatusResponse(BaseModel):
     run_id: str
     current_step: str | None
@@ -93,6 +112,7 @@ class PipelineStatusResponse(BaseModel):
     pending_review: dict[str, Any] | None = None
     step_results: dict[str, PipelineStepStatus] = {}
     interrupted: bool = Field(description="是否在等待人工确认（interrupt 暂停中）")
+    model_task: PipelineLinkedTaskStatus | None = None
     initial_params: dict[str, Any] = Field(default_factory=dict, description="启动该 run 时的参数，用于复用")
 
 
@@ -126,6 +146,7 @@ class SopRunRequest(BaseModel):
     yolo_train_model: str | None = None
     yolo_train_epochs: int | None = Field(default=None, ge=1)
     yolo_train_imgsz: int | None = Field(default=None, ge=1)
+    yolo_export_after_train: bool | None = None
     split_mode: Literal["train_val", "train_val_test", "train_only"] | None = None
     train_ratio: float | None = Field(default=None, gt=0.0, le=1.0)
     val_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -137,6 +158,8 @@ class SopRunRequest(BaseModel):
 
     class_name_map: dict[str, str] | None = None
     final_classes: list[str] | None = None
+    class_index_map: dict[str, int] | None = None
+    training_names: list[str] | None = None
 
     full_access: bool | None = None
     step_gates: dict[str, StepGateInput] | None = None

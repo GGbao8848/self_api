@@ -39,10 +39,15 @@ class TaskRecord(TypedDict):
     callback_error: str | None
     callback_events: list[dict[str, Any]]
     artifacts: list[dict[str, Any]]
+    queue_key: str | None
+    queue_position: int | None
 
 
 _TASKS: dict[str, TaskRecord] = {}
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
+_QUEUE_CONDITION = threading.Condition(_LOCK)
+_TASK_QUEUES: dict[str, list[str]] = {}
+_ACTIVE_QUEUED_TASKS: dict[str, str] = {}
 _CALLBACK_URL_LOCKS: dict[str, threading.Lock] = {}
 _CALLBACK_URL_LOCKS_GUARD = threading.Lock()
 logger = logging.getLogger(__name__)
@@ -83,6 +88,7 @@ def _update_task(
     callback_error: str | None | object = _UNSET,
     callback_event: dict[str, Any] | object = _UNSET,
     artifacts: list[dict[str, Any]] | object = _UNSET,
+    queue_position: int | None | object = _UNSET,
 ) -> None:
     with _LOCK:
         task = _TASKS.get(task_id)
@@ -110,7 +116,73 @@ def _update_task(
             task["callback_events"].append(callback_event)
         if artifacts is not _UNSET:
             task["artifacts"] = artifacts
+        if queue_position is not _UNSET:
+            task["queue_position"] = queue_position
         task["updated_at"] = _now_iso()
+
+
+def _refresh_queue_positions(queue_key: str) -> None:
+    queue = _TASK_QUEUES.get(queue_key, [])
+    for index, queued_task_id in enumerate(queue, start=1):
+        task = _TASKS.get(queued_task_id)
+        if task is not None:
+            task["queue_position"] = index
+            task["updated_at"] = _now_iso()
+
+
+def _enqueue_task(task_id: str, queue_key: str) -> None:
+    with _QUEUE_CONDITION:
+        queue = _TASK_QUEUES.setdefault(queue_key, [])
+        queue.append(task_id)
+        _refresh_queue_positions(queue_key)
+        _QUEUE_CONDITION.notify_all()
+
+
+def _acquire_task_queue_slot(task_id: str, queue_key: str) -> bool:
+    with _QUEUE_CONDITION:
+        while True:
+            task = _TASKS.get(task_id)
+            if task is None:
+                return False
+            if task["cancellation_requested"] or task["state"] == "cancelled":
+                queue = _TASK_QUEUES.get(queue_key, [])
+                if task_id in queue:
+                    queue.remove(task_id)
+                    _refresh_queue_positions(queue_key)
+                _QUEUE_CONDITION.notify_all()
+                return False
+
+            queue = _TASK_QUEUES.get(queue_key, [])
+            active_task_id = _ACTIVE_QUEUED_TASKS.get(queue_key)
+            is_queue_head = bool(queue) and queue[0] == task_id
+            if active_task_id is None and is_queue_head:
+                _ACTIVE_QUEUED_TASKS[queue_key] = task_id
+                queue.pop(0)
+                task["queue_position"] = None
+                task["updated_at"] = _now_iso()
+                _refresh_queue_positions(queue_key)
+                _QUEUE_CONDITION.notify_all()
+                return True
+
+            _QUEUE_CONDITION.wait()
+
+
+def _release_task_queue_slot(task_id: str, queue_key: str) -> None:
+    with _QUEUE_CONDITION:
+        if _ACTIVE_QUEUED_TASKS.get(queue_key) == task_id:
+            _ACTIVE_QUEUED_TASKS.pop(queue_key, None)
+
+        queue = _TASK_QUEUES.get(queue_key, [])
+        if task_id in queue:
+            queue.remove(task_id)
+        _refresh_queue_positions(queue_key)
+
+        if not queue:
+            _TASK_QUEUES.pop(queue_key, None)
+        if queue_key not in _TASK_QUEUES:
+            _ACTIVE_QUEUED_TASKS.pop(queue_key, None)
+
+        _QUEUE_CONDITION.notify_all()
 
 
 def _post_callback(callback_url: str, payload: dict[str, Any], timeout: float) -> int:
@@ -337,6 +409,7 @@ def submit_task(
     *,
     callback_url: str | None = None,
     callback_timeout_seconds: float = 10.0,
+    queue_key: str | None = None,
 ) -> str:
     task_id = uuid.uuid4().hex
     now = _now_iso()
@@ -359,11 +432,24 @@ def submit_task(
             "callback_error": None,
             "callback_events": [],
             "artifacts": [],
+            "queue_key": queue_key,
+            "queue_position": None,
         }
+    if queue_key:
+        _enqueue_task(task_id, queue_key)
 
     def _run() -> None:
         _set_current_task_id(task_id)
         try:
+            if queue_key and not _acquire_task_queue_slot(task_id, queue_key):
+                task = get_task(task_id)
+                if (
+                    task is not None
+                    and task["state"] == "cancelled"
+                    and callback_url
+                ):
+                    _send_task_callback(task_id, callback_timeout_seconds)
+                return
             ensure_current_task_active()
             _update_task(task_id, state="running")
             task_result = runner()
@@ -405,6 +491,8 @@ def submit_task(
             if callback_url:
                 _send_task_callback(task_id, callback_timeout_seconds)
         finally:
+            if queue_key:
+                _release_task_queue_slot(task_id, queue_key)
             _set_current_task_id(None)
 
     thread = threading.Thread(
@@ -453,12 +541,19 @@ def cancel_task(task_id: str) -> TaskRecord | None:
     _update_task(task_id, cancellation_requested=True)
     updated = get_task(task_id)
     if updated is not None and updated["state"] == "pending":
-        _update_task(
-            task_id,
-            state="cancelled",
-            error=f"task cancelled: {task_id}",
-            result=None,
-            finished_at=_now_iso(),
-        )
+        queue_key = updated.get("queue_key")
+        with _QUEUE_CONDITION:
+            if queue_key and task_id in _TASK_QUEUES.get(queue_key, []):
+                _TASK_QUEUES[queue_key].remove(task_id)
+                _refresh_queue_positions(queue_key)
+                _QUEUE_CONDITION.notify_all()
+            _update_task(
+                task_id,
+                state="cancelled",
+                error=f"task cancelled: {task_id}",
+                result=None,
+                finished_at=_now_iso(),
+                queue_position=None,
+            )
         updated = get_task(task_id)
     return updated

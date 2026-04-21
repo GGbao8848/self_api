@@ -23,6 +23,8 @@ def test_list_sops_returns_registered_templates(client: TestClient) -> None:
     baseline = next(s for s in data["sops"] if s["id"] == "local-small-baseline")
     assert baseline["defaults"]["execution_mode"] == "local"
     assert baseline["step_gates"]["train"] == "manual"
+    large = next(s for s in data["sops"] if s["id"] == "local-large-sliding-window")
+    assert large["defaults"]["yolo_export_after_train"] is True
 
 
 def test_run_sop_unknown_id_returns_404(client: TestClient) -> None:
@@ -114,6 +116,7 @@ def test_run_sop_user_step_gates_override_sop_gates(
                 "review_labels": {"mode": "auto"},
                 "train": {"mode": "auto"},
                 "review_result": {"mode": "auto"},
+                    "model_infer": {"mode": "auto"},
             },
         },
     )

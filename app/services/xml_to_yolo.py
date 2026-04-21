@@ -14,6 +14,31 @@ from app.services.task_manager import ensure_current_task_active
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
 
 
+def _normalize_class_index_map(raw: dict[str, int]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for key, value in raw.items():
+        k = key.strip()
+        if not k:
+            continue
+        out[k] = int(value)
+    return out
+
+
+def _validate_contiguous_class_ids(values: list[int]) -> None:
+    if not values:
+        raise ValueError("class_index_map 不能为空")
+    unique = sorted(set(values))
+    if unique[0] != 0:
+        raise ValueError("class_index_map 中的类 id 必须从 0 开始")
+    if unique != list(range(unique[-1] + 1)):
+        raise ValueError("class_index_map 中的类 id 必须为从 0 起的连续整数（无断档）")
+
+
+def _default_display_name_for_class_id(class_id: int, index_map: dict[str, int]) -> str:
+    names = sorted(n for n, i in index_map.items() if i == class_id)
+    return names[0] if names else str(class_id)
+
+
 def _to_int(value: str | None) -> int | None:
     if value is None:
         return None
@@ -147,19 +172,39 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
             mapped = name_map.get(class_name, class_name)
             discovered_classes.add(mapped)
 
-    if request.classes:
-        ordered_classes = []
-        seen: set[str] = set()
+    name_map = request.class_name_map or {}
+
+    if request.class_index_map is not None:
+        class_to_id = _normalize_class_index_map(request.class_index_map)
+        _validate_contiguous_class_ids(list(class_to_id.values()))
+        max_id = max(class_to_id.values())
+        if request.training_names is not None:
+            if len(request.training_names) != max_id + 1:
+                raise ValueError(
+                    f"training_names 长度须为 {max_id + 1}（覆盖索引 0..{max_id}），当前为 {len(request.training_names)}"
+                )
+            ordered_classes = list(request.training_names)
+        else:
+            ordered_classes = [
+                _default_display_name_for_class_id(i, class_to_id) for i in range(max_id + 1)
+            ]
+    elif request.classes:
+        logical_classes: list[str] = []
+        seen_cls: set[str] = set()
         for name in request.classes:
             normalized = name.strip()
-            if not normalized or normalized in seen:
+            if not normalized or normalized in seen_cls:
                 continue
-            seen.add(normalized)
-            ordered_classes.append(normalized)
+            seen_cls.add(normalized)
+            logical_classes.append(normalized)
+        class_to_id = {name: idx for idx, name in enumerate(logical_classes)}
+        if request.training_names is not None:
+            ordered_classes = list(request.training_names)
+        else:
+            ordered_classes = list(logical_classes)
     else:
         ordered_classes = sorted(discovered_classes)
-
-    class_to_id = {name: idx for idx, name in enumerate(ordered_classes)}
+        class_to_id = {name: idx for idx, name in enumerate(ordered_classes)}
 
     converted_files = 0
     skipped_files = 0
@@ -207,7 +252,6 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
             continue
 
         lines: list[str] = []
-        name_map = request.class_name_map or {}
         for class_name, (xmin, ymin, xmax, ymax) in objects:
             class_name = name_map.get(class_name, class_name)
             if class_name not in class_to_id:

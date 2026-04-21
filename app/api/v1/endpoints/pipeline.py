@@ -29,6 +29,7 @@ from app.graph.pipeline import compiled_graph
 from app.graph.sops import apply_sop_defaults, list_sops
 from app.graph.state import DEFAULT_GATES, PipelineState, StepGateConfig
 from app.schemas.pipeline import (
+    PipelineLinkedTaskStatus,
     PipelineConfirmRequest,
     PipelineRunRequest,
     PipelineStatusResponse,
@@ -37,6 +38,7 @@ from app.schemas.pipeline import (
     SopRunRequest,
     SopSummary,
 )
+from app.services.task_manager import get_task
 
 router = APIRouter(
     prefix="/pipeline",
@@ -68,6 +70,7 @@ def _build_initial_state(req: PipelineRunRequest, run_id: str) -> PipelineState:
         yolo_train_model=req.yolo_train_model,
         yolo_train_epochs=req.yolo_train_epochs,
         yolo_train_imgsz=req.yolo_train_imgsz,
+        yolo_export_after_train=req.yolo_export_after_train,
         split_mode=req.split_mode,
         train_ratio=req.train_ratio,
         val_ratio=req.val_ratio,
@@ -77,6 +80,8 @@ def _build_initial_state(req: PipelineRunRequest, run_id: str) -> PipelineState:
         remote_project_root_dir=req.remote_project_root_dir,
         class_name_map=req.class_name_map,
         final_classes=req.final_classes,
+        class_index_map=req.class_index_map,
+        training_names=req.training_names,
         full_access=req.full_access,
         step_gates=step_gates,
         step_results={},
@@ -138,6 +143,18 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
     if interrupted and not pending_review:
         pending_review = _extract_pending_review(gs)
 
+    model_task = None
+    train_task_id = state.get("train_task_id")
+    if train_task_id:
+        task = get_task(train_task_id)
+        if task is not None:
+            model_task = PipelineLinkedTaskStatus(
+                task_id=task["task_id"],
+                task_type=task["task_type"],
+                state=task["state"],
+                queue_position=task.get("queue_position"),
+            )
+
     return PipelineStatusResponse(
         run_id=run_id,
         current_step=state.get("current_step"),
@@ -146,6 +163,7 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
         pending_review=pending_review,
         step_results=step_results,
         interrupted=interrupted,
+        model_task=model_task,
         initial_params={
             "original_dataset": state.get("original_dataset"),
             "detector_name": state.get("detector_name"),
@@ -155,6 +173,7 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
             "yolo_train_model": state.get("yolo_train_model"),
             "yolo_train_epochs": state.get("yolo_train_epochs"),
             "yolo_train_imgsz": state.get("yolo_train_imgsz"),
+            "yolo_export_after_train": state.get("yolo_export_after_train"),
             "full_access": state.get("full_access"),
             "class_name_map": state.get("class_name_map"),
             "final_classes": state.get("final_classes"),

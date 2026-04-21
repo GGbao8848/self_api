@@ -8,10 +8,310 @@
  */
 
 import { loadJson, saveJson } from "/static/shared/js/jsonStorage.js";
+import {
+  mountClassMappingForm,
+  collectClassMappingPayload,
+} from "/static/pipeline-ui/js/classMappingUi.js";
 
 const STORAGE_KEY = "self_api_pipeline_runs";
 const POLL_INTERVAL_MS = 3000;
 const API_BASE = `${location.origin}/api/v1/pipeline`;
+
+const STEP_META = {
+  label_transform_review: {
+    label: "标注检查与转换修改",
+    goal: "完成类别检查、标签转换和最终标签口径确认。",
+    reviewQuestion: "确认类别映射、标签转换和索引定义都正确。",
+    reviewAction: "重点看类别列表、class_to_id 和 labels 输出位置。",
+    expected: "通过后会进入数据集划分。",
+    checklist: [
+      "类别合并/改名规则是否正确。",
+      "标签转换结果是否完整。",
+      "最终类别与索引是否可直接训练。",
+    ],
+  },
+  healthcheck: {
+    label: "环境检查",
+    goal: "确认 self_api 服务当前可用，整个流程可以正常开始。",
+    reviewQuestion: "检查当前服务是否可用，流程能不能继续。",
+    reviewAction: "这里只看服务是否连通即可；失败时先修复环境，再重新运行。",
+    expected: "成功时会明确告诉你服务可用；失败时流程会直接停下，不建议继续看后面的步骤。",
+    checklist: [
+      "接口是否可访问。",
+      "如果失败，优先检查服务地址、鉴权和后端是否启动。",
+    ],
+  },
+  discover_classes: {
+    label: "类别发现",
+    goal: "扫描原始 XML，找出数据里实际出现了哪些类别。",
+    reviewQuestion: "确认这些类别是不是你想训练的目标类别。",
+    reviewAction: "重点看有没有错别字、同义词、脏类别，是否需要合并或改名。",
+    expected: "确认后，后续转换会按你的类别映射生成训练标签。",
+    checklist: [
+      "保留的类别是否都需要训练。",
+      "同一类目标是否存在多个写法，需要合并。",
+      "最终训练类别顺序或索引是否符合你的预期。",
+    ],
+  },
+  xml_to_yolo: {
+    label: "标签转换",
+    goal: "把 XML 标注转换成 YOLO 训练所需的标签文件。",
+    reviewQuestion: "确认转换是否成功，训练标签有没有正确生成。",
+    reviewAction: "优先看成功转换了多少文件、生成了多少框，以及标签目录是否落在预期位置。",
+    expected: "成功后会得到可继续划分与训练的 labels 和 classes 信息。",
+    checklist: [
+      "转换文件数是否接近原始 XML 文件数。",
+      "标签目录是否生成在正确位置。",
+      "类别列表是否与前一步确认结果一致。",
+    ],
+  },
+  review_labels: {
+    label: "标签确认",
+    goal: "在真正切分数据前，再确认一次最终训练类别和索引。",
+    reviewQuestion: "确认 classes.txt 与标签索引是否就是你要拿去训练的版本。",
+    reviewAction: "只看类别名、顺序和索引是否正确；不对就直接改，不需要看原始 JSON。",
+    expected: "确认后系统会用这份定义重建 labels/classes.txt，然后继续后续流程。",
+    checklist: [
+      "类别名是否清晰且没有脏值。",
+      "类别顺序或显式索引是否与训练要求一致。",
+      "如果做了修改，确认这就是最终训练口径。",
+    ],
+  },
+  split_dataset: {
+    label: "数据集划分",
+    goal: "把数据划分到 train/val/test，形成可训练的数据结构。",
+    reviewQuestion: "确认训练集和验证集是否已经按预期生成。",
+    reviewAction: "主要看输出目录和各 split 数量是否合理。",
+    expected: "成功后会得到一个新的数据集版本目录，后续步骤会基于它继续处理。",
+    checklist: [
+      "train/val/test 数量是否合理。",
+      "输出目录是否在预期位置。",
+    ],
+  },
+  crop_augment: {
+    label: "滑窗裁剪与增强",
+    goal: "把大图切成更适合训练的小图，并补充训练样本。",
+    reviewQuestion: "确认滑窗裁剪和增强是否达到了你想要的数据效果。",
+    reviewAction: "重点看生成了多少窗口、多少增强图，以及输出目录是否正确。",
+    expected: "成功后会得到 crop/train、crop/val 和可用于训练的增强结果。",
+    checklist: [
+      "是否生成了足够数量的小图窗口。",
+      "训练集增强结果是否已经生成。",
+      "如果跳过增强，确认是否属于预期情况。",
+    ],
+  },
+  crop_window: {
+    label: "滑窗裁剪",
+    goal: "把大图按滑窗策略切分为训练小图。",
+    reviewQuestion: "确认滑窗窗口数量与输出路径是否符合预期。",
+    reviewAction: "重点看 generated_crops、generated_labels 与 crop 输出目录。",
+    expected: "完成后进入增强阶段。",
+    checklist: [
+      "窗口数量是否符合预期。",
+      "裁剪输出目录是否正确。",
+    ],
+  },
+  augment_only: {
+    label: "增强",
+    goal: "对训练集裁剪图做离线增强，提升样本多样性。",
+    reviewQuestion: "确认增强是否执行且数量符合预期。",
+    reviewAction: "重点看 generated_images 与 augment 输出目录。",
+    expected: "完成后进入发布数据集。",
+    checklist: [
+      "增强图像数量是否合理。",
+      "增强输出目录是否正确。",
+    ],
+  },
+  publish_transfer: {
+    label: "发布训练数据",
+    goal: "生成训练 YAML，并把最终训练数据放到正确的位置。",
+    reviewQuestion: "确认即将用于训练的数据版本、YAML 路径和发布位置是否正确。",
+    reviewAction: "只看训练 YAML、数据版本、发布目录和推荐训练输出目录。",
+    expected: "完成后会得到可直接训练的 YAML 和最终发布目录。",
+    checklist: [
+      "训练 YAML 路径是否正确。",
+      "数据版本号是否符合本次 run。",
+      "发布目录和后续训练目录是否正确。",
+    ],
+  },
+  train: {
+    label: "训练参数审核修改并确认",
+    goal: "在真正开始训练前，做最后一次参数确认。",
+    reviewQuestion: "确认现在能不能开始训练，以及训练参数是否合适。",
+    reviewAction: "重点看底模、epochs、imgsz、训练 YAML 和输出目录。",
+    expected: "确认后会提交异步训练任务，系统随后自动等待训练结束。",
+    checklist: [
+      "底模是否正确。",
+      "训练轮数和图像尺寸是否符合目标。",
+      "训练 YAML、输出目录、run 名称是否都正确。",
+    ],
+  },
+  poll_train: {
+    label: "训练",
+    goal: "持续轮询训练任务，直到训练结束或失败。",
+    reviewQuestion: "这里只需要知道训练是否顺利结束。",
+    reviewAction: "优先看训练状态、退出码和输出目录。",
+    expected: "训练成功后会进入最终验收；失败时会停在错误结果，供你排查。",
+    checklist: [
+      "训练状态是否成功。",
+      "若失败，优先看退出码和日志。",
+    ],
+  },
+  review_result: {
+    label: "模型导出",
+    goal: "根据训练结果决定这次 run 是否达到预期。",
+    reviewQuestion: "确认这次训练结果是否可以接受并作为最终输出。",
+    reviewAction: "优先看训练是否成功、输出目录是否生成、日志里有没有明显异常。",
+    expected: "确认通过后流程结束；如果不满意，就中止并调整参数后重新跑。",
+    checklist: [
+      "训练是否成功结束。",
+      "输出目录是否生成在预期位置。",
+      "日志中是否有明显异常、空结果或提前退出。",
+    ],
+  },
+  model_infer: {
+    label: "模型推理",
+    goal: "使用导出的 torchscript 对单图/目录/多路径进行批量推理。",
+    reviewQuestion: "确认模型路径、输入来源和阈值参数是否正确。",
+    reviewAction: "重点看 model_path、source_path/source_paths、imgsz/conf/iou。",
+    expected: "确认后会在 runs/infer 下生成标准推理产物目录。",
+    checklist: [
+      "模型路径是否为刚导出的 torchscript。",
+      "输入路径是否覆盖本次待测数据。",
+      "阈值与类别过滤是否符合当前场景。",
+    ],
+  },
+};
+
+const BUSINESS_STEP_TO_TECH_STEP = {
+  label_transform_review: "review_labels",
+  split_dataset: "split_dataset",
+  crop_window: "crop_augment",
+  augment_only: "crop_augment",
+  publish_transfer: "publish_transfer",
+  train: "train",
+  poll_train: "poll_train",
+  review_result: "review_result",
+  model_infer: "model_infer",
+};
+
+function resolveStepResultForDisplay(stepName, data) {
+  const stepResults = data.step_results || {};
+  if (stepName === "label_transform_review") {
+    const review = stepResults.review_labels;
+    if (review) return review;
+    if (stepResults.xml_to_yolo || stepResults.discover_classes) {
+      return {
+        status: "running",
+        summary: "正在进行标注检查与转换修改。",
+        data: {},
+      };
+    }
+    return null;
+  }
+  if (stepName === "crop_window") {
+    const merged = stepResults.crop_augment;
+    if (!merged) return null;
+    return {
+      status: merged.status,
+      summary: "滑窗裁剪阶段",
+      data: merged.data?.crop || {},
+    };
+  }
+  if (stepName === "augment_only") {
+    const merged = stepResults.crop_augment;
+    if (!merged) return null;
+    const augment = merged.data?.augment;
+    if (augment) {
+      return {
+        status: merged.status,
+        summary: "增强阶段",
+        data: augment,
+      };
+    }
+    return {
+      status: "skipped",
+      summary: "增强未执行或被跳过",
+      data: {},
+    };
+  }
+  return stepResults[stepName] || null;
+}
+
+const FIELD_LABELS = {
+  class_names: "类别列表",
+  class_counts: "类别统计",
+  total_classes: "类别数",
+  total_xml_files: "XML 文件数",
+  converted_files: "已转换文件",
+  total_boxes: "标注框总数",
+  labels_dir: "标签目录",
+  classes: "训练类别",
+  class_to_id: "类别索引",
+  classes_file: "classes.txt",
+  output_dir: "输出目录",
+  input_dir: "输入目录",
+  split_output_dir: "划分目录",
+  publish_input_dir: "发布源目录",
+  crop_root: "裁剪输出目录",
+  output_yaml_path: "训练 YAML",
+  dataset_version: "数据版本",
+  published_dataset_dir: "发布目录",
+  recommended_train_project: "建议训练输出目录",
+  recommended_train_name: "建议 Run 名称",
+  model: "底模",
+  epochs: "训练轮数",
+  imgsz: "图像尺寸",
+  yolo_train_env: "训练环境",
+  yaml_path: "训练 YAML",
+  project: "训练输出目录",
+  name: "Run 名称",
+  exit_code: "退出码",
+  stdout: "标准输出",
+  stderr: "错误输出",
+  train_summary: "训练结论",
+  train_task_id: "训练任务 ID",
+  generated_crops: "生成窗口数",
+  generated_labels: "生成标签数",
+  generated_images: "增强新增图像",
+  processed_images: "处理图像数",
+  skipped_images: "跳过图像数",
+  train_images: "训练图像",
+  val_images: "验证图像",
+  test_images: "测试图像",
+  total_images: "总图像数",
+  paired_images: "成对图像数",
+  execution_mode: "执行模式",
+  project_root_dir: "工作区目录",
+  model_path: "模型路径",
+  source_path: "输入路径",
+  source_paths: "输入路径列表",
+  run_args_path: "推理参数文件",
+  summary_path: "推理汇总文件",
+  detected_images: "命中图像数",
+  no_detect_images: "未命中图像数",
+  result_images: "结果图像数",
+  labels_written: "标签文件数",
+};
+
+const STATUS_TEXT = {
+  ok: "已完成",
+  completed: "已完成",
+  succeeded: "已完成",
+  failed: "失败",
+  error: "失败",
+  skipped: "已跳过",
+  running: "进行中",
+  waiting: "待确认",
+  interrupted: "待确认",
+  pending: "未开始",
+  unknown: "未知",
+};
+
+const MODEL_STEP_TOKENS = {
+  training: ["train", "训练"],
+  inference: ["predict", "infer", "inference", "推理"],
+};
 
 const qs = (id) => document.getElementById(id);
 
@@ -29,8 +329,8 @@ const el = {
   trainEpochs: qs("trainEpochs"),
   trainImgsz: qs("trainImgsz"),
   fullAccess: qs("fullAccess"),
-  classNameMap: qs("classNameMap"),
-  finalClasses: qs("finalClasses"),
+  classMappingLaunch: qs("classMappingLaunch"),
+  classMapFieldset: qs("classMapFieldset"),
   runBtn: qs("runBtn"),
   previewBtn: qs("previewBtn"),
   statusBox: qs("statusBox"),
@@ -48,6 +348,9 @@ const el = {
   saveSettingsBtn: qs("saveSettingsBtn"),
   settingLocalPath: qs("settingLocalPath"),
   settingRemotePath: qs("settingRemotePath"),
+  settingLocalYoloTrainEnv: qs("settingLocalYoloTrainEnv"),
+  settingRemoteYoloTrainEnv: qs("settingRemoteYoloTrainEnv"),
+  settingsEnvStatus: qs("settingsEnvStatus"),
 
   launchView: qs("launchView"),
   detailView: qs("detailView"),
@@ -65,6 +368,13 @@ const el = {
   noReviewNote: qs("noReviewNote"),
   reviewStep: qs("reviewStep"),
   reviewHint: qs("reviewHint"),
+  reviewQuestion: qs("reviewQuestion"),
+  reviewAction: qs("reviewAction"),
+  reviewExpectation: qs("reviewExpectation"),
+  reviewChecklist: qs("reviewChecklist"),
+  reviewFocusMode: qs("reviewFocusMode"),
+  reviewAdvancedOverride: qs("reviewAdvancedOverride"),
+  reviewAdvancedData: qs("reviewAdvancedData"),
   reviewFacts: qs("reviewFacts"),
   reviewData: qs("reviewData"),
   reviewOverrideForm: qs("reviewOverrideForm"),
@@ -83,8 +393,11 @@ let state = {
   activeTab: "local", // 'local' or 'remote'
   settings: loadJson("pipeline_settings", {
     localPath: "",
-    remotePath: ""
+    remotePath: "",
+    localYoloTrainEnv: "",
+    remoteYoloTrainEnv: "",
   }),
+  reviewFocusMode: loadJson("pipeline_review_focus_mode", true),
 };
 
 let sopCache = [];
@@ -108,6 +421,7 @@ function onSopChange() {
   const sopId = el.sopSelect.value;
   if (!sopId) {
     el.sopDescription.textContent = "选择上方 SOP 查看详情。";
+    el.classMapFieldset?.classList.remove("sop-large-sliding");
     updateExecutionModeSettingHint();
     return;
   }
@@ -120,6 +434,9 @@ function onSopChange() {
   if (d.yolo_train_epochs) el.trainEpochs.value = d.yolo_train_epochs;
   if (d.yolo_train_imgsz) el.trainImgsz.value = d.yolo_train_imgsz;
   if (typeof d.full_access === "boolean") el.fullAccess.checked = d.full_access;
+  if (el.classMapFieldset) {
+    el.classMapFieldset.classList.toggle("sop-large-sliding", sopId === "local-large-sliding-window");
+  }
   updateProjectRootDirPreview();
 }
 
@@ -170,6 +487,20 @@ function updateProjectRootDirPreview() {
   const basePath = getWorkspaceBasePathByMode(el.executionMode.value);
   el.projectRootDir.value = normalizePathJoin(basePath, owner);
   updateExecutionModeSettingHint();
+  refreshTrainEnvByMode();
+}
+
+function getYoloTrainEnvByMode(mode) {
+  if (mode === "local") {
+    return String(state.settings.localYoloTrainEnv || "").trim();
+  }
+  return String(state.settings.remoteYoloTrainEnv || "").trim();
+}
+
+function refreshTrainEnvByMode() {
+  const mode = el.executionMode.value;
+  const envValue = getYoloTrainEnvByMode(mode);
+  if (envValue) el.trainEnv.value = envValue;
 }
 
 function buildRunPayload() {
@@ -178,12 +509,13 @@ function buildRunPayload() {
   const projectRootDir = normalizePathJoin(basePath, owner);
   el.projectRootDir.value = projectRootDir;
 
+  const yoloTrainEnv = getYoloTrainEnvByMode(el.executionMode.value) || el.trainEnv.value.trim();
   const payload = {
     original_dataset: el.originalDataset.value.trim(),
     detector_name: el.detectorName.value.trim(),
     project_root_dir: projectRootDir,
     execution_mode: el.executionMode.value,
-    yolo_train_env: el.trainEnv.value.trim(),
+    yolo_train_env: yoloTrainEnv,
     yolo_train_model: el.trainModel.value.trim(),
     yolo_train_epochs: Number(el.trainEpochs.value) || 100,
     yolo_train_imgsz: Number(el.trainImgsz.value) || 640,
@@ -191,13 +523,8 @@ function buildRunPayload() {
     self_api_url: location.origin,
   };
 
-  const mapText = el.classNameMap.value.trim();
-  if (mapText) {
-    payload.class_name_map = JSON.parse(mapText);
-  }
-  const finalText = el.finalClasses.value.trim();
-  if (finalText) {
-    payload.final_classes = JSON.parse(finalText);
+  if (el.classMappingLaunch) {
+    Object.assign(payload, collectClassMappingPayload(el.classMappingLaunch));
   }
   return payload;
 }
@@ -232,9 +559,28 @@ async function fetchJson(url, options = {}) {
   }
   if (!resp.ok) {
     const msg = body?.detail || `HTTP ${resp.status}`;
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    const err = new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    err.responseBody = body;
+    err.httpStatus = resp.status;
+    throw err;
   }
   return body;
+}
+
+async function waitForNextInterrupt(runId, initialData, options = {}) {
+  const maxAttempts = options.maxAttempts || 8;
+  const intervalMs = options.intervalMs || 350;
+  let latest = initialData;
+  for (let i = 0; i < maxAttempts; i++) {
+    if (latest?.completed || latest?.interrupted) return latest;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    try {
+      latest = await fetchJson(`${API_BASE}/${runId}`);
+    } catch {
+      break;
+    }
+  }
+  return latest;
 }
 
 async function startRun() {
@@ -261,7 +607,7 @@ async function startRun() {
       detector_name: payload.detector_name,
       execution_mode: payload.execution_mode || "local",
       started_at: new Date().toISOString(),
-      last_status: summarizeStatus(resp),
+      last_status: getDisplayStatusInfo(resp),
     });
     persistRuns();
     renderRunList();
@@ -288,7 +634,7 @@ function summarizeStatus(resp) {
   if (resp.completed) {
     return resp.error ? "failed" : "completed";
   }
-  if (resp.interrupted) {
+  if (resp.interrupted && resp.pending_review) {
     return "waiting";
   }
   return "running";
@@ -300,6 +646,431 @@ function prettyJson(value) {
   } catch {
     return String(value);
   }
+}
+
+function getStepMeta(stepName) {
+  return STEP_META[stepName] || {
+    label: stepName,
+    goal: "该步骤正在处理当前流程所需的数据。",
+    reviewQuestion: "确认这一步的结果是否符合你的预期。",
+    reviewAction: "优先看当前结论与关键输出路径。",
+    expected: "确认后流程会继续推进到下一步。",
+    checklist: ["确认当前结果是否满足后续步骤需要。"],
+  };
+}
+
+function getStatusText(status) {
+  return STATUS_TEXT[status] || status || STATUS_TEXT.unknown;
+}
+
+function detectModelOperation({ stepName = "", taskType = "", pendingStep = "" } = {}) {
+  const haystack = [stepName, taskType, pendingStep]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (!haystack) return null;
+  if (MODEL_STEP_TOKENS.inference.some((token) => haystack.includes(token))) {
+    return "inference";
+  }
+  if (MODEL_STEP_TOKENS.training.some((token) => haystack.includes(token))) {
+    return "training";
+  }
+  return null;
+}
+
+function getModelVerb(activity) {
+  return activity === "inference" ? "推理" : "训练";
+}
+
+function buildModelTaskStatusInfo(runData, options = {}) {
+  const currentStep = options.stepName || runData.current_step || "";
+  const pendingStep = runData.pending_review?.step || "";
+  const modelTask = runData.model_task;
+  const activity = detectModelOperation({
+    stepName: currentStep,
+    taskType: modelTask?.task_type || "",
+    pendingStep,
+  });
+
+  if (!activity) return null;
+
+  const verb = getModelVerb(activity);
+  if (runData.interrupted && runData.pending_review && currentStep === "review_result") {
+    return {
+      key: "waiting",
+      text: `待确认${verb}结果`,
+      summary: `${verb}已经完成，等待人工验收结果。`,
+    };
+  }
+
+  if (
+    runData.interrupted
+    && runData.pending_review
+    && (
+      (activity === "training" && currentStep === "train")
+      || (activity === "inference" && detectModelOperation({ stepName: currentStep }) === "inference")
+    )
+  ) {
+    return {
+      key: "waiting",
+      text: `待确认${verb}参数`,
+      summary: `${verb}参数等待人工确认。`,
+    };
+  }
+
+  if (!modelTask) {
+    if (currentStep === "poll_train") {
+      return {
+        key: "running",
+        text: `等待${verb}结果`,
+        summary: `${verb}任务已提交，系统正在等待完成。`,
+      };
+    }
+    return null;
+  }
+
+  switch (modelTask.state) {
+    case "pending":
+      if ((modelTask.queue_position || 0) > 0) {
+        const queueText = modelTask.queue_position > 1
+          ? `，前面还有 ${modelTask.queue_position} 个任务`
+          : "，即将自动开始";
+        return {
+          key: "queued",
+          text: `已添加到${verb}队列`,
+          summary: `当前任务已进入${verb}队列${queueText}。`,
+        };
+      }
+      return {
+        key: "pending",
+        text: `等待${verb}启动`,
+        summary: `${verb}任务已创建，正在等待启动。`,
+      };
+    case "running":
+      return {
+        key: "model-running",
+        text: `模型${verb}中`,
+        summary: `模型正在${verb}，当前任务已占用执行资源。`,
+      };
+    case "succeeded":
+      return {
+        key: "ok",
+        text: `模型${verb}完成`,
+        summary: `模型${verb}已经完成。`,
+      };
+    case "failed":
+      return {
+        key: "failed",
+        text: `模型${verb}失败`,
+        summary: `模型${verb}失败，需要查看日志排查。`,
+      };
+    case "cancelled":
+      return {
+        key: "skipped",
+        text: `模型${verb}已取消`,
+        summary: `模型${verb}任务已取消。`,
+      };
+    default:
+      return null;
+  }
+}
+
+function getDisplayStatusInfo(runData) {
+  if (runData.completed && runData.error) {
+    return {
+      key: "failed",
+      text: getStatusText("failed"),
+      summary: "",
+    };
+  }
+  const modelInfo = buildModelTaskStatusInfo(runData);
+  if (modelInfo) return modelInfo;
+
+  const statusKey = summarizeStatus(runData);
+  return {
+    key: statusKey,
+    text: getStatusText(statusKey),
+    summary: "",
+  };
+}
+
+function buildModelStepResultStatusInfo(stepName, result, runData) {
+  if (!result) return null;
+  const activity = detectModelOperation({
+    stepName,
+    taskType: runData.model_task?.task_type || "",
+    pendingStep: runData.pending_review?.step || "",
+  });
+  if (!activity) return null;
+
+  const verb = getModelVerb(activity);
+  if (stepName === "train" && result.status === "ok") {
+    return { key: "ok", text: `已提交${verb}任务` };
+  }
+  if (stepName === "poll_train") {
+    if (result.status === "ok") return { key: "ok", text: `模型${verb}完成` };
+    if (result.status === "failed") return { key: "failed", text: `模型${verb}失败` };
+    if (result.status === "skipped") return { key: "skipped", text: `模型${verb}已跳过` };
+  }
+  if (stepName === "review_result") {
+    if (result.status === "ok") return { key: "ok", text: `${verb}结果已验收` };
+    if (result.status === "failed") return { key: "failed", text: `${verb}结果待处理` };
+  }
+  return null;
+}
+
+function normalizeCachedStatus(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const key = value.key || value.status || "unknown";
+    return {
+      key,
+      text: value.text || getStatusText(key),
+    };
+  }
+  const key = typeof value === "string" ? value : "unknown";
+  return {
+    key,
+    text: getStatusText(key),
+  };
+}
+
+function labelForField(key) {
+  return FIELD_LABELS[key] || key;
+}
+
+function formatFactValue(value, label = "") {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "number") return Number.isFinite(value) ? value.toLocaleString("zh-CN") : String(value);
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return "";
+    if (text.length > 96 && !label.includes("日志")) return `${text.slice(0, 93)}...`;
+    return text;
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) return "";
+    const preview = value.slice(0, 4).map((item) => String(item)).join("、");
+    return value.length > 4 ? `${preview} 等 ${value.length} 项` : preview;
+  }
+  if (typeof value === "object") {
+    const keys = Object.keys(value);
+    if (!keys.length) return "";
+    if (label.includes("统计") || label.includes("索引")) {
+      const preview = keys.slice(0, 3).map((key) => `${key}:${value[key]}`).join("，");
+      return keys.length > 3 ? `${preview} 等 ${keys.length} 项` : preview;
+    }
+    return `共 ${keys.length} 项`;
+  }
+  return String(value);
+}
+
+function appendFact(facts, label, value) {
+  const formatted = formatFactValue(value, label);
+  if (!formatted) return;
+  facts.push([label, formatted]);
+}
+
+function buildGenericFacts(source, limit = 6) {
+  if (!source || typeof source !== "object") return [];
+  const facts = [];
+  for (const [key, value] of Object.entries(source)) {
+    if (facts.length >= limit) break;
+    if (["hint", "note", "instructions"].includes(key)) continue;
+    appendFact(facts, labelForField(key), value);
+  }
+  return facts;
+}
+
+function buildStepFacts(stepName, result, source = {}, runData = {}) {
+  const facts = [];
+  const pollTrainData = (source?.train_data && typeof source.train_data === "object")
+    ? source.train_data
+    : source;
+  const modelTask = runData.model_task;
+  const modelInfo = buildModelTaskStatusInfo(runData, { stepName });
+
+  switch (stepName) {
+    case "label_transform_review":
+      appendFact(facts, "类别数", runData.step_results?.discover_classes?.data?.total_classes);
+      appendFact(facts, "已转换文件", runData.step_results?.xml_to_yolo?.data?.converted_files);
+      appendFact(facts, "标签目录", runData.step_results?.xml_to_yolo?.data?.labels_dir);
+      appendFact(facts, "最终训练类别", runData.step_results?.review_labels?.data?.classes);
+      break;
+    case "healthcheck":
+      appendFact(facts, "当前结论", result?.status === "ok" ? "服务可用，可继续执行" : "服务异常，流程无法继续");
+      appendFact(facts, "服务地址", runData.initial_params?.self_api_url || location.origin);
+      break;
+    case "discover_classes":
+      appendFact(facts, "XML 文件数", source.total_xml_files);
+      appendFact(facts, "发现类别", source.total_classes);
+      appendFact(facts, "类别预览", source.class_names);
+      break;
+    case "xml_to_yolo":
+      appendFact(facts, "已转换文件", source.total_xml_files ? `${source.converted_files}/${source.total_xml_files}` : source.converted_files);
+      appendFact(facts, "标注框总数", source.total_boxes);
+      appendFact(facts, "标签目录", source.labels_dir);
+      appendFact(facts, "训练类别", source.classes);
+      break;
+    case "review_labels": {
+      const classes = Array.isArray(source.classes) ? source.classes : Object.keys(source.class_to_id || {});
+      appendFact(facts, "最终训练类别", classes);
+      appendFact(facts, "类别数量", classes.length);
+      appendFact(facts, "标签目录", source.labels_dir || runData.step_results?.xml_to_yolo?.data?.labels_dir);
+      break;
+    }
+    case "split_dataset":
+      appendFact(facts, "输出目录", source.output_dir);
+      appendFact(facts, "训练图像", source.train_images);
+      appendFact(facts, "验证图像", source.val_images);
+      appendFact(facts, "测试图像", source.test_images);
+      break;
+    case "crop_augment":
+      appendFact(facts, "裁剪目录", source.crop_root || source.crop?.output_dir);
+      appendFact(facts, "生成窗口数", source.crop?.generated_crops);
+      appendFact(facts, "生成标签数", source.crop?.generated_labels);
+      appendFact(facts, "增强新增图像", source.augment?.generated_images);
+      break;
+    case "crop_window":
+      appendFact(facts, "裁剪目录", source.output_dir || runData.step_results?.crop_augment?.data?.crop_root);
+      appendFact(facts, "生成窗口数", source.generated_crops);
+      appendFact(facts, "生成标签数", source.generated_labels);
+      break;
+    case "augment_only":
+      appendFact(facts, "增强目录", source.output_dir);
+      appendFact(facts, "增强新增图像", source.generated_images);
+      appendFact(facts, "处理图像数", source.processed_images);
+      break;
+    case "publish_transfer":
+      appendFact(facts, "训练 YAML", source.output_yaml_path);
+      appendFact(facts, "数据版本", source.dataset_version);
+      appendFact(facts, "发布目录", source.published_dataset_dir);
+      appendFact(facts, "建议训练输出目录", source.recommended_train_project);
+      break;
+    case "train":
+      appendFact(facts, "底模", source.model);
+      appendFact(facts, "训练轮数", source.epochs);
+      appendFact(facts, "图像尺寸", source.imgsz);
+      appendFact(facts, "训练 YAML", source.yaml_path);
+      appendFact(facts, "训练输出目录", source.project);
+      break;
+    case "poll_train":
+      appendFact(
+        facts,
+        "训练结论",
+        result?.status === "ok"
+          ? "训练已完成"
+          : (modelInfo?.text || (result ? "训练失败" : "等待训练结果")),
+      );
+      appendFact(facts, "Run 名称", pollTrainData.name);
+      appendFact(facts, "训练输出目录", pollTrainData.project);
+      appendFact(facts, "退出码", pollTrainData.exit_code);
+      appendFact(facts, "任务状态", modelTask?.state);
+      appendFact(facts, "排队位置", modelTask?.queue_position);
+      break;
+    case "review_result":
+      appendFact(facts, "训练结论", source.train_summary || result?.summary);
+      appendFact(facts, "导出状态", source.export_status);
+      appendFact(facts, "导出模型", source.export_file_path);
+      appendFact(facts, "Run 名称", pollTrainData.name);
+      appendFact(facts, "训练输出目录", pollTrainData.project);
+      appendFact(facts, "退出码", pollTrainData.exit_code);
+      break;
+    case "model_infer":
+      appendFact(facts, "模型路径", source.model_path);
+      appendFact(facts, "输出目录", source.output_dir);
+      appendFact(facts, "总图像数", source.total_images);
+      appendFact(facts, "命中图像数", source.detected_images);
+      appendFact(facts, "未命中图像数", source.no_detect_images);
+      break;
+    default:
+      return buildGenericFacts(source, 6);
+  }
+
+  return facts.filter(([, value]) => value !== "");
+}
+
+function buildStepSummary(stepName, result, data = {}) {
+  const meta = getStepMeta(stepName);
+  const modelInfo = state.currentRunData
+    ? buildModelTaskStatusInfo(state.currentRunData, { stepName })
+    : null;
+  if (!result) return modelInfo?.summary || meta.goal;
+  if (result.status === "failed") return result.summary || "这一步失败了，需要先处理问题再继续。";
+  if (result.status === "skipped") return result.summary || "这一步已跳过。";
+
+  switch (stepName) {
+    case "label_transform_review":
+      return result?.status === "ok"
+        ? "标注检查、转换与类别确认已完成。"
+        : "正在进行标注检查与转换修改。";
+    case "healthcheck":
+      return result.status === "ok" ? "服务可用，流程可以继续。" : "服务不可用，流程已停止。";
+    case "discover_classes":
+      return data.total_classes
+        ? `已发现 ${data.total_classes} 个类别，下一步可确认是否需要合并或改名。`
+        : "已完成类别扫描。";
+    case "xml_to_yolo":
+      return data.converted_files
+        ? `标签已生成，可继续检查类别与索引是否正确。`
+        : (result.summary || meta.goal);
+    case "review_labels":
+      return result.summary || "类别与标签口径已经确认。";
+    case "split_dataset":
+      return data.output_dir
+        ? "训练集和验证集已经生成。"
+        : (result.summary || meta.goal);
+    case "crop_augment":
+      return result.summary || "滑窗裁剪和增强已完成。";
+    case "crop_window":
+      return result?.status === "ok"
+        ? "滑窗裁剪已完成。"
+        : (result?.summary || "正在进行滑窗裁剪。");
+    case "augment_only":
+      if (result?.status === "skipped") return result.summary || "增强已跳过。";
+      return result?.status === "ok"
+        ? "增强已完成。"
+        : (result?.summary || "正在进行增强。");
+    case "publish_transfer":
+      return data.output_yaml_path
+        ? "训练 YAML 和发布目录已经就绪。"
+        : (result.summary || meta.goal);
+    case "train":
+      if (modelInfo && state.currentRunData?.current_step === "train") {
+        return modelInfo.summary || result.summary || "训练任务正在等待处理。";
+      }
+      return result.summary || "训练任务已提交，系统正在等待训练完成。";
+    case "poll_train":
+      if (modelInfo && state.currentRunData?.current_step === "poll_train") {
+        return modelInfo.summary || "训练任务正在处理中。";
+      }
+      return result.status === "ok"
+        ? "训练已经完成，可以查看最终验收结果。"
+        : (result.summary || "训练失败，需要排查。");
+    case "review_result":
+      return result.summary || "训练结果已经验收。";
+    case "model_infer":
+      return result.summary || "模型推理已完成。";
+    default:
+      return result.summary || meta.goal;
+  }
+}
+
+function buildReviewModel(stepName, pending = {}, runData = {}) {
+  const meta = getStepMeta(stepName);
+  const review = pending.review && typeof pending.review === "object" ? pending.review : {};
+  const checklist = Array.isArray(meta.checklist) ? meta.checklist : [];
+  return {
+    title: meta.label,
+    hint: state.reviewFocusMode
+      ? "只保留确认所需信息；如果要排查细节，再展开下方高级区。"
+      : (pending.instructions || review.hint || "确认无误后继续；如果结果不符合预期，可修改参数或中止本次 run。"),
+    question: meta.reviewQuestion,
+    action: meta.reviewAction,
+    expectation: meta.expected,
+    checklist,
+    facts: buildStepFacts(stepName, null, review, runData),
+  };
 }
 
 function pickFirstObject(source, keys) {
@@ -342,28 +1113,13 @@ function toShortText(value) {
   return String(value);
 }
 
-function pickReadableFacts(source, limit = 6) {
-  if (!source || typeof source !== "object") return [];
-  const pairs = [];
-  for (const [key, value] of Object.entries(source)) {
-    if (pairs.length >= limit) break;
-    if (["hint", "note", "instructions"].includes(key)) continue;
-    if (value === null || value === undefined || value === "") continue;
-    if (Array.isArray(value) && value.length > 8) {
-      pairs.push([key, `共 ${value.length} 项`]);
-      continue;
-    }
-    pairs.push([key, toShortText(value)]);
-  }
-  return pairs;
-}
-
-function renderFacts(container, facts) {
+function renderFacts(container, facts, options = {}) {
+  const emptyText = options.emptyText || "这里没有额外关键字段。通常只需要看上面的结论即可。";
   container.innerHTML = "";
   if (!facts.length) {
     const note = document.createElement("div");
     note.className = "agent-note";
-    note.textContent = "暂无关键字段，展开高级信息可查看完整数据。";
+    note.textContent = emptyText;
     container.appendChild(note);
     return;
   }
@@ -407,30 +1163,98 @@ function createFormField(label, key, value = "", options = {}) {
   return wrap;
 }
 
-function renderOverrideForm(stepName, review = {}) {
+function createClassesCheckboxField(classToId = {}, selectedClasses = []) {
+  const wrap = document.createElement("div");
+  wrap.className = "review-form-field review-form-field--full";
+  const lb = document.createElement("label");
+  lb.textContent = "classes（勾选类别）";
+  wrap.appendChild(lb);
+
+  const rows = Object.entries(classToId)
+    .map(([name, idx]) => [Number(idx), name])
+    .filter(([idx]) => Number.isFinite(idx))
+    .sort((a, b) => a[0] - b[0]);
+  const selected = new Set((selectedClasses || []).map((x) => Number(x)));
+
+  const box = document.createElement("div");
+  box.style.display = "grid";
+  box.style.gap = "6px";
+  box.style.marginTop = "6px";
+
+  for (const [idx, name] of rows) {
+    const line = document.createElement("label");
+    line.style.display = "flex";
+    line.style.alignItems = "center";
+    line.style.gap = "8px";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.classesCheckbox = "1";
+    cb.value = String(idx);
+    cb.checked = selected.has(idx);
+    const text = document.createElement("span");
+    text.textContent = `[${idx}] ${name}`;
+    line.append(cb, text);
+    box.appendChild(line);
+  }
+
+  if (!rows.length) {
+    const note = document.createElement("div");
+    note.className = "agent-note";
+    note.textContent = "未发现类别映射，无法生成勾选项。可用下方 classes(JSON数组) 手填。";
+    box.appendChild(note);
+  }
+
+  wrap.appendChild(box);
+  return wrap;
+}
+
+function renderOverrideForm(stepName, review = {}, initialParams = {}) {
   el.reviewOverrideForm.innerHTML = "";
   const formRoot = document.createElement("div");
   const title = document.createElement("h4");
-  title.textContent = "快捷参数修改（会作为 params_override 提交）";
+  title.textContent = "需要调整时，在这里改参数";
   formRoot.appendChild(title);
   const grid = document.createElement("div");
   grid.className = "review-form-grid";
 
   if (stepName === "discover_classes") {
-    grid.append(
-      createFormField("class_name_map（JSON 对象）", "class_name_map", "{}", {
-        multiline: true,
-        rows: 3,
-        full: true,
-        placeholder: '{"louyou1":"louyou","louyou2":"louyou"}',
-      }),
-      createFormField("final_classes（JSON 数组）", "final_classes", "[]", {
-        multiline: true,
-        rows: 2,
-        full: true,
-        placeholder: '["louyou"]',
-      }),
-    );
+    const cmHost = document.createElement("div");
+    cmHost.className = "review-class-mapping-host";
+    grid.appendChild(cmHost);
+    mountClassMappingForm(cmHost, {
+      radioName: `reviewIdx_${Date.now()}`,
+      discoveredNames: review.class_names || [],
+      seed: {
+        class_name_map: initialParams.class_name_map,
+        final_classes: initialParams.final_classes,
+        class_index_map: initialParams.class_index_map,
+        training_names: initialParams.training_names,
+      },
+    });
+  } else if (stepName === "review_labels") {
+    const cmHost = document.createElement("div");
+    cmHost.className = "review-class-mapping-host";
+    grid.appendChild(cmHost);
+    const reviewClassToId = review.class_to_id && typeof review.class_to_id === "object"
+      ? review.class_to_id
+      : undefined;
+    const reviewClasses = Array.isArray(review.classes) ? review.classes : undefined;
+    const indexSeed = reviewClassToId && Object.keys(reviewClassToId).length
+      ? reviewClassToId
+      : initialParams.class_index_map;
+    const trainingSeed = reviewClasses && reviewClasses.length
+      ? reviewClasses
+      : initialParams.training_names;
+    mountClassMappingForm(cmHost, {
+      radioName: `reviewLabelsIdx_${Date.now()}`,
+      discoveredNames: reviewClassToId ? Object.keys(reviewClassToId) : [],
+      seed: {
+        class_name_map: review.class_name_map ?? initialParams.class_name_map,
+        final_classes: review.final_classes ?? initialParams.final_classes,
+        class_index_map: review.class_index_map ?? indexSeed,
+        training_names: review.training_names ?? trainingSeed,
+      },
+    });
   } else if (stepName === "publish_transfer") {
     grid.append(
       createFormField("publish_input_dir", "input_dir", review.publish_input_dir || ""),
@@ -449,12 +1273,43 @@ function renderOverrideForm(stepName, review = {}) {
       createFormField("yolo_train_env", "yolo_train_env", review.yolo_train_env || ""),
       createFormField("project_root_dir", "project_root_dir", "", { full: true }),
     );
+  } else if (stepName === "model_infer") {
+    const classToId =
+      (initialParams.class_to_id && typeof initialParams.class_to_id === "object" && initialParams.class_to_id)
+      || (review.class_to_id && typeof review.class_to_id === "object" && review.class_to_id)
+      || (state.currentRunData?.step_results?.review_labels?.data?.class_to_id)
+      || (state.currentRunData?.step_results?.xml_to_yolo?.data?.class_to_id)
+      || {};
+    grid.append(
+      createFormField("yolo_train_env", "yolo_train_env", review.yolo_train_env || ""),
+      createFormField("model_path", "model_path", review.model_path || "", { full: true }),
+      createFormField("source_path", "source_path", review.source_path || "", { full: true }),
+      createFormField(
+        "source_paths(多行，一行一个路径)",
+        "source_paths",
+        Array.isArray(review.source_paths) ? review.source_paths.join("\n") : "",
+        { full: true, multiline: true, rows: 2 },
+      ),
+      createFormField("project", "project", review.project || "", { full: true }),
+      createFormField("name", "name", review.name || ""),
+      createFormField("imgsz", "imgsz", String(review.imgsz ?? 640), { type: "number" }),
+      createFormField("conf", "conf", String(review.conf ?? 0.25)),
+      createFormField("iou", "iou", String(review.iou ?? 0.7)),
+    );
+    grid.append(createClassesCheckboxField(classToId, review.classes || []));
+    grid.append(
+      createFormField(
+        "classes(逗号分隔，兜底)",
+        "classes",
+        Array.isArray(review.classes) ? review.classes.join(",") : "",
+      ),
+    );
   } else {
     grid.append(createFormField("备注（可选）", "_note", "", {
       multiline: true,
       rows: 2,
       full: true,
-      placeholder: "该审核点暂无标准可改字段，可直接编辑下方 JSON。",
+      placeholder: "这个审核点通常不需要改单独参数；如果确实需要，再展开下方高级参数编辑。",
     }));
   }
 
@@ -464,14 +1319,38 @@ function renderOverrideForm(stepName, review = {}) {
 }
 
 function collectOverrideFormValues() {
-  const fields = el.reviewOverrideForm.querySelectorAll("[data-override-key]");
   const override = {};
+  const cmRoot = el.reviewOverrideForm.querySelector(".class-mapping-form");
+  if (cmRoot) {
+    Object.assign(override, collectClassMappingPayload(cmRoot));
+  }
+  const fields = el.reviewOverrideForm.querySelectorAll("[data-override-key]");
   fields.forEach((input) => {
     const key = input.dataset.overrideKey;
     const raw = String(input.value || "").trim();
     if (!raw || key === "_note") return;
     if (key === "epochs" || key === "imgsz") {
       override[key] = Number(raw);
+      return;
+    }
+    if (key === "conf" || key === "iou") {
+      override[key] = Number(raw);
+      return;
+    }
+    if (key === "source_paths") {
+      override[key] = raw
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      return;
+    }
+    if (key === "classes") {
+      override[key] = raw
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .map((x) => Number(x))
+        .filter((x) => Number.isFinite(x));
       return;
     }
     if (key === "class_name_map") {
@@ -486,6 +1365,14 @@ function collectOverrideFormValues() {
     }
     override[key] = raw;
   });
+  const classChecks = el.reviewOverrideForm.querySelectorAll("[data-classes-checkbox='1']");
+  if (classChecks.length > 0) {
+    const picked = Array.from(classChecks)
+      .filter((n) => n.checked)
+      .map((n) => Number(n.value))
+      .filter((n) => Number.isFinite(n));
+    override.classes = picked;
+  }
   return override;
 }
 
@@ -519,9 +1406,10 @@ function renderRunList() {
     const detector = document.createElement("span");
     detector.className = "run-list__detector";
     detector.textContent = run.detector_name || "(no detector)";
+    const statusInfo = normalizeCachedStatus(run.last_status);
     const pill = document.createElement("span");
-    pill.className = `pill ${run.last_status || ""}`;
-    pill.textContent = run.last_status || "unknown";
+    pill.className = `pill ${statusInfo.key || ""}`;
+    pill.textContent = statusInfo.text;
     const rid = document.createElement("span");
     rid.className = "run-list__id";
     rid.textContent = run.run_id.slice(0, 8);
@@ -548,6 +1436,7 @@ function showLaunchView() {
   } else if (state.activeTab === "remote") {
     el.executionMode.value = "remote_sftp";
   }
+  refreshTrainEnvByMode();
   updateProjectRootDirPreview();
 }
 
@@ -575,31 +1464,50 @@ async function openRun(runId, prefetched = null) {
 
 function renderDetail(data) {
   state.currentRunData = data;
-  const statusText = summarizeStatus(data);
-  el.detailStatusPill.textContent = statusText;
-  el.detailStatusPill.className = `pill ${statusText}`;
+  const statusInfo = getDisplayStatusInfo(data);
+  el.detailStatusPill.textContent = statusInfo.text;
+  el.detailStatusPill.className = `pill ${statusInfo.key}`;
 
   el.stepList.innerHTML = "";
   const allSteps = [
-    "healthcheck", "discover_classes", "xml_to_yolo", "review_labels",
-    "split_dataset", "crop_augment", "publish_transfer",
-    "train", "poll_train", "review_result",
+    "label_transform_review",
+    "split_dataset",
+    "crop_window",
+    "augment_only",
+    "publish_transfer",
+    "train",
+    "poll_train",
+    "review_result",
+    "model_infer",
   ];
   for (const stepName of allSteps) {
-    const result = data.step_results?.[stepName];
+    const result = resolveStepResultForDisplay(stepName, data);
+    const techStepName = BUSINESS_STEP_TO_TECH_STEP[stepName] || stepName;
     const li = document.createElement("li");
     let cls = "";
-    let statusLabel = "pending";
+    let statusInfoForStep = { key: "pending", text: getStatusText("pending") };
     if (result) {
-      if (result.status === "ok") { cls = "step--ok"; statusLabel = "ok"; }
-      else if (result.status === "failed") { cls = "step--failed"; statusLabel = "failed"; }
-      else if (result.status === "skipped") { cls = "step--skipped"; statusLabel = "skipped"; }
+      if (result.status === "ok") { cls = "step--ok"; statusInfoForStep = { key: "ok", text: getStatusText("ok") }; }
+      else if (result.status === "failed") { cls = "step--failed"; statusInfoForStep = { key: "failed", text: getStatusText("failed") }; }
+      else if (result.status === "skipped") { cls = "step--skipped"; statusInfoForStep = { key: "skipped", text: getStatusText("skipped") }; }
+      const modelResultStatus = buildModelStepResultStatusInfo(stepName, result, data);
+      if (modelResultStatus) {
+        statusInfoForStep = modelResultStatus;
+      }
     }
-    if (data.current_step === stepName && !result) {
-      cls = "step--running"; statusLabel = "running";
+    if (data.current_step === techStepName && !result) {
+      cls = "step--running"; statusInfoForStep = { key: "running", text: getStatusText("running") };
     }
-    if (data.interrupted && data.current_step === stepName) {
-      cls = "step--waiting"; statusLabel = "waiting";
+    if (data.interrupted && data.pending_review && data.current_step === techStepName) {
+      cls = "step--waiting"; statusInfoForStep = { key: "waiting", text: getStatusText("waiting") };
+    }
+
+    const modelStatusForStep = buildModelTaskStatusInfo(data, { stepName });
+    if (modelStatusForStep && data.current_step === techStepName) {
+      statusInfoForStep = {
+        key: modelStatusForStep.key,
+        text: modelStatusForStep.text,
+      };
     }
     li.className = cls;
 
@@ -607,7 +1515,7 @@ function renderDetail(data) {
     details.className = "step-card";
     if (
       (data.interrupted && data.current_step === stepName) || 
-      (data.current_step === stepName && !result) ||
+      (data.current_step === techStepName && !result) ||
       (result && result.status === "failed")
     ) {
       details.open = true;
@@ -619,33 +1527,52 @@ function renderDetail(data) {
     header.className = "step-header";
     const name = document.createElement("span");
     name.className = "step__name";
-    name.textContent = stepName;
+    name.textContent = getStepMeta(stepName).label;
+    name.title = stepName;
     const pill = document.createElement("span");
-    pill.className = `pill ${statusLabel}`;
-    pill.textContent = statusLabel;
+    pill.className = `pill ${statusInfoForStep.key}`;
+    pill.textContent = statusInfoForStep.text;
     header.append(name, pill);
 
     const summaryText = document.createElement("div");
     summaryText.className = "step__summary";
-    summaryText.textContent = result?.summary || "点击展开查看该步骤详情、输入与输出。";
+    summaryText.textContent = buildStepSummary(stepName, result, result?.data || {});
     summaryLine.append(header, summaryText);
 
     const detailData = result?.data || {};
     const detailBody = document.createElement("div");
     detailBody.className = "step-detail";
+    const meta = getStepMeta(stepName);
+    const guide = document.createElement("div");
+    guide.className = "step-guide";
+    const guideGoal = document.createElement("p");
+    guideGoal.className = "step-guide-text";
+    guideGoal.textContent = `这一步的作用：${meta.goal}`;
+    const guideResult = document.createElement("p");
+    guideResult.className = "step-guide-text";
+    guideResult.textContent = `当前结论：${buildStepSummary(stepName, result, detailData)}`;
+    guide.append(guideGoal, guideResult);
+    detailBody.appendChild(guide);
     const factsWrap = document.createElement("div");
-    renderFacts(factsWrap, pickReadableFacts(detailData, 8));
+    renderFacts(
+      factsWrap,
+      buildStepFacts(stepName, result, detailData, data),
+      {
+        emptyText: "这个步骤没有额外需要你阅读的字段。通常只看上面的当前结论即可。",
+      },
+    );
     detailBody.appendChild(factsWrap);
 
     const rawDetails = document.createElement("details");
     rawDetails.className = "disclosure";
     const rawSummary = document.createElement("summary");
-    rawSummary.textContent = "高级信息：输入/输出与原始 JSON";
+    rawSummary.textContent = "排查信息（输入 / 输出 / 原始 JSON，仅异常时需要）";
     const { input, output } = extractStepIo(detailData);
     const rawPre = document.createElement("pre");
     rawPre.className = "step-detail-json";
     rawPre.textContent = prettyJson({
-      status: result?.status || statusLabel,
+      status: result?.status || statusInfoForStep.key,
+      model_task: data.model_task || null,
       summary: result?.summary || "",
       input,
       output,
@@ -666,32 +1593,71 @@ function renderDetail(data) {
     el.bottomActionArea.hidden = false;
     const pending = data.pending_review;
     const stepName = pending.step || data.current_step || "?";
-    el.reviewStep.textContent = pending.step || data.current_step || "?";
-    el.reviewHint.textContent = pending.instructions || "";
+    const reviewModel = buildReviewModel(stepName, pending, data);
+    el.reviewStep.textContent = reviewModel.title;
+    el.reviewHint.textContent = reviewModel.hint;
+    el.reviewHint.hidden = false;
+    el.reviewQuestion.textContent = reviewModel.question;
+    el.reviewAction.textContent = reviewModel.action;
+    el.reviewExpectation.textContent = reviewModel.expectation;
     const dataBlock = { ...(pending.review || {}) };
     el.reviewFacts.className = "review-facts";
-    renderFacts(el.reviewFacts, pickReadableFacts(dataBlock, 8));
+    renderFacts(el.reviewFacts, reviewModel.facts, {
+      emptyText: "这个审核点没有额外关键字段。通常只需要按上面的判断说明操作。",
+    });
+    el.reviewChecklist.innerHTML = "";
+    for (const item of reviewModel.checklist) {
+      const li = document.createElement("li");
+      li.textContent = item;
+      el.reviewChecklist.appendChild(li);
+    }
     el.reviewData.textContent = JSON.stringify(dataBlock, null, 2);
-    renderOverrideForm(stepName, dataBlock);
+    if (el.reviewAdvancedOverride) el.reviewAdvancedOverride.open = !state.reviewFocusMode;
+    if (el.reviewAdvancedData) el.reviewAdvancedData.open = false;
+    el.reviewCard.classList.toggle("focus-mode", !!state.reviewFocusMode);
+    renderOverrideForm(stepName, dataBlock, data.initial_params || {});
+  } else if (data.interrupted && !data.pending_review) {
+    el.reviewCard.hidden = false;
+    el.noReviewNote.hidden = true;
+    el.bottomActionArea.hidden = true;
+    el.reviewOverrideForm.hidden = true;
+    el.reviewOverrideForm.innerHTML = "";
+    el.reviewFacts.innerHTML = "";
+    el.reviewChecklist.innerHTML = "";
+    el.reviewStep.textContent = "待确认步骤";
+    el.reviewQuestion.textContent = "正在加载确认表单…";
+    el.reviewAction.textContent = "请稍候，系统会自动刷新并显示可修改参数。";
+    el.reviewExpectation.textContent = "确认表单就绪后，可直接修改参数并点击确认。";
+    el.reviewHint.textContent = "当前处于待确认状态，但审核数据尚未返回，正在重试获取。";
+    el.reviewHint.hidden = false;
+    if (!state.pollTimer && !state.eventSource && state.activeRunId) {
+      startPolling(state.activeRunId);
+    }
   } else {
     el.reviewCard.hidden = true;
     el.bottomActionArea.hidden = true;
     el.reviewOverrideForm.hidden = true;
     el.reviewOverrideForm.innerHTML = "";
     el.reviewFacts.innerHTML = "";
+    el.reviewChecklist.innerHTML = "";
+    el.reviewQuestion.textContent = "";
+    el.reviewAction.textContent = "";
+    el.reviewExpectation.textContent = "";
+    el.reviewHint.hidden = false;
+    el.reviewCard.classList.remove("focus-mode");
     el.noReviewNote.hidden = false;
     if (data.completed) {
       el.noReviewNote.textContent = data.error
-        ? `run 已终止：${data.error}`
-        : "run 已完成。";
+        ? `流程已终止：${data.error}`
+        : "流程已完成。建议重点查看最后的训练结果与输出目录。";
     } else {
-      el.noReviewNote.textContent = "当前没有待人工审核的步骤。";
+      el.noReviewNote.textContent = "当前不需要你操作，流程会自动继续。";
     }
   }
 
   const runIdx = state.runs.findIndex((r) => r.run_id === data.run_id);
   if (runIdx >= 0) {
-    state.runs[runIdx].last_status = statusText;
+    state.runs[runIdx].last_status = statusInfo;
     persistRuns();
     renderRunList();
   }
@@ -762,13 +1728,16 @@ async function confirmStep() {
   el.confirmBtn.disabled = true;
   setStatus(el.reviewStatus, "提交确认，等待流程推进...", "info");
   try {
-    const data = await fetchJson(
+    let data = await fetchJson(
       `${API_BASE}/${state.activeRunId}/confirm`,
       {
         method: "POST",
         body: JSON.stringify({ decision: "confirm", params_override: override }),
       },
     );
+    if (!data.completed && !data.interrupted) {
+      data = await waitForNextInterrupt(state.activeRunId, data);
+    }
     renderDetail(data);
     el.reviewOverride.value = "";
     setStatus(el.reviewStatus, "已确认，流程继续。", "success");
@@ -803,9 +1772,9 @@ async function refreshAll() {
   for (const run of state.runs) {
     try {
       const data = await fetchJson(`${API_BASE}/${run.run_id}`);
-      run.last_status = summarizeStatus(data);
+      run.last_status = getDisplayStatusInfo(data);
     } catch {
-      run.last_status = "unknown";
+      run.last_status = { key: "unknown", text: getStatusText("unknown") };
     }
   }
   persistRuns();
@@ -848,11 +1817,16 @@ function copyRunParams() {
   if (p.yolo_train_imgsz) el.trainImgsz.value = p.yolo_train_imgsz;
   if (typeof p.full_access === "boolean") el.fullAccess.checked = p.full_access;
 
-  if (p.class_name_map) {
-    el.classNameMap.value = JSON.stringify(p.class_name_map, null, 2);
-  }
-  if (p.final_classes) {
-    el.finalClasses.value = JSON.stringify(p.final_classes);
+  if (el.classMappingLaunch) {
+    mountClassMappingForm(el.classMappingLaunch, {
+      radioName: "launchIdxMode",
+      seed: {
+        class_name_map: p.class_name_map,
+        final_classes: p.final_classes,
+        class_index_map: p.class_index_map,
+        training_names: p.training_names,
+      },
+    });
   }
 
   updateProjectRootDirPreview();
@@ -875,15 +1849,79 @@ el.tabRemote.addEventListener("click", () => {
 el.settingsBtn.addEventListener("click", () => {
   el.settingLocalPath.value = state.settings.localPath || "";
   el.settingRemotePath.value = state.settings.remotePath || "";
+  if (el.settingLocalYoloTrainEnv) {
+    el.settingLocalYoloTrainEnv.value = state.settings.localYoloTrainEnv || "";
+  }
+  if (el.settingRemoteYoloTrainEnv) {
+    el.settingRemoteYoloTrainEnv.value = state.settings.remoteYoloTrainEnv || "";
+  }
+  if (el.settingsEnvStatus) {
+    el.settingsEnvStatus.textContent = "保存时会自动校验本地/远程 yolo_train_env 的 ultralytics/torch/cv2 等依赖。";
+  }
   el.settingsModal.hidden = false;
 });
 el.closeSettingsBtn.addEventListener("click", () => {
   el.settingsModal.hidden = true;
 });
-el.saveSettingsBtn.addEventListener("click", () => {
+el.saveSettingsBtn.addEventListener("click", async () => {
+  const nextLocalYoloEnv = String(el.settingLocalYoloTrainEnv?.value || "").trim();
+  const nextRemoteYoloEnv = String(el.settingRemoteYoloTrainEnv?.value || "").trim();
+  if (!nextLocalYoloEnv) {
+    if (el.settingsEnvStatus) el.settingsEnvStatus.textContent = "请至少填写本地 yolo_train_env。";
+    return;
+  }
+  if (el.settingsEnvStatus) el.settingsEnvStatus.textContent = "正在校验本地 yolo_train_env ...";
+  let validatedLocal;
+  try {
+    validatedLocal = await fetchJson("/api/v1/system/validate-yolo-env", {
+      method: "POST",
+      body: JSON.stringify({ yolo_train_env: nextLocalYoloEnv }),
+    });
+  } catch (exc) {
+    const backendDetail = exc?.responseBody?.detail;
+    const extra = typeof backendDetail === "string" ? `\n${backendDetail}` : "";
+    if (el.settingsEnvStatus) el.settingsEnvStatus.textContent = `本地 yolo_train_env 校验失败：${exc.message}${extra}`;
+    return;
+  }
+  if (!validatedLocal || validatedLocal.status !== "ok") {
+    if (el.settingsEnvStatus) {
+      el.settingsEnvStatus.textContent = `本地 yolo_train_env 校验失败：\n${validatedLocal?.stderr || validatedLocal?.stdout || "依赖不可用"}`;
+    }
+    return;
+  }
+  if (nextRemoteYoloEnv) {
+    if (el.settingsEnvStatus) el.settingsEnvStatus.textContent = "正在校验远程 yolo_train_env ...";
+    let validatedRemote;
+    try {
+      validatedRemote = await fetchJson("/api/v1/system/validate-yolo-env", {
+        method: "POST",
+        body: JSON.stringify({ yolo_train_env: nextRemoteYoloEnv }),
+      });
+    } catch (exc) {
+      const backendDetail = exc?.responseBody?.detail;
+      const extra = typeof backendDetail === "string" ? `\n${backendDetail}` : "";
+      if (el.settingsEnvStatus) el.settingsEnvStatus.textContent = `远程 yolo_train_env 校验失败：${exc.message}${extra}`;
+      return;
+    }
+    if (!validatedRemote || validatedRemote.status !== "ok") {
+      if (el.settingsEnvStatus) {
+        el.settingsEnvStatus.textContent = `远程 yolo_train_env 校验失败：\n${validatedRemote?.stderr || validatedRemote?.stdout || "依赖不可用"}`;
+      }
+      return;
+    }
+  }
+
   state.settings.localPath = el.settingLocalPath.value.trim();
   state.settings.remotePath = el.settingRemotePath.value.trim();
+  state.settings.localYoloTrainEnv = nextLocalYoloEnv;
+  state.settings.remoteYoloTrainEnv = nextRemoteYoloEnv;
   saveJson("pipeline_settings", state.settings);
+  if (el.settingsEnvStatus) {
+    el.settingsEnvStatus.textContent = nextRemoteYoloEnv
+      ? "本地/远程 yolo_train_env 校验通过，已保存。"
+      : "本地 yolo_train_env 校验通过，已保存（远程未填写）。";
+  }
+  refreshTrainEnvByMode();
   el.settingsModal.hidden = true;
   showLaunchView(); // Update form if needed
   updateExecutionModeSettingHint();
@@ -904,12 +1942,25 @@ el.detailCopyBtn.addEventListener("click", copyRunParams);
 el.detailAbortBtn.addEventListener("click", abortCurrentStep);
 el.confirmBtn.addEventListener("click", confirmStep);
 el.abortStepBtn.addEventListener("click", abortCurrentStep);
+el.reviewFocusMode?.addEventListener("change", () => {
+  state.reviewFocusMode = !!el.reviewFocusMode.checked;
+  saveJson("pipeline_review_focus_mode", state.reviewFocusMode);
+  if (state.currentRunData) {
+    renderDetail(state.currentRunData);
+  }
+});
 
 renderRunList();
 loadSops();
+if (el.classMappingLaunch) {
+  mountClassMappingForm(el.classMappingLaunch, { radioName: "launchIdxMode", seed: {} });
+}
 if (state.runs[0]) {
   openRun(state.runs[0].run_id);
 } else {
   showLaunchView();
 }
 updateExecutionModeSettingHint();
+if (el.reviewFocusMode) {
+  el.reviewFocusMode.checked = !!state.reviewFocusMode;
+}

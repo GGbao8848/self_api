@@ -65,11 +65,15 @@ def isolated_runtime(monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("SELF_API_STORAGE_ROOT", "./tmp_datasets/test_storage")
     get_settings.cache_clear()
     task_manager._TASKS.clear()
+    task_manager._TASK_QUEUES.clear()
+    task_manager._ACTIVE_QUEUED_TASKS.clear()
     task_manager._CALLBACK_URL_LOCKS.clear()
 
     yield storage_dir
 
     task_manager._TASKS.clear()
+    task_manager._TASK_QUEUES.clear()
+    task_manager._ACTIVE_QUEUED_TASKS.clear()
     task_manager._CALLBACK_URL_LOCKS.clear()
     get_settings.cache_clear()
     if storage_dir.exists():

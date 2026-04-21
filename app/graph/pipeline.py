@@ -3,7 +3,7 @@
 Graph 节点顺序：
   healthcheck → discover_classes → xml_to_yolo → review_labels
   → split_dataset → crop_augment
-  → publish_transfer → train → poll_train → review_result
+  → publish_transfer → train → poll_train → review_result → model_infer
 
 注：data.yaml 由 publish_transfer 内部的 publish_yolo_dataset 服务生成，
     不再单独走 build_yaml 节点（build_yolo_yaml API 已弃用）。
@@ -40,6 +40,7 @@ from app.graph.nodes import (
     node_publish_transfer,
     node_review_labels,
     node_review_result,
+    node_model_infer,
     node_split_dataset,
     node_train,
     node_xml_to_yolo,
@@ -98,6 +99,7 @@ def build_graph() -> StateGraph:
     g.add_node("train",             node_train)
     g.add_node("poll_train",        node_poll_train)
     g.add_node("review_result",     node_review_result)
+    g.add_node("model_infer",       node_model_infer)
 
     g.set_entry_point("healthcheck")
 
@@ -111,6 +113,7 @@ def build_graph() -> StateGraph:
         ("publish_transfer", "train"),
         ("train",            "poll_train"),
         ("poll_train",       "review_result"),
+        ("review_result",    "model_infer"),
     ]:
         g.add_conditional_edges(
             src,
@@ -118,7 +121,7 @@ def build_graph() -> StateGraph:
             {"end": END, "continue": dst},
         )
 
-    g.add_edge("review_result", END)
+    g.add_edge("model_infer", END)
 
     return g
 

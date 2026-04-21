@@ -119,7 +119,8 @@
                 <div class="field-grid">
                   <div>
                     <label for="trainEnv">yolo_train_env <span class="req">*</span></label>
-                    <input id="trainEnv" value="yolo_pose" autocomplete="off">
+                    <input id="trainEnv" value="yolo_pose" autocomplete="off" readonly>
+                    <div class="inline-note">来自工作区设置</div>
                   </div>
                   <div>
                     <label for="trainModel">model</label>
@@ -147,10 +148,7 @@
 
               <fieldset class="fieldset-plain" id="classMapFieldset">
                 <legend>类别映射（可选，也可在 discover_classes 审核点填）</legend>
-                <label for="classNameMap">class_name_map（JSON）</label>
-                <textarea id="classNameMap" rows="2" placeholder='{"louyou1": "louyou", "louyou2": "louyou"}'></textarea>
-                <label for="finalClasses">final_classes（JSON 数组）</label>
-                <input id="finalClasses" placeholder='["louyou"]' autocomplete="off">
+                <div id="classMappingLaunch" class="class-mapping-mount"></div>
               </fieldset>
 
               <div class="row submit-actions">
@@ -180,19 +178,47 @@
       <div class="bottom-action-area" id="bottomActionArea" hidden>
         <div class="review-panel" id="reviewCard">
           <div class="review-header">
-            <h3>等待人工审核: <code id="reviewStep"></code></h3>
+            <h3>待确认步骤</h3>
+            <p class="review-step-name" id="reviewStep"></p>
             <p class="review-hint" id="reviewHint"></p>
+            <label class="choice-row review-focus-toggle">
+              <input type="checkbox" id="reviewFocusMode" checked>
+              <span>只显示判断所需信息</span>
+            </label>
           </div>
           <div class="review-content">
-            <div id="reviewFacts" class="review-facts"></div>
+            <div class="review-brief-grid">
+              <div class="review-brief-card">
+                <div class="review-brief-label">这一步在确认什么</div>
+                <p class="review-brief-text" id="reviewQuestion"></p>
+              </div>
+              <div class="review-brief-card">
+                <div class="review-brief-label">你现在主要看什么</div>
+                <p class="review-brief-text" id="reviewAction"></p>
+              </div>
+              <div class="review-brief-card review-brief-card--full">
+                <div class="review-brief-label">预计结果</div>
+                <p class="review-brief-text" id="reviewExpectation"></p>
+              </div>
+            </div>
+
+            <div class="review-section">
+              <div class="review-section-title">当前关键信息</div>
+              <div id="reviewFacts" class="review-facts"></div>
+            </div>
+
+            <div class="review-section">
+              <div class="review-section-title">判断建议</div>
+              <ul id="reviewChecklist" class="review-checklist"></ul>
+            </div>
             <div id="reviewOverrideForm" class="review-override-form" hidden></div>
             
-            <details class="disclosure">
-              <summary>高级参数：手动编辑 params_override（JSON）</summary>
+            <details class="disclosure" id="reviewAdvancedOverride">
+              <summary>高级参数编辑（直接修改 params_override）</summary>
               <textarea id="reviewOverride" rows="3" placeholder='{"class_name_map": {"louyou1": "louyou"}}'></textarea>
             </details>
-            <details class="disclosure">
-              <summary>高级信息：审核原始数据（JSON）</summary>
+            <details class="disclosure" id="reviewAdvancedData">
+              <summary>排查信息（原始 JSON，仅异常时需要）</summary>
               <pre class="review-data" id="reviewData"></pre>
             </details>
           </div>
@@ -225,7 +251,16 @@
               <label for="settingRemotePath">远程训练工作区路径</label>
               <input id="settingRemotePath" placeholder="/data/remote_workspace" autocomplete="off">
             </div>
+            <div>
+              <label for="settingLocalYoloTrainEnv">本地 yolo_train_env（环境名 / 环境目录 / python路径）</label>
+              <input id="settingLocalYoloTrainEnv" placeholder="/home/qzq/anaconda3/envs/v11_sk" autocomplete="off">
+            </div>
+            <div>
+              <label for="settingRemoteYoloTrainEnv">远程 yolo_train_env（环境名 / 环境目录 / python路径）</label>
+              <input id="settingRemoteYoloTrainEnv" placeholder="/home/qzq/anaconda3/envs/v11_sk" autocomplete="off">
+            </div>
           </div>
+          <div class="inline-note" id="settingsEnvStatus">保存时会自动校验 ultralytics/torch/cv2 等依赖。</div>
         </fieldset>
       </div>
       <div class="modal-footer">

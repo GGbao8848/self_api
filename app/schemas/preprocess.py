@@ -112,6 +112,7 @@ class AsyncTaskStatusResponse(BaseModel):
     callback_error: str | None = None
     callback_events: list[AsyncTaskCallbackEvent] = Field(default_factory=list)
     artifacts: list[ArtifactSummary] = Field(default_factory=list)
+    queue_position: int | None = None
 
 
 class AnnotateVisualizeRequest(BaseModel):
@@ -218,7 +219,10 @@ class XmlToYoloRequest(BaseModel):
     recursive: bool = Field(default=True, description="Search xml files recursively")
     classes: list[str] | None = Field(
         default=None,
-        description="Optional fixed class list; when omitted, classes are inferred",
+        description=(
+            "Optional fixed class list defining index order (index i = classes[i]). "
+            "Cannot be combined with class_index_map."
+        ),
     )
     class_name_map: dict[str, str] | None = Field(
         default=None,
@@ -226,6 +230,23 @@ class XmlToYoloRequest(BaseModel):
             "Optional many-to-one rename map applied before class indexing. "
             "Key = original XML label name, value = target name. "
             "Example: {\"louyou1\": \"louyou\", \"louyou2\": \"louyou\"} merges all variants into one class."
+        ),
+    )
+    class_index_map: dict[str, int] | None = Field(
+        default=None,
+        description=(
+            "After class_name_map, map each logical class name to a YOLO class id (non-negative int). "
+            "Values must be a contiguous range 0..N. Multiple names may share one id (merge). "
+            "Mutually exclusive with `classes`. Use `training_names` for names written to classes.txt / data.yaml."
+        ),
+    )
+    training_names: list[str] | None = Field(
+        default=None,
+        description=(
+            "Names for YOLO indices 0..N (one line per id in classes.txt and Ultralytics `names`). "
+            "With class_index_map: length must be max(id)+1; overrides auto-picked names. "
+            "With `classes` (and no class_index_map): same length as classes to rename for YAML only; "
+            "class_to_id keys stay the logical names from `classes`."
         ),
     )
     include_difficult: bool = Field(
@@ -244,6 +265,19 @@ class XmlToYoloRequest(BaseModel):
         default=True,
         description="Whether to overwrite existing label files",
     )
+
+    @model_validator(mode="after")
+    def _xml_to_yolo_class_options(self) -> "XmlToYoloRequest":
+        if self.class_index_map is not None and self.classes is not None:
+            raise ValueError("classes 与 class_index_map 不能同时指定，请只选一种索引方式")
+        tn = self.training_names
+        if tn is not None:
+            if self.class_index_map is None and self.classes is None:
+                raise ValueError("training_names 须与 classes 或 class_index_map 同时使用")
+        if tn is not None and self.classes is not None and self.class_index_map is None:
+            if len(tn) != len(self.classes):
+                raise ValueError("training_names 与 classes 长度必须一致（按索引一一对应显示名）")
+        return self
 
 
 class XmlToYoloFileDetail(BaseModel):
@@ -1325,6 +1359,117 @@ class YoloTrainResponse(BaseModel):
     exit_code: int
     stdout: str
     stderr: str
+
+
+class YoloExportRequest(BaseModel):
+    best_pt_path: str = Field(
+        ...,
+        description="Path to trained best.pt weights file",
+    )
+    project_root_dir: str = Field(
+        ...,
+        description="Working directory for the export subprocess (shell cwd)",
+    )
+    yolo_train_env: str = Field(
+        ...,
+        description="Conda environment name used to run yolo export",
+    )
+    overwrite: bool = Field(
+        default=True,
+        description="Whether to overwrite existing exported torchscript file",
+    )
+
+
+class YoloExportAsyncRequest(YoloExportRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class YoloExportResponse(BaseModel):
+    status: Literal["ok", "failed"]
+    command: str
+    cwd: str
+    best_pt_path: str
+    args_yaml_path: str
+    imgsz: int
+    dataset_yaml: str
+    export_file_path: str
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+class YoloInferRequest(BaseModel):
+    yolo_train_env: str = Field(..., description="Conda environment name to run inference")
+    model_path: str = Field(..., description="Path to .torchscript model")
+    source_path: str | None = Field(
+        default=None,
+        description="Single image path or root directory path (recursive when recursive=true)",
+    )
+    source_paths: list[str] | None = Field(
+        default=None,
+        description="Multiple image/dir paths; merged with source_path",
+    )
+    project: str = Field(..., description="Infer project output root, e.g. <detector>/runs/infer")
+    name: str = Field(..., description="Infer run name under project")
+    imgsz: int = Field(default=640, ge=1, description="Inference image size")
+    conf: float = Field(default=0.25, ge=0.0, le=1.0, description="Confidence threshold")
+    iou: float = Field(default=0.7, ge=0.0, le=1.0, description="NMS IoU threshold")
+    classes: list[int] | None = Field(default=None, description="Optional class id filter list")
+    device: str | None = Field(default=None, description="Optional device, e.g. 0 or cpu")
+    recursive: bool = Field(default=True, description="Whether to recursively scan source directories")
+    save_labels: bool = Field(default=True, description="Write YOLO txt labels for detected images")
+    save_no_detect: bool = Field(default=True, description="Save images with no detections into no_detect/")
+    add_conf_prefix: bool = Field(default=True, description="Prefix output filenames with max confidence")
+    draw_label: bool = Field(default=True, description="Draw class/conf text on result images")
+    overwrite: bool = Field(default=True, description="Overwrite existing infer run directory")
+
+    @model_validator(mode="after")
+    def _validate_sources(self) -> "YoloInferRequest":
+        merged_sources = [*(self.source_paths or []), *([self.source_path] if self.source_path else [])]
+        if not merged_sources:
+            raise ValueError("source_path 与 source_paths 至少提供一个")
+        cleaned = [str(p).strip() for p in merged_sources if str(p).strip()]
+        if not cleaned:
+            raise ValueError("source_path/source_paths 不能全为空")
+        self.source_paths = cleaned
+        self.source_path = cleaned[0]
+        return self
+
+
+class YoloInferAsyncRequest(YoloInferRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class YoloInferResponse(BaseModel):
+    status: Literal["ok", "failed"]
+    model_path: str
+    output_dir: str
+    run_args_path: str
+    summary_path: str
+    total_images: int
+    detected_images: int
+    no_detect_images: int
+    result_images: int
+    labels_written: int
+    classes_filter: list[int] | None = None
 
 
 class YoloAugmentRequest(BaseModel):

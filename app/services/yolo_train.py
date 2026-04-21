@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from app.schemas.preprocess import YoloTrainRequest, YoloTrainResponse
+from app.services.yolo_env import resolve_env_python
 from app.services.yolo_model_resolver import resolve_local_yolo_model
 
 
@@ -21,21 +22,36 @@ def run_yolo_train(request: YoloTrainRequest) -> YoloTrainResponse:
 
     resolved_model = resolve_local_yolo_model(request.model, cwd=root)
 
-    cmd: list[str] = [
-        "conda",
-        "run",
-        "-n",
-        request.yolo_train_env,
-        "--no-capture-output",
-        "yolo",
-        "train",
-        f"model={resolved_model}",
-        f"data={str(yaml_p)}",
-        f"epochs={request.epochs}",
-        f"imgsz={request.imgsz}",
-        f"project={request.project}",
-        f"name={request.name}",
-    ]
+    env_python = resolve_env_python(request.yolo_train_env)
+    if env_python:
+        cmd: list[str] = [
+            env_python,
+            "-m",
+            "ultralytics",
+            "train",
+            f"model={resolved_model}",
+            f"data={str(yaml_p)}",
+            f"epochs={request.epochs}",
+            f"imgsz={request.imgsz}",
+            f"project={request.project}",
+            f"name={request.name}",
+        ]
+    else:
+        cmd = [
+            "conda",
+            "run",
+            "-n",
+            request.yolo_train_env,
+            "--no-capture-output",
+            "yolo",
+            "train",
+            f"model={resolved_model}",
+            f"data={str(yaml_p)}",
+            f"epochs={request.epochs}",
+            f"imgsz={request.imgsz}",
+            f"project={request.project}",
+            f"name={request.name}",
+        ]
     if request.batch is not None:
         cmd.append(f"batch={request.batch}")
 

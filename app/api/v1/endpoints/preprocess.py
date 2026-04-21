@@ -50,6 +50,12 @@ from app.schemas.preprocess import (
     PublishYoloDatasetRequest,
     PublishYoloDatasetResponse,
     YoloTrainAsyncRequest,
+    YoloExportAsyncRequest,
+    YoloExportRequest,
+    YoloExportResponse,
+    YoloInferAsyncRequest,
+    YoloInferRequest,
+    YoloInferResponse,
     YoloTrainRequest,
     YoloTrainResponse,
     YoloSlidingWindowCropAsyncRequest,
@@ -86,6 +92,8 @@ from app.services.split_yolo_dataset import run_split_yolo_dataset
 from app.services.task_manager import get_task, submit_task
 from app.services.publish_yolo_dataset import run_publish_yolo_dataset
 from app.services.yolo_train import run_yolo_train
+from app.services.yolo_export import run_yolo_export
+from app.services.yolo_infer import run_yolo_infer
 from app.services.yolo_augment import run_yolo_augment
 from app.services.annotation_visualize import run_annotate_visualize
 from app.services.xml_to_yolo import run_xml_to_yolo
@@ -778,6 +786,81 @@ def yolo_train_async(
         runner=lambda: run_yolo_train(sync_payload).model_dump(),
         callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
+        queue_key="local_yolo_train",
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/yolo-export", response_model=YoloExportResponse)
+def yolo_export(payload: YoloExportRequest) -> YoloExportResponse:
+    try:
+        return run_yolo_export(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/yolo-export/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def yolo_export_async(
+    payload: YoloExportAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "yolo_export"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = YoloExportRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_yolo_export(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+        queue_key="local_yolo_train",
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/yolo-infer", response_model=YoloInferResponse)
+def yolo_infer(payload: YoloInferRequest) -> YoloInferResponse:
+    try:
+        return run_yolo_infer(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/yolo-infer/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def yolo_infer_async(
+    payload: YoloInferAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "yolo_infer"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = YoloInferRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: run_yolo_infer(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+        queue_key="local_yolo_infer",
     )
     return _build_async_submit_response(
         request,
