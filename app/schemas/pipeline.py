@@ -33,6 +33,10 @@ class PipelineRunRequest(BaseModel):
         default=False,
         description="训练成功后是否自动导出 torchscript（走 yolo-export 逻辑）",
     )
+    enable_sliding_window: bool = Field(
+        default=False,
+        description="是否启用滑窗裁剪和增强流程",
+    )
     split_mode: Literal["train_val", "train_val_test", "train_only"] = Field(default="train_val")
     train_ratio: float = Field(default=0.85, gt=0.0, le=1.0)
     val_ratio: float = Field(default=0.15, ge=0.0, le=1.0)
@@ -147,6 +151,7 @@ class SopRunRequest(BaseModel):
     yolo_train_epochs: int | None = Field(default=None, ge=1)
     yolo_train_imgsz: int | None = Field(default=None, ge=1)
     yolo_export_after_train: bool | None = None
+    enable_sliding_window: bool | None = None
     split_mode: Literal["train_val", "train_val_test", "train_only"] | None = None
     train_ratio: float | None = Field(default=None, gt=0.0, le=1.0)
     val_ratio: float | None = Field(default=None, ge=0.0, le=1.0)

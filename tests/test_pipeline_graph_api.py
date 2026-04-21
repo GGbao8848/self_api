@@ -69,11 +69,13 @@ def patch_all_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
         "xml_to_yolo": "node_xml_to_yolo",
         "review_labels": "node_review_labels",
         "split_dataset": "node_split_dataset",
-        "crop_augment": "node_crop_augment",
+        "crop_window": "node_crop_window",
+        "augment_only": "node_augment_only",
         "publish_transfer": "node_publish_transfer",
         "train": "node_train",
         "poll_train": "node_poll_train",
         "review_result": "node_review_result",
+        "export_model": "node_export_model",
         "model_infer": "node_model_infer",
     }
     for step, attr in step_to_attr.items():
@@ -92,12 +94,14 @@ def patch_all_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
         ("discover_classes", "xml_to_yolo"),
         ("xml_to_yolo", "review_labels"),
         ("review_labels", "split_dataset"),
-        ("split_dataset", "crop_augment"),
-        ("crop_augment", "publish_transfer"),
+        ("split_dataset", "crop_window"),
+        ("crop_window", "augment_only"),
+        ("augment_only", "publish_transfer"),
         ("publish_transfer", "train"),
         ("train", "poll_train"),
         ("poll_train", "review_result"),
-        ("review_result", "model_infer"),
+        ("review_result", "export_model"),
+        ("export_model", "model_infer"),
     ]
     for src, dst in edges:
         g.add_conditional_edges(
@@ -153,7 +157,21 @@ def test_pipeline_full_access_runs_to_completion(
     assert data["completed"] is True
     assert data["interrupted"] is False
     assert data["error"] is None
-    for step in DEFAULT_GATES:
+    for step in (
+        "healthcheck",
+        "discover_classes",
+        "xml_to_yolo",
+        "review_labels",
+        "split_dataset",
+        "crop_window",
+        "augment_only",
+        "publish_transfer",
+        "train",
+        "poll_train",
+        "review_result",
+        "export_model",
+        "model_infer",
+    ):
         assert step in data["step_results"]
         assert data["step_results"][step]["status"] == "ok"
 
@@ -229,6 +247,7 @@ def test_pipeline_step_gate_override_to_auto(
         "step_gates": {
             "discover_classes": {"mode": "auto"},
             "review_labels": {"mode": "auto"},
+            "split_dataset": {"mode": "auto"},
         },
     }
     response = client.post("/api/v1/pipeline/run", json=payload)
@@ -239,7 +258,8 @@ def test_pipeline_step_gate_override_to_auto(
     assert data["step_results"]["xml_to_yolo"]["status"] == "ok"
     assert data["step_results"]["review_labels"]["status"] == "ok"
     assert data["step_results"]["split_dataset"]["status"] == "ok"
-    assert data["step_results"]["crop_augment"]["status"] == "ok"
+    assert "crop_window" not in data["step_results"]
+    assert "augment_only" not in data["step_results"]
     assert "publish_transfer" not in data["step_results"]
 
 

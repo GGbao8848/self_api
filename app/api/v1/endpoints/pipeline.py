@@ -71,6 +71,7 @@ def _build_initial_state(req: PipelineRunRequest, run_id: str) -> PipelineState:
         yolo_train_epochs=req.yolo_train_epochs,
         yolo_train_imgsz=req.yolo_train_imgsz,
         yolo_export_after_train=req.yolo_export_after_train,
+        enable_sliding_window=req.enable_sliding_window,
         split_mode=req.split_mode,
         train_ratio=req.train_ratio,
         val_ratio=req.val_ratio,
@@ -90,6 +91,8 @@ def _build_initial_state(req: PipelineRunRequest, run_id: str) -> PipelineState:
         current_step=None,
         pending_review=None,
         train_task_id=None,
+        crop_output_dir=None,
+        export_file_path=None,
         yaml_path=None,
         labels_dir=None,
         split_output_dir=None,
@@ -122,6 +125,18 @@ def _extract_pending_review(gs: Any) -> dict[str, Any] | None:
     return None
 
 
+def _is_waiting_for_confirmation(gs: Any) -> bool:
+    """判断当前 run 是否在等待人工确认。
+
+    兼容两种表现：
+    - gs.next 非空（常见）
+    - gs.tasks[*].interrupts 存在 value（某些节点内多次 interrupt 的场景）
+    """
+    if bool(getattr(gs, "next", ())):
+        return True
+    return _extract_pending_review(gs) is not None
+
+
 def _to_status_response(run_id: str) -> PipelineStatusResponse:
     gs = _get_graph_state(run_id)
     # LangGraph 对未知 thread_id 也返回空 StateSnapshot，需要额外校验
@@ -129,7 +144,7 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
         raise HTTPException(status_code=404, detail=f"pipeline run not found: {run_id}")
 
     state: PipelineState = gs.values
-    interrupted = bool(gs.next)  # LangGraph: gs.next 非空表示被 interrupt 暂停
+    interrupted = _is_waiting_for_confirmation(gs)
 
     step_results: dict[str, PipelineStepStatus] = {}
     for step, result in (state.get("step_results") or {}).items():
@@ -174,6 +189,7 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
             "yolo_train_epochs": state.get("yolo_train_epochs"),
             "yolo_train_imgsz": state.get("yolo_train_imgsz"),
             "yolo_export_after_train": state.get("yolo_export_after_train"),
+            "enable_sliding_window": state.get("enable_sliding_window"),
             "full_access": state.get("full_access"),
             "class_name_map": state.get("class_name_map"),
             "final_classes": state.get("final_classes"),
@@ -279,7 +295,7 @@ def confirm_pipeline_step(run_id: str, body: PipelineConfirmRequest) -> Pipeline
     gs = _get_graph_state(run_id)
     if gs is None or not gs.values or not gs.values.get("run_id"):
         raise HTTPException(status_code=404, detail=f"pipeline run not found: {run_id}")
-    if not gs.next:
+    if not _is_waiting_for_confirmation(gs):
         raise HTTPException(status_code=409, detail="pipeline is not waiting for confirmation")
 
     config = _build_config(run_id)
@@ -308,6 +324,18 @@ def abort_pipeline(run_id: str) -> PipelineStatusResponse:
             compiled_graph.invoke(
                 Command(resume={"decision": "abort", "params_override": {}}),
                 config,
+            )
+        except Exception:
+            pass
+    else:
+        # 非 interrupt 等待态也允许中止：写入终止标志，后续边路由会在当前节点结束后尽快停止。
+        try:
+            compiled_graph.update_state(
+                config,
+                {
+                    "error": "用户手动中止流程",
+                    "completed": True,
+                },
             )
         except Exception:
             pass

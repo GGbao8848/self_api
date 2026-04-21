@@ -24,10 +24,12 @@ STEP_NAMES = [
     "xml_to_yolo",
     "review_labels",       # 转换后审核 label 分布
     "split_dataset",
-    "crop_augment",
+    "crop_window",
+    "augment_only",
     "publish_transfer",    # 内置 data.yaml 生成（原 build_yaml 已并入此步）
     "train",
     "review_result",       # 训练完成后人工验收
+    "export_model",        # 训练成功后导出 torchscript
     "model_infer",         # 模型导出后执行批量推理
 ]
 
@@ -36,11 +38,13 @@ DEFAULT_GATES: dict[str, GateMode] = {
     "discover_classes":  "manual",   # 展示类名，让用户确认/填写映射
     "xml_to_yolo":       "auto",
     "review_labels":     "manual",   # 展示 label 统计，确认后才划分
-    "split_dataset":     "auto",
-    "crop_augment":      "auto",
+    "split_dataset":     "manual",   # 划分前确认 train/val 参数与输出目录
+    "crop_window":       "manual",   # 滑窗裁剪前确认参数
+    "augment_only":      "manual",   # 增强前确认参数
     "publish_transfer":  "manual",   # 传输/发布前确认（含 yaml 生成）
     "train":             "manual",   # 训练启动前最终确认
     "review_result":     "manual",   # 训练完成后人工验收
+    "export_model":      "auto",
     "model_infer":       "manual",   # 推理参数确认
 }
 
@@ -75,6 +79,7 @@ class PipelineState(TypedDict, total=False):
     yolo_train_epochs: int
     yolo_train_imgsz: int
     yolo_export_after_train: bool
+    enable_sliding_window: bool
     split_mode: Literal["train_val", "train_val_test", "train_only"]
     train_ratio: float
     val_ratio: float
@@ -103,8 +108,10 @@ class PipelineState(TypedDict, total=False):
     labels_dir: str | None
     dataset_version: str | None              # split 后版本目录名
     split_output_dir: str | None
+    crop_output_dir: str | None
     yaml_path: str | None                    # publish_transfer 内置生成
     train_task_id: str | None                # async train task id
+    export_file_path: str | None
 
     # ── 流程控制 ──────────────────────────────────────────────
     current_step: str | None

@@ -111,16 +111,20 @@ def test_run_sop_user_step_gates_override_sop_gates(
             "detector_name": "d",
             "project_root_dir": "/tmp/ws",
             "yolo_train_env": "env",
-            "step_gates": {
-                "discover_classes": {"mode": "auto"},
-                "review_labels": {"mode": "auto"},
-                "train": {"mode": "auto"},
-                "review_result": {"mode": "auto"},
+                "step_gates": {
+                    "discover_classes": {"mode": "auto"},
+                    "review_labels": {"mode": "auto"},
+                    "split_dataset": {"mode": "auto"},
+                    "crop_window": {"mode": "auto"},
+                    "augment_only": {"mode": "auto"},
+                    "publish_transfer": {"mode": "auto"},
+                    "train": {"mode": "auto"},
+                    "review_result": {"mode": "auto"},
                     "model_infer": {"mode": "auto"},
+                },
             },
-        },
-    )
+        )
     data = response.json()
-    for step in ("discover_classes", "review_labels", "train", "review_result"):
+    for step in ("discover_classes", "review_labels", "train", "review_result", "export_model"):
         assert step in data["step_results"], f"{step} 应已执行，但未在 step_results 中"
     assert data["completed"] is True

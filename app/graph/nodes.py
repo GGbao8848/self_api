@@ -45,7 +45,7 @@ def _maybe_interrupt(state: PipelineState, step: str, review_data: dict[str, Any
     user_response: dict[str, Any] = interrupt({
         "step": step,
         "review": review_data,
-        "instructions": "确认后点击 confirm（可在 params_override 中修改参数），中止请发 abort。",
+        "instructions": "",
     })
     return user_response
 
@@ -312,15 +312,50 @@ def node_split_dataset(state: PipelineState) -> dict[str, Any]:
     detector_name = state.get("detector_name", "unknown")
     output_dir = f"{state['original_dataset']}/{detector_name}_{ts}"
 
+    review_data = {
+        "input_dir": state["original_dataset"],
+        "output_dir": output_dir,
+        "mode": state.get("split_mode", "train_val"),
+        "train_ratio": state.get("train_ratio", 0.85),
+        "val_ratio": state.get("val_ratio", 0.15),
+        "shuffle": True,
+        "seed": 42,
+        "copy_files": True,
+        "hint": "确认数据划分参数和输出目录无误后继续。",
+    }
+    user_response = _maybe_interrupt(state, "split_dataset", review_data)
+    if user_response and user_response.get("decision") == "abort":
+        return {
+            **_set_step_result(state, "split_dataset", StepResult(
+                status="skipped", summary="用户中止", data={}
+            )),
+            "error": "用户在 split_dataset 中止流程",
+            "completed": True,
+        }
+    override = (user_response or {}).get("params_override") or {}
+    final_params = _merge_override(
+        {
+            "input_dir": state["original_dataset"],
+            "output_dir": output_dir,
+            "mode": state.get("split_mode", "train_val"),
+            "train_ratio": state.get("train_ratio", 0.85),
+            "val_ratio": state.get("val_ratio", 0.15),
+            "shuffle": True,
+            "seed": 42,
+            "copy_files": True,
+        },
+        override,
+    )
+
     req = SplitYoloDatasetRequest(
-        input_dir=state["original_dataset"],
-        output_dir=output_dir,
-        mode=state.get("split_mode", "train_val"),
-        train_ratio=state.get("train_ratio", 0.85),
-        val_ratio=state.get("val_ratio", 0.15),
-        shuffle=True,
-        seed=42,
-        copy_files=True,
+        input_dir=final_params["input_dir"],
+        output_dir=final_params["output_dir"],
+        mode=final_params["mode"],
+        train_ratio=final_params["train_ratio"],
+        val_ratio=final_params["val_ratio"],
+        shuffle=final_params["shuffle"],
+        seed=final_params["seed"],
+        copy_files=final_params["copy_files"],
     )
     try:
         resp = run_split_yolo_dataset(req)
@@ -338,71 +373,84 @@ def node_split_dataset(state: PipelineState) -> dict[str, Any]:
         **_set_step_result(state, "split_dataset", StepResult(
             status="ok",
             summary=f"划分完成 → {resp.output_dir}",
-            data=resp.model_dump(),
+            data={**resp.model_dump(), "effective_params": final_params},
         )),
         "split_output_dir": resp.output_dir,
         "dataset_version": version,
     }
 
 
-def node_crop_augment(state: PipelineState) -> dict[str, Any]:
-    """滑窗裁剪（train+val 切小图，避免数据泄漏）+ 对 crop/train 做增强。
+def _sliding_window_enabled(state: PipelineState) -> bool:
+    return bool(state.get("enable_sliding_window", False))
 
-    原始 split 下是大图；此步完成后 crop/ 即构成实际的数据集版本来源：
-      {split_dir}/
-        classes.txt
-        train/{images,labels}              ← 原始大图 train（不参与训练）
-        val/{images,labels}                ← 原始大图 val
-        crop/
-          classes.txt                       ← 从 split_dir 复制
-          train/
-            images/, labels/                ← 原始 train 大图滑窗而来
-            augment/
-              images/, labels/              ← 对 crop/train 的离线增强
-          val/
-            images/, labels/                ← 原始 val 大图滑窗而来
 
-    数据泄漏防护：sliding_window 分别对 split_dir/train、split_dir/val 切窗口，
-    同一张大图的所有 patches 始终归属同一 split。
-    最终 publish_transfer 将以 {split_dir}/crop 为 input_dir 发布数据集版本。
-    """
+def node_crop_window(state: PipelineState) -> dict[str, Any]:
+    """对 split 后的 train/val 分别执行滑窗裁剪。"""
     import shutil as _shutil
     from pathlib import Path as _Path
     from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
-    from app.services.yolo_augment import run_yolo_augment
-    from app.schemas.preprocess import YoloSlidingWindowCropRequest, YoloAugmentRequest
+    from app.schemas.preprocess import YoloSlidingWindowCropRequest
 
     split_dir = state.get("split_output_dir", "")
-    summaries: list[str] = []
     data_payload: dict[str, Any] = {"split_dir": split_dir}
+
+    if not _sliding_window_enabled(state):
+        return _set_step_result(state, "crop_window", StepResult(
+            status="skipped",
+            summary="当前 SOP 未启用滑窗裁剪",
+            data=data_payload,
+        ))
 
     if not split_dir or not _Path(split_dir).is_dir():
         return {
-            **_set_step_result(state, "crop_augment", StepResult(
+            **_set_step_result(state, "crop_window", StepResult(
                 status="failed",
                 summary=f"split_output_dir 不存在: {split_dir!r}",
                 data=data_payload,
             )),
-            "error": f"crop_augment: invalid split_output_dir {split_dir!r}",
+            "error": f"crop_window: invalid split_output_dir {split_dir!r}",
             "completed": True,
         }
 
     crop_root = f"{split_dir}/crop"
     data_payload["crop_root"] = crop_root
 
-    if _Path(crop_root).exists():
-        _shutil.rmtree(crop_root, ignore_errors=True)
+    crop_review = {
+        "input_dir": split_dir,
+        "output_dir": crop_root,
+        "only_wide": True,
+        "hint": "确认滑窗裁剪参数后继续。",
+    }
+    crop_response = _maybe_interrupt(state, "crop_window", crop_review)
+    if crop_response and crop_response.get("decision") == "abort":
+        return {
+            **_set_step_result(state, "crop_window", StepResult(
+                status="skipped", summary="用户在滑窗裁剪审核点中止", data=data_payload
+            )),
+            "error": "用户在 crop_window 中止流程",
+            "completed": True,
+        }
+    crop_override = (crop_response or {}).get("params_override") or {}
+    crop_params = _merge_override(
+        {
+            "input_dir": split_dir,
+            "output_dir": crop_root,
+            "only_wide": True,
+        },
+        crop_override,
+    )
+
+    data_payload["crop_root"] = crop_params["output_dir"]
+
+    if _Path(crop_params["output_dir"]).exists():
+        _shutil.rmtree(crop_params["output_dir"], ignore_errors=True)
 
     try:
         crop_resp = run_yolo_sliding_window_crop(YoloSlidingWindowCropRequest(
-            input_dir=split_dir,
-            output_dir=crop_root,
-            only_wide=True,
+            input_dir=crop_params["input_dir"],
+            output_dir=crop_params["output_dir"],
+            only_wide=bool(crop_params["only_wide"]),
         ))
-        summaries.append(
-            f"滑窗裁剪：{crop_resp.processed_images}/{crop_resp.input_images} 张处理，"
-            f"跳过 {crop_resp.skipped_images}，生成 {crop_resp.generated_crops} 个窗口"
-        )
         data_payload["crop"] = {
             "output_dir": crop_resp.output_dir,
             "input_images": crop_resp.input_images,
@@ -411,65 +459,124 @@ def node_crop_augment(state: PipelineState) -> dict[str, Any]:
             "generated_crops": crop_resp.generated_crops,
             "generated_labels": crop_resp.generated_labels,
         }
+        data_payload["crop_effective_params"] = crop_params
     except Exception as exc:
-        logger.warning("crop_augment: sliding_window 失败", exc_info=True)
+        logger.warning("crop_window: sliding_window 失败", exc_info=True)
         return {
-            **_set_step_result(state, "crop_augment", StepResult(
+            **_set_step_result(state, "crop_window", StepResult(
                 status="failed",
                 summary=f"滑窗裁剪失败：{type(exc).__name__}: {exc}",
                 data=data_payload,
             )),
-            "error": f"crop_augment sliding_window failed: {exc}",
+            "error": f"crop_window failed: {exc}",
             "completed": True,
         }
 
     src_classes = _Path(split_dir) / "classes.txt"
-    dst_classes = _Path(crop_root) / "classes.txt"
+    dst_classes = _Path(crop_params["output_dir"]) / "classes.txt"
     if src_classes.exists():
         try:
             dst_classes.parent.mkdir(parents=True, exist_ok=True)
             _shutil.copy2(src_classes, dst_classes)
             data_payload["classes_copied_to"] = str(dst_classes)
         except OSError as exc:
-            logger.warning("crop_augment: 复制 classes.txt 失败: %s", exc)
+            logger.warning("crop_window: 复制 classes.txt 失败: %s", exc)
             data_payload["classes_copy_error"] = str(exc)
     else:
-        logger.warning("crop_augment: split_dir 下未找到 classes.txt: %s", src_classes)
+        logger.warning("crop_window: split_dir 下未找到 classes.txt: %s", src_classes)
 
-    train_crop_dir = f"{crop_root}/train"
-    if not _Path(f"{train_crop_dir}/images").is_dir():
-        summaries.append("train 增强跳过：crop/train/images 不存在（train 无宽图？）")
-        return _set_step_result(state, "crop_augment", StepResult(
+    return {
+        **_set_step_result(state, "crop_window", StepResult(
             status="ok",
-            summary="；".join(summaries),
+            summary=(
+                f"滑窗裁剪完成：{crop_resp.processed_images}/{crop_resp.input_images} 张处理，"
+                f"跳过 {crop_resp.skipped_images}，生成 {crop_resp.generated_crops} 个窗口"
+            ),
+            data=data_payload,
+        )),
+        "crop_output_dir": crop_resp.output_dir,
+    }
+
+
+def node_augment_only(state: PipelineState) -> dict[str, Any]:
+    """对 crop/train 执行离线增强。"""
+    from pathlib import Path as _Path
+    from app.services.yolo_augment import run_yolo_augment
+    from app.schemas.preprocess import YoloAugmentRequest
+
+    crop_root = state.get("crop_output_dir", "")
+    data_payload: dict[str, Any] = {"crop_root": crop_root}
+
+    if not _sliding_window_enabled(state):
+        return _set_step_result(state, "augment_only", StepResult(
+            status="skipped",
+            summary="当前 SOP 未启用增强流程",
             data=data_payload,
         ))
 
+    train_crop_dir = f"{crop_root}/train" if crop_root else ""
+    if not train_crop_dir or not _Path(f"{train_crop_dir}/images").is_dir():
+        return _set_step_result(state, "augment_only", StepResult(
+            status="skipped",
+            summary="crop/train/images 不存在，增强已跳过",
+            data={**data_payload, "input_dir": train_crop_dir},
+        ))
+
+    augment_review = {
+        "input_dir": train_crop_dir,
+        "output_dir": f"{train_crop_dir}/augment",
+        "hint": "确认增强输入输出目录后继续。",
+    }
+    augment_response = _maybe_interrupt(state, "augment_only", augment_review)
+    if augment_response and augment_response.get("decision") == "abort":
+        return {
+            **_set_step_result(state, "augment_only", StepResult(
+                status="skipped", summary="用户在增强审核点中止", data=data_payload
+            )),
+            "error": "用户在 augment_only 中止流程",
+            "completed": True,
+        }
+    augment_override = (augment_response or {}).get("params_override") or {}
+    augment_params = _merge_override(
+        {
+            "input_dir": train_crop_dir,
+            "output_dir": f"{train_crop_dir}/augment",
+        },
+        augment_override,
+    )
+
     try:
         aug_resp = run_yolo_augment(YoloAugmentRequest(
-            input_dir=train_crop_dir,
-            output_dir=f"{train_crop_dir}/augment",
+            input_dir=augment_params["input_dir"],
+            output_dir=augment_params["output_dir"],
         ))
-        summaries.append(
-            f"train 增强：处理 {aug_resp.processed_images} 张，"
+    except Exception as exc:
+        logger.warning("augment_only: augment 失败", exc_info=True)
+        return {
+            **_set_step_result(state, "augment_only", StepResult(
+                status="failed",
+                summary=f"增强失败：{type(exc).__name__}: {exc}",
+                data={**data_payload, "augment_effective_params": augment_params},
+            )),
+            "error": f"augment_only failed: {exc}",
+            "completed": True,
+        }
+
+    return _set_step_result(state, "augment_only", StepResult(
+        status="ok",
+        summary=(
+            f"增强完成：处理 {aug_resp.processed_images} 张，"
             f"生成 {aug_resp.generated_images} 张（跳过 {aug_resp.skipped_images}）"
-        )
-        data_payload["augment"] = {
+        ),
+        data={
+            **data_payload,
             "output_dir": aug_resp.output_dir,
             "processed_images": aug_resp.processed_images,
             "skipped_images": aug_resp.skipped_images,
             "generated_images": aug_resp.generated_images,
             "generated_labels": aug_resp.generated_labels,
-        }
-    except Exception as exc:
-        logger.warning("crop_augment: augment 失败", exc_info=True)
-        summaries.append(f"train 增强跳过：{type(exc).__name__}: {exc}")
-        data_payload["augment_error"] = f"{type(exc).__name__}: {exc}"
-
-    return _set_step_result(state, "crop_augment", StepResult(
-        status="ok",
-        summary="；".join(summaries),
-        data=data_payload,
+            "augment_effective_params": augment_params,
+        },
     ))
 
 
@@ -478,7 +585,7 @@ def node_publish_transfer(state: PipelineState) -> dict[str, Any]:
 
     数据集版本 = 小图 + 增强（只发布 crop/，不含原始大图）：
       input_dir 优先取 {split_output_dir}/crop，若不存在则退回 split_output_dir
-      （后一种仅用于 crop_augment 被跳过的异常路径）。
+      （后一种用于未启用滑窗流程的 baseline/remote 场景）。
 
     local 模式：publish_yolo_dataset 在本地生成 dataset_version.yaml（含 classes 与递归
       发现的所有 images 路径）。此前的 build_yolo_yaml 独立节点已弃用，yaml 生成统一
@@ -677,41 +784,81 @@ def node_review_result(state: PipelineState) -> dict[str, Any]:
             "completed": True,
         }
 
-    export_payload: dict[str, Any] = {}
-    if (
-        state.get("execution_mode") == "local"
-        and state.get("yolo_export_after_train", False)
-        and train_result.get("status") == "ok"
-    ):
-        from app.schemas.preprocess import YoloExportRequest
-        from app.services.yolo_export import run_yolo_export
+    return {
+        **_set_step_result(state, "review_result", StepResult(
+            status="ok",
+            summary="训练结果验收通过",
+            data={
+                "train_summary": train_result.get("summary", ""),
+                "train_data": train_data,
+            },
+        )),
+    }
 
-        project = str(train_data.get("project") or "").rstrip("/")
-        run_name = str(train_data.get("name") or "").strip()
-        best_pt_path = f"{project}/{run_name}/weights/best.pt" if project and run_name else ""
-        try:
-            export_resp = run_yolo_export(
-                YoloExportRequest(
-                    best_pt_path=best_pt_path,
-                    project_root_dir=state.get("project_root_dir", ""),
-                    yolo_train_env=state.get("yolo_train_env", ""),
-                    overwrite=True,
-                )
+
+def node_export_model(state: PipelineState) -> dict[str, Any]:
+    """训练成功后导出 torchscript。"""
+    train_result = (state.get("step_results") or {}).get("poll_train", {})
+    train_data = train_result.get("data", {}) if isinstance(train_result, dict) else {}
+
+    if state.get("execution_mode") != "local":
+        return _set_step_result(state, "export_model", StepResult(
+            status="skipped",
+            summary="非本地训练，跳过模型导出",
+            data={},
+        ))
+    if not state.get("yolo_export_after_train", False):
+        return _set_step_result(state, "export_model", StepResult(
+            status="skipped",
+            summary="当前 run 未启用模型导出",
+            data={},
+        ))
+    if train_result.get("status") != "ok":
+        return _set_step_result(state, "export_model", StepResult(
+            status="skipped",
+            summary="训练未成功完成，跳过模型导出",
+            data={"train_status": train_result.get("status")},
+        ))
+
+    from app.schemas.preprocess import YoloExportRequest
+    from app.services.yolo_export import run_yolo_export
+
+    project = str(train_data.get("project") or "").rstrip("/")
+    run_name = str(train_data.get("name") or "").strip()
+    best_pt_path = f"{project}/{run_name}/weights/best.pt" if project and run_name else ""
+    try:
+        export_resp = run_yolo_export(
+            YoloExportRequest(
+                best_pt_path=best_pt_path,
+                project_root_dir=state.get("project_root_dir", ""),
+                yolo_train_env=state.get("yolo_train_env", ""),
+                overwrite=True,
             )
-            export_payload = {
+        )
+    except Exception as exc:
+        return {
+            **_set_step_result(state, "export_model", StepResult(
+                status="failed",
+                summary=f"模型导出失败：{exc}",
+                data={"best_pt_path": best_pt_path},
+            )),
+            "error": f"export_model failed: {exc}",
+            "completed": True,
+        }
+
+    return {
+        **_set_step_result(state, "export_model", StepResult(
+            status="ok",
+            summary=f"模型导出完成 → {export_resp.export_file_path}",
+            data={
                 "export_status": export_resp.status,
                 "export_file_path": export_resp.export_file_path,
                 "dataset_yaml": export_resp.dataset_yaml,
                 "imgsz": export_resp.imgsz,
                 "exit_code": export_resp.exit_code,
-            }
-        except Exception as exc:
-            export_payload = {"export_status": "failed", "error": str(exc)}
-
-    return {
-        **_set_step_result(state, "review_result", StepResult(
-            status="ok", summary="训练结果验收通过", data=export_payload
+            },
         )),
+        "export_file_path": export_resp.export_file_path,
     }
 
 
@@ -720,7 +867,7 @@ def node_model_infer(state: PipelineState) -> dict[str, Any]:
     from app.schemas.preprocess import YoloInferRequest
     from app.services.yolo_infer import run_yolo_infer
 
-    export_result = (state.get("step_results") or {}).get("review_result", {})
+    export_result = (state.get("step_results") or {}).get("export_model", {})
     export_data = export_result.get("data", {}) if isinstance(export_result, dict) else {}
     default_model_path = str(export_data.get("export_file_path") or "").strip()
     if not default_model_path:

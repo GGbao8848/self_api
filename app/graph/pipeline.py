@@ -2,8 +2,8 @@
 
 Graph 节点顺序：
   healthcheck → discover_classes → xml_to_yolo → review_labels
-  → split_dataset → crop_augment
-  → publish_transfer → train → poll_train → review_result → model_infer
+  → split_dataset → crop_window → augment_only
+  → publish_transfer → train → poll_train → review_result → export_model → model_infer
 
 注：data.yaml 由 publish_transfer 内部的 publish_yolo_dataset 服务生成，
     不再单独走 build_yaml 节点（build_yolo_yaml API 已弃用）。
@@ -33,8 +33,10 @@ from langgraph.types import Command  # re-export for callers
 
 from app.core.config import get_settings
 from app.graph.nodes import (
-    node_crop_augment,
+    node_augment_only,
+    node_crop_window,
     node_discover_classes,
+    node_export_model,
     node_healthcheck,
     node_poll_train,
     node_publish_transfer,
@@ -94,11 +96,13 @@ def build_graph() -> StateGraph:
     g.add_node("xml_to_yolo",       node_xml_to_yolo)
     g.add_node("review_labels",     node_review_labels)
     g.add_node("split_dataset",     node_split_dataset)
-    g.add_node("crop_augment",      node_crop_augment)
+    g.add_node("crop_window",       node_crop_window)
+    g.add_node("augment_only",      node_augment_only)
     g.add_node("publish_transfer",  node_publish_transfer)
     g.add_node("train",             node_train)
     g.add_node("poll_train",        node_poll_train)
     g.add_node("review_result",     node_review_result)
+    g.add_node("export_model",      node_export_model)
     g.add_node("model_infer",       node_model_infer)
 
     g.set_entry_point("healthcheck")
@@ -108,12 +112,14 @@ def build_graph() -> StateGraph:
         ("discover_classes", "xml_to_yolo"),
         ("xml_to_yolo",      "review_labels"),
         ("review_labels",    "split_dataset"),
-        ("split_dataset",    "crop_augment"),
-        ("crop_augment",     "publish_transfer"),
+        ("split_dataset",    "crop_window"),
+        ("crop_window",      "augment_only"),
+        ("augment_only",     "publish_transfer"),
         ("publish_transfer", "train"),
         ("train",            "poll_train"),
         ("poll_train",       "review_result"),
-        ("review_result",    "model_infer"),
+        ("review_result",    "export_model"),
+        ("export_model",     "model_infer"),
     ]:
         g.add_conditional_edges(
             src,

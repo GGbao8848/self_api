@@ -41,6 +41,7 @@ SOP_REGISTRY: dict[SopId, _Sop] = {
             "yolo_train_model": "yolo11s.pt",
             "yolo_train_epochs": 100,
             "yolo_train_imgsz": 640,
+            "enable_sliding_window": False,
             "full_access": False,
         },
         step_gates={
@@ -59,7 +60,7 @@ SOP_REGISTRY: dict[SopId, _Sop] = {
             "默认 imgsz=800，epochs=150，其他审核点与 baseline 相同。"
             "SOP 展示链路：标注检查与转换修改 → 数据集划分 → 滑窗裁剪 → 增强"
             " → 发布数据集 → 训练参数审核修改并确认 → 训练 → 模型导出 → 模型推理。"
-            "其中模型导出发生在 review_result 阶段：训练成功后自动执行 yolo-export"
+            "其中模型导出为独立 export_model 阶段：训练结果验收通过后自动执行 yolo-export"
             "（读取 args.yaml 的 imgsz，并按 data 对应数据集 yaml 名命名 torchscript）；"
             "模型推理发生在 model_infer 阶段（支持单图、递归目录、多路径列表输入）。"
         ),
@@ -72,6 +73,7 @@ SOP_REGISTRY: dict[SopId, _Sop] = {
             "yolo_train_epochs": 150,
             "yolo_train_imgsz": 800,
             "yolo_export_after_train": True,
+            "enable_sliding_window": True,
             "full_access": False,
         },
         step_gates={
@@ -97,6 +99,7 @@ SOP_REGISTRY: dict[SopId, _Sop] = {
             "yolo_train_model": "yolo11s.pt",
             "yolo_train_epochs": 150,
             "yolo_train_imgsz": 640,
+            "enable_sliding_window": False,
             "full_access": False,
         },
         step_gates={
@@ -128,6 +131,7 @@ SOP_REGISTRY: dict[SopId, _Sop] = {
             "yolo_train_model": "yolo11n.pt",
             "yolo_train_epochs": 1,
             "yolo_train_imgsz": 320,
+            "enable_sliding_window": False,
             "full_access": True,
         },
         step_gates={},
