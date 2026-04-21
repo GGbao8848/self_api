@@ -47,6 +47,72 @@ def test_yolo_train_sync_mocked(
     assert "yolo train" in data["command"] or "yolo" in data["command"]
 
 
+def test_yolo_train_resolves_model_from_parent_dirs(
+    case_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.schemas.preprocess import YoloTrainRequest
+    from app.services.yolo_train import run_yolo_train
+
+    yaml_path = case_dir / "demo" / "datasets" / "demo" / "demo.yaml"
+    yaml_path.parent.mkdir(parents=True)
+    yaml_path.write_text("names: []\n", encoding="utf-8")
+
+    cwd = case_dir / "level1" / "level2" / "level3" / "work"
+    cwd.mkdir(parents=True)
+    model_path = case_dir / "level1" / "yolo11s.pt"
+    model_path.write_text("weights", encoding="utf-8")
+
+    def fake_run(cmd: list[str], **kwargs: object) -> CompletedProcess[str]:
+        assert f"model={model_path.resolve()}" in cmd
+        return CompletedProcess(cmd, 0, stdout="train ok\n", stderr="")
+
+    monkeypatch.setattr("app.services.yolo_train.subprocess.run", fake_run)
+
+    response = run_yolo_train(
+        YoloTrainRequest(
+            yaml_path=str(yaml_path.resolve()),
+            project_root_dir=str(cwd.resolve()),
+            project=str((case_dir / "demo" / "runs" / "detect").resolve()),
+            name="demo",
+            yolo_train_env="yolo_pose",
+            model="yolo11s.pt",
+        )
+    )
+    assert response.status == "ok"
+
+
+def test_yolo_train_keeps_model_name_when_not_found(
+    case_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.schemas.preprocess import YoloTrainRequest
+    from app.services.yolo_train import run_yolo_train
+
+    yaml_path = case_dir / "demo" / "datasets" / "demo" / "demo.yaml"
+    yaml_path.parent.mkdir(parents=True)
+    yaml_path.write_text("names: []\n", encoding="utf-8")
+
+    cwd = case_dir / "work"
+    cwd.mkdir()
+
+    def fake_run(cmd: list[str], **kwargs: object) -> CompletedProcess[str]:
+        assert "model=yolo11s.pt" in cmd
+        return CompletedProcess(cmd, 0, stdout="train ok\n", stderr="")
+
+    monkeypatch.setattr("app.services.yolo_train.subprocess.run", fake_run)
+
+    response = run_yolo_train(
+        YoloTrainRequest(
+            yaml_path=str(yaml_path.resolve()),
+            project_root_dir=str(cwd.resolve()),
+            project=str((case_dir / "demo" / "runs" / "detect").resolve()),
+            name="demo",
+            yolo_train_env="yolo_pose",
+            model="yolo11s.pt",
+        )
+    )
+    assert response.status == "ok"
+
+
 def test_yolo_train_missing_yaml(client: TestClient, case_dir) -> None:
     detector_dir = case_dir / "nzxj_louyou"
     missing = detector_dir / "datasets" / "nzxj_louyou_20260417_1430" / "nzxj_louyou_20260417_1430.yaml"

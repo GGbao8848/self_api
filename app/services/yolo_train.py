@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from app.schemas.preprocess import YoloTrainRequest, YoloTrainResponse
+from app.services.yolo_model_resolver import resolve_local_yolo_model
 
 
 def run_yolo_train(request: YoloTrainRequest) -> YoloTrainResponse:
@@ -18,6 +19,8 @@ def run_yolo_train(request: YoloTrainRequest) -> YoloTrainResponse:
     if not root.is_dir():
         raise ValueError(f"project_root_dir is not a directory: {root}")
 
+    resolved_model = resolve_local_yolo_model(request.model, cwd=root)
+
     cmd: list[str] = [
         "conda",
         "run",
@@ -26,7 +29,7 @@ def run_yolo_train(request: YoloTrainRequest) -> YoloTrainResponse:
         "--no-capture-output",
         "yolo",
         "train",
-        f"model={request.model}",
+        f"model={resolved_model}",
         f"data={str(yaml_p)}",
         f"epochs={request.epochs}",
         f"imgsz={request.imgsz}",

@@ -13,6 +13,7 @@ from app.schemas.preprocess import (
     RemoteSbatchYoloTrainRequest,
     RemoteSbatchYoloTrainResponse,
 )
+from app.services.yolo_model_resolver import build_remote_yolo_model_resolver_shell
 
 
 def _parse_remote_path(target: str) -> tuple[str, int, str]:
@@ -126,7 +127,6 @@ def run_remote_sbatch_yolo_train(
         "--no-capture-output",
         "yolo",
         "train",
-        f"model={request.model}",
         f"data={yaml_remote_path}",
         f"epochs={request.epochs}",
         f"imgsz={request.imgsz}",
@@ -142,7 +142,9 @@ def run_remote_sbatch_yolo_train(
     if request.device:
         train_tokens.append(f"device={request.device}")
 
-    wrap_command = shlex.join(train_tokens)
+    model_resolver_shell = build_remote_yolo_model_resolver_shell(request.model)
+    train_command = " ".join(shlex.quote(token) for token in train_tokens)
+    wrap_command = f'{model_resolver_shell}; {train_command} "model=$resolved_model"'
     sbatch_tokens: list[str] = [
         "sbatch",
         "--parsable",
