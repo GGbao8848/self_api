@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 
 GateMode = Literal["auto", "manual"]
+ReviewProfile = Literal["strict", "balanced", "auto"]
 
 
 class StepGateInput(BaseModel):
@@ -111,8 +112,11 @@ class PipelineLinkedTaskStatus(BaseModel):
 class PipelineStatusResponse(BaseModel):
     run_id: str
     current_step: str | None
+    active_step: str | None = None
     completed: bool
     error: str | None
+    revision: int = 0
+    snapshot_id: str | None = None
     pending_review: dict[str, Any] | None = None
     step_results: dict[str, PipelineStepStatus] = {}
     interrupted: bool = Field(description="是否在等待人工确认（interrupt 暂停中）")
@@ -128,6 +132,8 @@ class SopSummary(BaseModel):
     description: str
     defaults: dict[str, Any]
     step_gates: dict[str, GateMode] = {}
+    review_profile_default: ReviewProfile = "balanced"
+    review_profiles: dict[ReviewProfile, dict[str, GateMode]] = Field(default_factory=dict)
     required_fields: list[str] = []
 
 
@@ -167,5 +173,9 @@ class SopRunRequest(BaseModel):
     training_names: list[str] | None = None
 
     full_access: bool | None = None
+    review_profile: ReviewProfile | None = Field(
+        default=None,
+        description="审核策略：strict | balanced | auto",
+    )
     step_gates: dict[str, StepGateInput] | None = None
     self_api_url: str | None = None

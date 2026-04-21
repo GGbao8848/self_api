@@ -25,33 +25,19 @@ class _Sop(dict):
     """简单的 dict 包装，用于类型提示。"""
 
 
+def _merge_profiles(
+    base: dict[str, GateMode],
+    updates: dict[str, dict[str, GateMode]],
+) -> dict[str, dict[str, GateMode]]:
+    out: dict[str, dict[str, GateMode]] = {}
+    for profile, patch in updates.items():
+        merged = dict(base)
+        merged.update(patch)
+        out[profile] = merged
+    return out
+
+
 SOP_REGISTRY: dict[SopId, _Sop] = {
-    "local-small-baseline": _Sop(
-        id="local-small-baseline",
-        name="小图本地 baseline 训练",
-        description=(
-            "适用于：图像较小（~640）、数据量不大、在本机 GPU 上训练的 baseline。"
-            "默认启用 discover/review_labels/train/review_result 人工审核点。"
-        ),
-        defaults={
-            "execution_mode": "local",
-            "split_mode": "train_val",
-            "train_ratio": 0.85,
-            "val_ratio": 0.15,
-            "yolo_train_model": "yolo11s.pt",
-            "yolo_train_epochs": 100,
-            "yolo_train_imgsz": 640,
-            "enable_sliding_window": False,
-            "full_access": False,
-        },
-        step_gates={
-            "discover_classes": "manual",
-            "review_labels": "manual",
-            "publish_transfer": "auto",
-            "train": "manual",
-            "review_result": "manual",
-        },
-    ),
     "local-large-sliding-window": _Sop(
         id="local-large-sliding-window",
         name="大图滑窗裁剪 · 本地训练",
@@ -79,62 +65,52 @@ SOP_REGISTRY: dict[SopId, _Sop] = {
         step_gates={
             "discover_classes": "manual",
             "review_labels": "manual",
+            "split_dataset": "manual",
+            "crop_window": "manual",
+            "augment_only": "manual",
             "publish_transfer": "auto",
             "train": "manual",
             "review_result": "manual",
         },
-    ),
-    "remote-slurm-iter": _Sop(
-        id="remote-slurm-iter",
-        name="远程 Slurm 迭代训练",
-        description=(
-            "适用于：数据集通过 SFTP 传输至远端，远端通过 sbatch 提交训练任务。"
-            "requires remote_host / remote_username / remote_private_key_path / remote_project_root_dir。"
+        review_profile_default="balanced",
+        review_profiles=_merge_profiles(
+            base={
+                "discover_classes": "manual",
+                "review_labels": "manual",
+                "split_dataset": "manual",
+                "crop_window": "manual",
+                "augment_only": "manual",
+                "publish_transfer": "auto",
+                "train": "manual",
+                "review_result": "manual",
+                "model_infer": "manual",
+            },
+            updates={
+                "strict": {
+                    "healthcheck": "manual",
+                    "xml_to_yolo": "manual",
+                    "publish_transfer": "manual",
+                    "export_model": "manual",
+                    "poll_train": "manual",
+                },
+                "balanced": {},
+                "auto": {
+                    "discover_classes": "auto",
+                    "review_labels": "auto",
+                    "split_dataset": "auto",
+                    "crop_window": "auto",
+                    "augment_only": "auto",
+                    "publish_transfer": "auto",
+                    "train": "auto",
+                    "review_result": "auto",
+                    "model_infer": "auto",
+                    "xml_to_yolo": "auto",
+                    "export_model": "auto",
+                    "healthcheck": "auto",
+                    "poll_train": "auto",
+                },
+            },
         ),
-        defaults={
-            "execution_mode": "remote_slurm",
-            "split_mode": "train_val",
-            "train_ratio": 0.85,
-            "val_ratio": 0.15,
-            "yolo_train_model": "yolo11s.pt",
-            "yolo_train_epochs": 150,
-            "yolo_train_imgsz": 640,
-            "enable_sliding_window": False,
-            "full_access": False,
-        },
-        step_gates={
-            "discover_classes": "manual",
-            "review_labels": "manual",
-            "publish_transfer": "manual",
-            "train": "manual",
-            "review_result": "manual",
-        },
-        required_fields=(
-            "remote_host",
-            "remote_username",
-            "remote_private_key_path",
-            "remote_project_root_dir",
-        ),
-    ),
-    "full-auto-smoke": _Sop(
-        id="full-auto-smoke",
-        name="全自动 smoke 测试",
-        description=(
-            "全部步骤 auto、full_access=True，仅用于 CI 或快速冒烟验证，"
-            "不建议对正式数据使用（无人工把关）。"
-        ),
-        defaults={
-            "execution_mode": "local",
-            "split_mode": "train_val",
-            "train_ratio": 0.85,
-            "val_ratio": 0.15,
-            "yolo_train_model": "yolo11n.pt",
-            "yolo_train_epochs": 1,
-            "yolo_train_imgsz": 320,
-            "enable_sliding_window": False,
-            "full_access": True,
-        },
-        step_gates={},
     ),
 }
 
@@ -149,6 +125,8 @@ def list_sops() -> list[dict[str, Any]]:
             "description": sop["description"],
             "defaults": sop["defaults"],
             "step_gates": sop["step_gates"],
+            "review_profile_default": sop.get("review_profile_default", "balanced"),
+            "review_profiles": sop.get("review_profiles", {}),
             "required_fields": tuple(sop.get("required_fields", ())),
         })
     return out
@@ -181,13 +159,21 @@ def apply_sop_defaults(
             continue
         merged[key] = value
 
+    review_profile = user_payload.get("review_profile")
+    profile_gates = sop.get("review_profiles", {})
+    if review_profile and review_profile in profile_gates:
+        sop_gates: dict[str, GateMode] = dict(profile_gates[review_profile])
+    else:
+        default_profile = sop.get("review_profile_default")
+        sop_gates = dict(profile_gates.get(default_profile, sop["step_gates"]))
+
     existing_gates: dict[str, Any] = dict(user_payload.get("step_gates") or {})
-    sop_gates: dict[str, GateMode] = sop["step_gates"]
     for step_name, mode in sop_gates.items():
         if step_name not in existing_gates:
             existing_gates[step_name] = {"mode": mode}
     if existing_gates:
         merged["step_gates"] = existing_gates
+    merged.pop("review_profile", None)
 
     missing: list[str] = []
     for field in sop.get("required_fields", ()):

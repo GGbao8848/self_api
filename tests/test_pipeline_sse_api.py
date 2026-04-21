@@ -77,6 +77,8 @@ def test_sse_emits_snapshot_and_end_for_completed_run(
     assert snap_data["run_id"] == run_id
     assert snap_data["completed"] is True
     assert snap_data["interrupted"] is False
+    assert isinstance(snap_data["revision"], int)
+    assert snap_data["snapshot_id"]
 
     end = next(e for e in events if e["event"] == "end")
     assert json.loads(end["data"])["reason"] == "completed"
@@ -108,6 +110,8 @@ def test_sse_emits_snapshot_for_paused_run(
     assert snap["run_id"] == run_id
     assert snap["interrupted"] is True
     assert snap["completed"] is False
+    assert snap["active_step"] == "discover_classes"
+    assert isinstance(snap["revision"], int)
     assert snap["step_results"]["healthcheck"]["status"] == "ok"
     assert "discover_classes" not in snap["step_results"]
 

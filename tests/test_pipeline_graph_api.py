@@ -313,3 +313,20 @@ def test_pipeline_status_includes_model_task_snapshot(
     assert status.model_task.task_type == "yolo_train"
     assert status.model_task.state == "pending"
     assert status.model_task.queue_position == 2
+
+
+def test_pipeline_status_exposes_revision_and_active_step(
+    client: TestClient, patch_all_nodes: None
+) -> None:
+    run = client.post("/api/v1/pipeline/run", json=BASE_RUN_PAYLOAD).json()
+    run_id = run["run_id"]
+    assert isinstance(run["revision"], int)
+    assert run["active_step"] == "discover_classes"
+    assert run["snapshot_id"]
+
+    confirm = client.post(
+        f"/api/v1/pipeline/{run_id}/confirm",
+        json={"decision": "confirm", "params_override": {}},
+    ).json()
+    assert confirm["revision"] >= run["revision"]
+    assert confirm["active_step"] == "review_labels"

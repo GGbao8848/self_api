@@ -137,6 +137,19 @@ def _is_waiting_for_confirmation(gs: Any) -> bool:
     return _extract_pending_review(gs) is not None
 
 
+def _extract_revision(gs: Any) -> int:
+    metadata = getattr(gs, "metadata", None) or {}
+    step = metadata.get("step")
+    return int(step) if isinstance(step, int | float) else 0
+
+
+def _extract_snapshot_id(gs: Any) -> str | None:
+    config = getattr(gs, "config", None) or {}
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    checkpoint_id = configurable.get("checkpoint_id")
+    return str(checkpoint_id) if checkpoint_id else None
+
+
 def _to_status_response(run_id: str) -> PipelineStatusResponse:
     gs = _get_graph_state(run_id)
     # LangGraph 对未知 thread_id 也返回空 StateSnapshot，需要额外校验
@@ -157,6 +170,9 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
     pending_review = state.get("pending_review")
     if interrupted and not pending_review:
         pending_review = _extract_pending_review(gs)
+    active_step = pending_review.get("step") if isinstance(pending_review, dict) else None
+    if not active_step:
+        active_step = state.get("current_step")
 
     model_task = None
     train_task_id = state.get("train_task_id")
@@ -173,8 +189,11 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
     return PipelineStatusResponse(
         run_id=run_id,
         current_step=state.get("current_step"),
+        active_step=active_step,
         completed=state.get("completed", False),
         error=state.get("error"),
+        revision=_extract_revision(gs),
+        snapshot_id=_extract_snapshot_id(gs),
         pending_review=pending_review,
         step_results=step_results,
         interrupted=interrupted,
@@ -205,7 +224,7 @@ def _wait_state_ready(run_id: str, timeout_s: float = 3.0) -> None:
         gs = _get_graph_state(run_id)
         if gs and gs.values and gs.values.get("run_id"):
             seen_state = True
-            if gs.values.get("completed") or bool(getattr(gs, "next", ())):
+            if gs.values.get("completed") or _is_waiting_for_confirmation(gs):
                 return
         time.sleep(0.05)
     if seen_state:
@@ -307,7 +326,7 @@ def confirm_pipeline_step(run_id: str, body: PipelineConfirmRequest) -> Pipeline
         compiled_graph.invoke(Command(resume=resume_payload), config)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"pipeline resume error: {exc}") from exc
-
+    _wait_state_ready(run_id, timeout_s=1.2)
     return _to_status_response(run_id)
 
 
@@ -347,6 +366,9 @@ def _snapshot_signature(resp: PipelineStatusResponse) -> str:
     """用于 SSE 去重：只有签名变化才发一条 event。"""
     step_states = {name: s.status for name, s in resp.step_results.items()}
     signature = {
+        "revision": resp.revision,
+        "snapshot_id": resp.snapshot_id,
+        "active_step": resp.active_step,
         "current_step": resp.current_step,
         "completed": resp.completed,
         "interrupted": resp.interrupted,

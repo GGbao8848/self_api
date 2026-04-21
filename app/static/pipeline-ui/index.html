@@ -73,6 +73,12 @@
                     </select>
                   </div>
                   <div>
+                    <label for="sopReviewProfile">审核策略</label>
+                    <select id="sopReviewProfile">
+                      <option value="">（使用 SOP 默认）</option>
+                    </select>
+                  </div>
+                  <div>
                     <label>说明</label>
                     <div class="inline-note" id="sopDescription">选择上方 SOP 查看详情。</div>
                   </div>
@@ -168,6 +174,10 @@
 
         <!-- Detail View (Timeline) -->
         <div class="detail-view" id="detailView" hidden>
+          <details class="disclosure timeline-panel" id="statusTimelinePanel" open>
+            <summary>状态时间线（revision）</summary>
+            <div id="statusTimeline" class="status-timeline"></div>
+          </details>
           <div class="timeline" id="stepList"></div>
           <div id="noReviewNote" class="inline-note text-center" style="margin-top: 20px;"></div>
         </div>

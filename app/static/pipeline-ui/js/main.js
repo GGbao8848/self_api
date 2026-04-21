@@ -331,6 +331,7 @@ const qs = (id) => document.getElementById(id);
 
 const el = {
   sopSelect: qs("sopSelect"),
+  sopReviewProfile: qs("sopReviewProfile"),
   sopDescription: qs("sopDescription"),
   originalDataset: qs("originalDataset"),
   detectorName: qs("detectorName"),
@@ -376,6 +377,7 @@ const el = {
   detailRefreshBtn: qs("detailRefreshBtn"),
   detailCopyBtn: qs("detailCopyBtn"),
   detailAbortBtn: qs("detailAbortBtn"),
+  statusTimeline: qs("statusTimeline"),
   stepList: qs("stepList"),
   reviewCard: qs("reviewCard"),
   bottomActionArea: qs("bottomActionArea"),
@@ -402,6 +404,9 @@ let state = {
   activeRunId: null,
   currentRunData: null,
   runningStepHintByRun: {},
+  latestSnapshotByRun: {},
+  timelineByRun: {},
+  uiModeByRun: {},
   pollTimer: null,
   eventSource: null,
   activeTab: "local", // 'local' or 'remote'
@@ -425,6 +430,7 @@ async function loadSops() {
       opt.textContent = `${sop.name} (${sop.id})`;
       el.sopSelect.appendChild(opt);
     }
+    onSopChange();
   } catch (exc) {
     setStatus(el.statusBox, `加载 SOP 失败：${exc.message}`, "warn");
   }
@@ -434,6 +440,9 @@ function onSopChange() {
   const sopId = el.sopSelect.value;
   if (!sopId) {
     el.sopDescription.textContent = "选择上方 SOP 查看详情。";
+    if (el.sopReviewProfile) {
+      el.sopReviewProfile.innerHTML = "<option value=\"\">（使用 SOP 默认）</option>";
+    }
     el.classMapFieldset?.classList.remove("sop-large-sliding");
     updateExecutionModeSettingHint();
     return;
@@ -441,6 +450,19 @@ function onSopChange() {
   const sop = sopCache.find((s) => s.id === sopId);
   if (!sop) return;
   el.sopDescription.textContent = sop.description;
+  if (el.sopReviewProfile) {
+    const profiles = sop.review_profiles || {};
+    el.sopReviewProfile.innerHTML = "<option value=\"\">（使用 SOP 默认）</option>";
+    for (const key of Object.keys(profiles)) {
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = key;
+      el.sopReviewProfile.appendChild(opt);
+    }
+    if (sop.review_profile_default && profiles[sop.review_profile_default]) {
+      el.sopReviewProfile.value = sop.review_profile_default;
+    }
+  }
   const d = sop.defaults || {};
   if (d.execution_mode) el.executionMode.value = d.execution_mode;
   if (d.yolo_train_model) el.trainModel.value = d.yolo_train_model;
@@ -538,6 +560,9 @@ function buildRunPayload() {
 
   if (el.classMappingLaunch) {
     Object.assign(payload, collectClassMappingPayload(el.classMappingLaunch));
+  }
+  if (el.sopSelect.value && el.sopReviewProfile?.value) {
+    payload.review_profile = el.sopReviewProfile.value;
   }
   return payload;
 }
@@ -651,6 +676,96 @@ function summarizeStatus(resp) {
     return "waiting";
   }
   return "running";
+}
+
+function getSnapshotOrderValue(snapshot = {}) {
+  return typeof snapshot.revision === "number" ? snapshot.revision : -1;
+}
+
+function shouldApplySnapshot(snapshot, options = {}) {
+  const runId = snapshot?.run_id;
+  if (!runId) return false;
+  if (options.force) return true;
+  const prev = state.latestSnapshotByRun[runId];
+  if (!prev) return true;
+  const currentRevision = getSnapshotOrderValue(snapshot);
+  const prevRevision = getSnapshotOrderValue(prev);
+  if (currentRevision > prevRevision) return true;
+  if (currentRevision < prevRevision) return false;
+  if (snapshot.snapshot_id && prev.snapshot_id && snapshot.snapshot_id === prev.snapshot_id) {
+    return false;
+  }
+  return true;
+}
+
+function applySnapshot(snapshot, options = {}) {
+  if (!shouldApplySnapshot(snapshot, options)) return false;
+  const runId = snapshot.run_id;
+  state.latestSnapshotByRun[runId] = {
+    revision: snapshot.revision ?? -1,
+    snapshot_id: snapshot.snapshot_id || null,
+  };
+  if (snapshot.completed || snapshot.error) {
+    delete state.uiModeByRun[runId];
+  }
+  appendTimelineEntry(snapshot);
+  if (state.activeRunId === runId) {
+    renderDetail(snapshot);
+  } else {
+    const runIdx = state.runs.findIndex((r) => r.run_id === runId);
+    if (runIdx >= 0) {
+      state.runs[runIdx].last_status = getDisplayStatusInfo(snapshot);
+      persistRuns();
+      renderRunList();
+    }
+  }
+  return true;
+}
+
+function appendTimelineEntry(snapshot) {
+  const runId = snapshot.run_id;
+  if (!runId) return;
+  const list = state.timelineByRun[runId] || [];
+  const revision = typeof snapshot.revision === "number" ? snapshot.revision : -1;
+  if (list.length && list[list.length - 1].revision === revision) return;
+  const activeStep = snapshot.active_step || snapshot.current_step || "-";
+  // 仅记录步骤变化：同一步骤内的状态刷新（等待/运行/轮询）不再重复追加。
+  if (list.length && list[list.length - 1].active_step === activeStep) return;
+  const statusKey = summarizeStatus(snapshot);
+  list.push({
+    revision,
+    at: Date.now(),
+    status: statusKey,
+    active_step: activeStep,
+    summary: snapshot.error || (snapshot.pending_review?.step ? `等待审核：${snapshot.pending_review.step}` : ""),
+  });
+  state.timelineByRun[runId] = list.slice(-120);
+}
+
+function renderStatusTimeline(runId) {
+  if (!el.statusTimeline) return;
+  const rows = state.timelineByRun[runId] || [];
+  if (!rows.length) {
+    el.statusTimeline.innerHTML = "<div class=\"status-timeline-item\"><span class=\"status-timeline-summary\">暂无状态变更记录</span></div>";
+    return;
+  }
+  el.statusTimeline.innerHTML = "";
+  for (const row of [...rows].reverse()) {
+    const item = document.createElement("div");
+    item.className = "status-timeline-item";
+    const rev = document.createElement("span");
+    rev.className = "status-timeline-revision";
+    rev.textContent = `r${row.revision}`;
+    const step = document.createElement("span");
+    step.className = "status-timeline-step";
+    step.textContent = row.active_step;
+    const info = document.createElement("span");
+    info.className = "status-timeline-summary";
+    const timeText = new Date(row.at).toLocaleTimeString();
+    info.textContent = `${getStatusText(row.status)} · ${timeText}${row.summary ? ` · ${row.summary}` : ""}`;
+    item.append(rev, step, info);
+    el.statusTimeline.appendChild(item);
+  }
 }
 
 function prettyJson(value) {
@@ -789,6 +904,21 @@ function buildModelTaskStatusInfo(runData, options = {}) {
 }
 
 function getDisplayStatusInfo(runData) {
+  const uiMode = state.uiModeByRun[runData.run_id];
+  if (uiMode === "confirming") {
+    return {
+      key: "running",
+      text: "确认中",
+      summary: "正在提交确认并等待最新状态",
+    };
+  }
+  if (uiMode === "aborting") {
+    return {
+      key: "waiting",
+      text: "中止中",
+      summary: "正在提交中止请求",
+    };
+  }
   if (runData.completed && runData.error) {
     return {
       key: "failed",
@@ -1196,6 +1326,113 @@ function createSelectField(label, key, value = "", choices = []) {
   return wrap;
 }
 
+const REVIEW_FORM_SCHEMAS = {
+  split_dataset: [
+    { type: "text", label: "input_dir", key: "input_dir" },
+    { type: "text", label: "output_dir", key: "output_dir" },
+    {
+      type: "select",
+      label: "mode",
+      key: "mode",
+      choices: [
+        { value: "train_val", label: "train_val" },
+        { value: "train_val_test", label: "train_val_test" },
+        { value: "train_only", label: "train_only" },
+      ],
+    },
+    { type: "number-text", label: "train_ratio", key: "train_ratio", defaultValue: "0.85" },
+    { type: "number-text", label: "val_ratio", key: "val_ratio", defaultValue: "0.15" },
+    {
+      type: "select",
+      label: "shuffle",
+      key: "shuffle",
+      choices: [
+        { value: "true", label: "true" },
+        { value: "false", label: "false" },
+      ],
+      defaultValue: "true",
+    },
+    { type: "number", label: "seed", key: "seed", defaultValue: "42" },
+    {
+      type: "select",
+      label: "copy_files",
+      key: "copy_files",
+      choices: [
+        { value: "true", label: "true" },
+        { value: "false", label: "false" },
+      ],
+      defaultValue: "true",
+    },
+  ],
+  crop_window: [
+    {
+      type: "text",
+      label: "input_dir",
+      key: "input_dir",
+      placeholder: "划分后数据集目录（通常是 split_output_dir）",
+    },
+    {
+      type: "text",
+      label: "output_dir",
+      key: "output_dir",
+      placeholder: "滑窗输出根目录（通常是 split_output_dir/crop）",
+    },
+    {
+      type: "select",
+      label: "only_wide",
+      key: "only_wide",
+      choices: [
+        { value: "true", label: "true（仅裁剪宽图）" },
+        { value: "false", label: "false（所有图都参与裁剪）" },
+      ],
+      defaultValue: "true",
+    },
+  ],
+  augment_only: [
+    {
+      type: "text",
+      label: "input_dir",
+      key: "input_dir",
+      placeholder: "增强输入目录（通常是 crop/train）",
+    },
+    {
+      type: "text",
+      label: "output_dir",
+      key: "output_dir",
+      placeholder: "增强输出目录（通常是 crop/train/augment）",
+    },
+  ],
+};
+
+function appendSchemaFields(grid, schema = [], review = {}) {
+  for (const field of schema) {
+    const currentValue = review[field.key];
+    const finalValue = currentValue !== undefined && currentValue !== null
+      ? String(currentValue)
+      : (field.defaultValue || "");
+    if (field.type === "select") {
+      grid.append(
+        createSelectField(field.label, field.key, finalValue, field.choices || []),
+      );
+      continue;
+    }
+    if (field.type === "number") {
+      grid.append(
+        createFormField(field.label, field.key, finalValue, {
+          type: "number",
+          placeholder: field.placeholder || "",
+        }),
+      );
+      continue;
+    }
+    grid.append(
+      createFormField(field.label, field.key, finalValue, {
+        placeholder: field.placeholder || "",
+      }),
+    );
+  }
+}
+
 function createClassesCheckboxField(classToId = {}, selectedClasses = []) {
   const wrap = document.createElement("div");
   wrap.className = "review-form-field review-form-field--full";
@@ -1295,43 +1532,8 @@ function renderOverrideForm(stepName, review = {}, initialParams = {}) {
       createFormField("project_root_dir", "project_root_dir", review.project_root_dir || ""),
       createFormField("detector_name", "detector_name", review.detector_name || ""),
     );
-  } else if (stepName === "split_dataset") {
-    grid.append(
-      createFormField("input_dir", "input_dir", review.input_dir || ""),
-      createFormField("output_dir", "output_dir", review.output_dir || ""),
-      createSelectField("mode", "mode", review.mode || "train_val", [
-        { value: "train_val", label: "train_val" },
-        { value: "train_val_test", label: "train_val_test" },
-        { value: "train_only", label: "train_only" },
-      ]),
-      createFormField("train_ratio", "train_ratio", String(review.train_ratio ?? 0.85)),
-      createFormField("val_ratio", "val_ratio", String(review.val_ratio ?? 0.15)),
-      createFormField("shuffle(true/false)", "shuffle", String(review.shuffle ?? true)),
-      createFormField("seed", "seed", String(review.seed ?? 42), { type: "number" }),
-      createFormField("copy_files(true/false)", "copy_files", String(review.copy_files ?? true)),
-    );
-  } else if (stepName === "crop_window") {
-    grid.append(
-      createFormField("input_dir", "input_dir", review.input_dir || "", {
-        placeholder: "划分后数据集目录（通常是 split_output_dir）",
-      }),
-      createFormField("output_dir", "output_dir", review.output_dir || "", {
-        placeholder: "滑窗输出根目录（通常是 split_output_dir/crop）",
-      }),
-      createSelectField("only_wide", "only_wide", String(review.only_wide ?? true), [
-        { value: "true", label: "true（仅裁剪宽图）" },
-        { value: "false", label: "false（所有图都参与裁剪）" },
-      ]),
-    );
-  } else if (stepName === "augment_only") {
-    grid.append(
-      createFormField("input_dir", "input_dir", review.input_dir || "", {
-        placeholder: "增强输入目录（通常是 crop/train）",
-      }),
-      createFormField("output_dir", "output_dir", review.output_dir || "", {
-        placeholder: "增强输出目录（通常是 crop/train/augment）",
-      }),
-    );
+  } else if (REVIEW_FORM_SCHEMAS[stepName]) {
+    appendSchemaFields(grid, REVIEW_FORM_SCHEMAS[stepName], review);
   } else if (stepName === "train") {
     grid.append(
       createFormField("yaml_path", "yaml_path", review.yaml_path || "", { full: true }),
@@ -1542,7 +1744,8 @@ async function openRun(runId, prefetched = null) {
     return null;
   }));
   if (!data) return;
-  renderDetail(data);
+  applySnapshot(data, { force: true });
+  renderStatusTimeline(runId);
   if (!data.completed) {
     startPolling(runId);
   }
@@ -1550,6 +1753,7 @@ async function openRun(runId, prefetched = null) {
 
 function renderDetail(data) {
   state.currentRunData = data;
+  renderStatusTimeline(data.run_id);
   if (data.interrupted && data.pending_review?.step) {
     state.runningStepHintByRun[data.run_id] = data.pending_review.step;
   } else if (data.completed || data.error) {
@@ -1559,9 +1763,7 @@ function renderDetail(data) {
   const statusInfo = getDisplayStatusInfo(data);
   el.detailStatusPill.textContent = statusInfo.text;
   el.detailStatusPill.className = `pill ${statusInfo.key}`;
-  const rawActiveStep = data.interrupted && data.pending_review?.step
-    ? data.pending_review.step
-    : (hintedStep || data.current_step);
+  const rawActiveStep = data.active_step || hintedStep || data.current_step;
   const activeDisplayStep = resolveActiveDisplayStep(rawActiveStep);
   const displaySteps = getDisplaySteps(data);
 
@@ -1761,7 +1963,7 @@ function startPolling(runId) {
       es.addEventListener("snapshot", (ev) => {
         if (runId !== state.activeRunId) return;
         try {
-          renderDetail(JSON.parse(ev.data));
+          applySnapshot(JSON.parse(ev.data));
         } catch { /* ignore */ }
       });
       es.addEventListener("end", () => stopPolling());
@@ -1782,7 +1984,7 @@ function fallbackPolling(runId) {
     if (runId !== state.activeRunId) return;
     try {
       const data = await fetchJson(`${API_BASE}/${runId}`);
-      renderDetail(data);
+      applySnapshot(data);
       if (data.completed) stopPolling();
     } catch (e) {
       setStatus(el.reviewStatus, `轮询失败：${e.message}`, "error");
@@ -1803,6 +2005,9 @@ function stopPolling() {
 
 async function confirmStep() {
   if (!state.activeRunId) return;
+  stopPolling();
+  state.uiModeByRun[state.activeRunId] = "confirming";
+  renderRunList();
   const pendingStep = state.currentRunData?.pending_review?.step;
   if (pendingStep) {
     state.runningStepHintByRun[state.activeRunId] = pendingStep;
@@ -1828,12 +2033,11 @@ async function confirmStep() {
         body: JSON.stringify({ decision: "confirm", params_override: override }),
       },
     );
-    // 先渲染一次确认后的即时快照，确保当前审核步骤可见“运行中”过渡态。
-    renderDetail(data);
+    applySnapshot(data, { force: true });
     if (!data.completed && !data.interrupted) {
       data = await waitForNextInterrupt(state.activeRunId, data);
     }
-    renderDetail(data);
+    applySnapshot(data, { force: true });
     el.reviewOverride.value = "";
     setStatus(el.reviewStatus, "已确认，流程继续。", "success");
     if (!data.completed) startPolling(state.activeRunId);
@@ -1841,12 +2045,16 @@ async function confirmStep() {
     setStatus(el.reviewStatus, `确认失败：${exc.message}`, "error");
   } finally {
     el.confirmBtn.disabled = false;
+    delete state.uiModeByRun[state.activeRunId];
   }
 }
 
 async function abortCurrentStep() {
   if (!state.activeRunId) return;
   if (!confirm("确认要中止当前 run 吗？")) return;
+  stopPolling();
+  state.uiModeByRun[state.activeRunId] = "aborting";
+  renderRunList();
   el.abortStepBtn.disabled = true;
   if (el.detailAbortBtn) el.detailAbortBtn.disabled = true;
   try {
@@ -1854,7 +2062,7 @@ async function abortCurrentStep() {
       `${API_BASE}/${state.activeRunId}/abort`,
       { method: "POST" },
     );
-    renderDetail(data);
+    applySnapshot(data, { force: true });
     if (data.completed || data.error) {
       setStatus(el.reviewStatus, "run 已中止。", "warn");
       stopPolling();
@@ -1867,6 +2075,7 @@ async function abortCurrentStep() {
   } finally {
     el.abortStepBtn.disabled = false;
     if (el.detailAbortBtn) el.detailAbortBtn.disabled = false;
+    delete state.uiModeByRun[state.activeRunId];
   }
 }
 
@@ -1874,7 +2083,7 @@ async function refreshAll() {
   for (const run of state.runs) {
     try {
       const data = await fetchJson(`${API_BASE}/${run.run_id}`);
-      run.last_status = getDisplayStatusInfo(data);
+      applySnapshot(data);
     } catch {
       run.last_status = { key: "unknown", text: getStatusText("unknown") };
     }

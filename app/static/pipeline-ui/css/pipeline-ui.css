@@ -59,7 +59,7 @@ body {
 
 /* Sidebar */
 .sidebar {
-  width: 260px;
+  width: 320px;
   flex-shrink: 0;
   background-color: var(--bg);
   border-right: 1px solid var(--border);
@@ -241,8 +241,8 @@ body {
 }
 
 .launch-container {
-  width: 100%;
-  max-width: 720px;
+  width: 75%;
+  max-width: none;
 }
 
 .launch-hero {
@@ -285,7 +285,8 @@ body {
 
 /* Detail View (Timeline) */
 .detail-view {
-  max-width: 800px;
+  width: 75%;
+  max-width: none;
   margin: 0 auto;
   padding-bottom: 20px;
 }
@@ -696,6 +697,47 @@ button:disabled {
 .disclosure textarea,
 .disclosure pre {
   margin-top: 8px;
+}
+
+.timeline-panel {
+  margin-bottom: 14px;
+}
+
+.status-timeline {
+  margin-top: 10px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.status-timeline-item {
+  display: grid;
+  grid-template-columns: 70px 120px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 12px;
+}
+
+.status-timeline-item:last-child {
+  border-bottom: none;
+}
+
+.status-timeline-revision {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+}
+
+.status-timeline-step {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+}
+
+.status-timeline-summary {
+  color: var(--muted);
 }
 
 .review-focus-toggle {
