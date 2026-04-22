@@ -11,7 +11,7 @@ from app.schemas.preprocess import (
     YoloAugmentRequest,
     YoloAugmentResponse,
 )
-from app.services.task_manager import ensure_current_task_active
+from app.services.task_manager import ensure_current_task_active, report_progress
 from app.utils.images import list_image_paths
 
 _AUGMENTATION_SPECS: list[tuple[str, str]] = [
@@ -152,6 +152,23 @@ def run_yolo_augment(request: YoloAugmentRequest) -> YoloAugmentResponse:
     skipped_images = 0
     generated_images = 0
     generated_labels = 0
+    total_images = 0
+    image_counts: dict[Path, int] = {}
+
+    for _relative_root, images_dir, _labels_dir in dataset_units:
+        count = len(list_image_paths(images_dir, recursive=request.recursive))
+        image_counts[images_dir] = count
+        total_images += count
+
+    report_progress(
+        current=0,
+        total=max(total_images, 1),
+        unit="image",
+        stage="augment_images",
+        message="running offline augmentations",
+        indeterminate=False,
+    )
+    processed_count = 0
 
     for relative_root, images_dir, labels_dir in dataset_units:
         ensure_current_task_active()
@@ -179,6 +196,15 @@ def run_yolo_augment(request: YoloAugmentRequest) -> YoloAugmentResponse:
                 detail.skipped_reason = "label file not found"
                 skipped_images += 1
                 details.append(detail)
+                processed_count += 1
+                report_progress(
+                    current=processed_count,
+                    total=max(total_images, 1),
+                    unit="image",
+                    stage="augment_images",
+                    message=f"processed {processed_count}/{total_images} images",
+                    indeterminate=False,
+                )
                 continue
 
             try:
@@ -211,10 +237,28 @@ def run_yolo_augment(request: YoloAugmentRequest) -> YoloAugmentResponse:
                 detail.skipped_reason = str(exc)
                 skipped_images += 1
                 details.append(detail)
+                processed_count += 1
+                report_progress(
+                    current=processed_count,
+                    total=max(total_images, 1),
+                    unit="image",
+                    stage="augment_images",
+                    message=f"processed {processed_count}/{total_images} images",
+                    indeterminate=False,
+                )
                 continue
 
             processed_images += 1
             details.append(detail)
+            processed_count += 1
+            report_progress(
+                current=processed_count,
+                total=max(total_images, 1),
+                unit="image",
+                stage="augment_images",
+                message=f"processed {processed_count}/{total_images} images",
+                indeterminate=False,
+            )
 
     return YoloAugmentResponse(
         input_dir=str(input_dir),

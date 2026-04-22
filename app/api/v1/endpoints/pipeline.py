@@ -31,14 +31,18 @@ from app.graph.state import DEFAULT_GATES, PipelineState, StepGateConfig
 from app.schemas.pipeline import (
     PipelineLinkedTaskStatus,
     PipelineConfirmRequest,
+    PipelineOverallProgress,
+    PipelineProgressSnapshot,
     PipelineRunRequest,
     PipelineStatusResponse,
+    PipelineStepProgress,
     PipelineStepStatus,
     SopListResponse,
     SopRunRequest,
     SopSummary,
 )
 from app.services.task_manager import get_task
+from app.services.task_manager import get_pipeline_progress
 
 router = APIRouter(
     prefix="/pipeline",
@@ -150,6 +154,218 @@ def _extract_snapshot_id(gs: Any) -> str | None:
     return str(checkpoint_id) if checkpoint_id else None
 
 
+BASE_PROGRESS_STEPS: list[str] = [
+    "label_transform_review",
+    "split_dataset",
+    "publish_transfer",
+    "train",
+    "poll_train",
+    "review_result",
+    "export_model",
+    "model_infer",
+]
+
+DISPLAY_STEP_TO_TECH_STEP: dict[str, str] = {
+    "label_transform_review": "review_labels",
+}
+
+
+def _resolve_display_steps(state: PipelineState, step_results: dict[str, PipelineStepStatus]) -> list[str]:
+    steps = list(BASE_PROGRESS_STEPS)
+    if state.get("enable_sliding_window") or "crop_window" in step_results or "augment_only" in step_results:
+        steps[2:2] = ["crop_window", "augment_only"]
+    if not state.get("yolo_export_after_train") and "export_model" not in step_results:
+        steps = [step for step in steps if step != "export_model"]
+    return steps
+
+
+def _resolve_step_result_for_progress(
+    display_step: str,
+    step_results: dict[str, PipelineStepStatus],
+) -> PipelineStepStatus | None:
+    if display_step == "label_transform_review":
+        return step_results.get("review_labels")
+    return step_results.get(display_step)
+
+
+def _clamp_percent(value: float) -> int:
+    return max(0, min(100, int(round(value))))
+
+
+def _build_model_task_progress(
+    *,
+    active_step: str | None,
+    display_step: str,
+    interrupted: bool,
+    model_task: PipelineLinkedTaskStatus | None,
+) -> PipelineStepProgress | None:
+    if display_step not in {"train", "poll_train", "review_result", "model_infer"}:
+        return None
+
+    if interrupted and active_step == display_step:
+        return PipelineStepProgress(
+            step=display_step,
+            percent=12,
+            hint="等待人工确认",
+            tone="waiting",
+            indeterminate=False,
+        )
+
+    if display_step == "poll_train" and model_task is None and active_step == "poll_train":
+        return PipelineStepProgress(
+            step=display_step,
+            percent=72,
+            hint="训练任务已提交，等待完成",
+            tone="running",
+            indeterminate=True,
+        )
+    if model_task is None or active_step != display_step:
+        return None
+
+    if model_task.state == "pending":
+        queue_position = model_task.queue_position or 0
+        return PipelineStepProgress(
+            step=display_step,
+            percent=20 if queue_position > 0 else 12,
+            hint=f"队列中，前面还有 {queue_position} 个任务" if queue_position > 0 else "任务已创建，等待启动",
+            tone="queued" if queue_position > 0 else "pending",
+            indeterminate=False,
+        )
+    if model_task.state == "running":
+        return PipelineStepProgress(
+            step=display_step,
+            percent=76,
+            hint="模型任务执行中",
+            tone="running",
+            indeterminate=True,
+        )
+    if model_task.state == "succeeded":
+        return PipelineStepProgress(step=display_step, percent=100, hint="模型任务已完成", tone="ok")
+    if model_task.state == "failed":
+        return PipelineStepProgress(step=display_step, percent=100, hint="模型任务失败", tone="failed")
+    if model_task.state == "cancelled":
+        return PipelineStepProgress(step=display_step, percent=100, hint="模型任务已取消", tone="skipped")
+    return None
+
+
+def _build_step_progress(
+    *,
+    display_step: str,
+    active_step: str | None,
+    interrupted: bool,
+    step_result: PipelineStepStatus | None,
+    model_task: PipelineLinkedTaskStatus | None,
+    runtime_progress: dict[str, Any] | None,
+) -> PipelineStepProgress:
+    model_progress = _build_model_task_progress(
+        active_step=active_step,
+        display_step=display_step,
+        interrupted=interrupted,
+        model_task=model_task,
+    )
+    if model_progress is not None:
+        return model_progress
+
+    if step_result is not None:
+        if step_result.status == "ok":
+            return PipelineStepProgress(step=display_step, percent=100, hint="已完成", tone="ok")
+        if step_result.status == "failed":
+            return PipelineStepProgress(step=display_step, percent=100, hint="执行失败", tone="failed")
+        if step_result.status == "skipped":
+            return PipelineStepProgress(step=display_step, percent=100, hint="已跳过", tone="skipped")
+
+    if runtime_progress is not None:
+        tone = "running"
+        if interrupted and active_step == display_step:
+            tone = "waiting"
+        elif runtime_progress.get("indeterminate"):
+            tone = "running"
+        percent = int(runtime_progress.get("percent") or 0)
+        hint = str(runtime_progress.get("message") or runtime_progress.get("stage") or "处理中")
+        if percent >= 100 and tone != "waiting":
+            tone = "ok"
+        return PipelineStepProgress(
+            step=display_step,
+            percent=percent,
+            hint=hint,
+            tone=tone,
+            indeterminate=bool(runtime_progress.get("indeterminate", False)),
+        )
+
+    if interrupted and active_step == display_step:
+        return PipelineStepProgress(step=display_step, percent=12, hint="等待人工确认", tone="waiting")
+    if active_step == display_step:
+        return PipelineStepProgress(step=display_step, percent=62, hint="处理中", tone="running", indeterminate=True)
+    return PipelineStepProgress(step=display_step, percent=0, hint="未开始", tone="pending")
+
+
+def _build_progress_snapshot(
+    *,
+    state: PipelineState,
+    active_step: str | None,
+    interrupted: bool,
+    step_results: dict[str, PipelineStepStatus],
+    model_task: PipelineLinkedTaskStatus | None,
+    runtime_progress: dict[str, dict[str, Any]],
+) -> PipelineProgressSnapshot:
+    ordered_steps = _resolve_display_steps(state, step_results)
+    progress_steps: dict[str, PipelineStepProgress] = {}
+    total_percent = 0
+    completed_steps = 0
+    overall_tone = "pending"
+    overall_indeterminate = False
+
+    for step in ordered_steps:
+        tech_step = DISPLAY_STEP_TO_TECH_STEP.get(step, step)
+        step_progress = _build_step_progress(
+            display_step=step,
+            active_step=active_step if active_step != tech_step else step,
+            interrupted=interrupted,
+            step_result=_resolve_step_result_for_progress(step, step_results),
+            model_task=model_task,
+            runtime_progress=runtime_progress.get(step) or runtime_progress.get(tech_step),
+        )
+        progress_steps[step] = step_progress
+        total_percent += step_progress.percent
+        if step_progress.percent >= 100:
+            completed_steps += 1
+        overall_indeterminate = overall_indeterminate or step_progress.indeterminate
+        if step_progress.tone == "failed":
+            overall_tone = "failed"
+        elif step_progress.tone == "running" and overall_tone != "failed":
+            overall_tone = "running"
+        elif step_progress.tone == "waiting" and overall_tone not in {"failed", "running"}:
+            overall_tone = "waiting"
+        elif step_progress.tone == "ok" and overall_tone == "pending":
+            overall_tone = "ok"
+
+    overall_percent = _clamp_percent(total_percent / len(ordered_steps)) if ordered_steps else 0
+    if state.get("completed") and not state.get("error"):
+        overall_hint = "全部步骤已完成"
+    elif state.get("completed") and state.get("error"):
+        overall_hint = "流程已结束，存在错误"
+    elif interrupted and active_step:
+        overall_hint = f"等待确认：{active_step}"
+    elif active_step:
+        overall_hint = f"正在执行：{active_step}"
+    else:
+        overall_hint = "等待开始"
+
+    return PipelineProgressSnapshot(
+        ordered_steps=ordered_steps,
+        steps=progress_steps,
+        overall=PipelineOverallProgress(
+            percent=overall_percent,
+            hint=overall_hint,
+            tone=overall_tone,
+            indeterminate=overall_indeterminate and overall_percent < 100,
+            active_step=active_step,
+            completed_steps=completed_steps,
+            total_steps=len(ordered_steps),
+        ),
+    )
+
+
 def _to_status_response(run_id: str) -> PipelineStatusResponse:
     gs = _get_graph_state(run_id)
     # LangGraph 对未知 thread_id 也返回空 StateSnapshot，需要额外校验
@@ -185,6 +401,14 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
                 state=task["state"],
                 queue_position=task.get("queue_position"),
             )
+    progress = _build_progress_snapshot(
+        state=state,
+        active_step=active_step,
+        interrupted=interrupted,
+        step_results=step_results,
+        model_task=model_task,
+        runtime_progress=get_pipeline_progress(run_id),
+    )
 
     return PipelineStatusResponse(
         run_id=run_id,
@@ -198,6 +422,7 @@ def _to_status_response(run_id: str) -> PipelineStatusResponse:
         step_results=step_results,
         interrupted=interrupted,
         model_task=model_task,
+        progress=progress,
         initial_params={
             "original_dataset": state.get("original_dataset"),
             "detector_name": state.get("detector_name"),
@@ -365,6 +590,15 @@ def abort_pipeline(run_id: str) -> PipelineStatusResponse:
 def _snapshot_signature(resp: PipelineStatusResponse) -> str:
     """用于 SSE 去重：只有签名变化才发一条 event。"""
     step_states = {name: s.status for name, s in resp.step_results.items()}
+    progress_steps = {
+        name: {
+            "percent": step.percent,
+            "hint": step.hint,
+            "tone": step.tone,
+            "indeterminate": step.indeterminate,
+        }
+        for name, step in resp.progress.steps.items()
+    }
     signature = {
         "revision": resp.revision,
         "snapshot_id": resp.snapshot_id,
@@ -374,6 +608,12 @@ def _snapshot_signature(resp: PipelineStatusResponse) -> str:
         "interrupted": resp.interrupted,
         "error": resp.error,
         "step_states": step_states,
+        "model_task_state": resp.model_task.state if resp.model_task else None,
+        "model_task_queue_position": resp.model_task.queue_position if resp.model_task else None,
+        "progress_percent": resp.progress.overall.percent,
+        "progress_active_step": resp.progress.overall.active_step,
+        "progress_hint": resp.progress.overall.hint,
+        "progress_steps": progress_steps,
     }
     return json.dumps(signature, sort_keys=True, ensure_ascii=False)
 
@@ -382,20 +622,20 @@ def _snapshot_signature(resp: PipelineStatusResponse) -> str:
 async def stream_pipeline_events(
     run_id: str,
     request: Request,
-    poll_interval: float = 1.0,
+    poll_interval: float = 0.25,
     max_duration: float = 3600.0,
 ) -> StreamingResponse:
     """Server-Sent Events：状态变化时推送一次快照，替代前端 HTTP 轮询。
 
     Query params：
-      - poll_interval：服务端内部轮询周期（秒），默认 1.0
+      - poll_interval：服务端内部轮询周期（秒），默认 0.25
       - max_duration：最长保持连接时间（秒），默认 3600；到期后自动关闭
     """
     gs = _get_graph_state(run_id)
     if gs is None or not gs.values or not gs.values.get("run_id"):
         raise HTTPException(status_code=404, detail=f"pipeline run not found: {run_id}")
 
-    poll_interval = max(0.1, min(poll_interval, 30.0))
+    poll_interval = max(0.2, min(poll_interval, 30.0))
     max_duration = max(10.0, min(max_duration, 24 * 3600.0))
 
     async def event_stream() -> AsyncIterator[bytes]:

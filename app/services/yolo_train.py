@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import re
 from pathlib import Path
 
 from app.schemas.preprocess import YoloTrainRequest, YoloTrainResponse
 from app.services.yolo_env import resolve_env_python
 from app.services.yolo_model_resolver import resolve_local_yolo_model
+from app.services.task_manager import report_progress
+
+
+_EPOCH_PATTERN = re.compile(r"(?<!\d)(\d+)\s*/\s*(\d+)(?!\d)")
 
 
 def run_yolo_train(request: YoloTrainRequest) -> YoloTrainResponse:
@@ -55,23 +60,55 @@ def run_yolo_train(request: YoloTrainRequest) -> YoloTrainResponse:
     if request.batch is not None:
         cmd.append(f"batch={request.batch}")
 
-    proc = subprocess.run(
+    report_progress(
+        percent=0,
+        current=0,
+        total=request.epochs,
+        unit="epoch",
+        stage="train",
+        message="starting yolo training",
+        indeterminate=False,
+    )
+
+    proc = subprocess.Popen(
         cmd,
         cwd=str(root),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        check=False,
     )
+    stdout_lines: list[str] = []
+    assert proc.stdout is not None
+    for raw_line in proc.stdout:
+        stdout_lines.append(raw_line)
+        match = _EPOCH_PATTERN.search(raw_line)
+        if not match:
+            continue
+        current_epoch = int(match.group(1))
+        total_epochs = int(match.group(2))
+        if total_epochs <= 0:
+            continue
+        report_progress(
+            current=current_epoch,
+            total=total_epochs,
+            unit="epoch",
+            stage="train",
+            message=f"training epoch {current_epoch}/{total_epochs}",
+            indeterminate=False,
+        )
+    stderr_text = proc.stderr.read() if proc.stderr is not None else ""
+    return_code = proc.wait()
+    stdout_text = "".join(stdout_lines)
 
     command_display = shlex.join(cmd)
 
     return YoloTrainResponse(
-        status="ok" if proc.returncode == 0 else "failed",
+        status="ok" if return_code == 0 else "failed",
         command=command_display,
         cwd=str(root),
         project=request.project,
         name=request.name,
-        exit_code=proc.returncode,
-        stdout=proc.stdout or "",
-        stderr=proc.stderr or "",
+        exit_code=return_code,
+        stdout=stdout_text,
+        stderr=stderr_text,
     )

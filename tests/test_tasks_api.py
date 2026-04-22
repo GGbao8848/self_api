@@ -3,7 +3,7 @@ import time
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
-from app.services.task_manager import cancel_task, ensure_current_task_active, get_task, submit_task
+from app.services.task_manager import cancel_task, ensure_current_task_active, get_task, report_progress, submit_task
 
 
 def _wait_for_task(client: TestClient, task_id: str, timeout_seconds: float = 5.0) -> dict:
@@ -57,6 +57,31 @@ def test_task_cancel_endpoint(isolated_runtime, client: TestClient) -> None:
 
     task_payload = _wait_for_task(client, task_id)
     assert task_payload["state"] == "cancelled"
+
+
+def test_task_status_exposes_runtime_progress(isolated_runtime, client: TestClient) -> None:
+    get_settings.cache_clear()
+
+    def _runner() -> dict[str, str]:
+        for index in range(1, 4):
+            ensure_current_task_active()
+            report_progress(
+                current=index,
+                total=3,
+                unit="file",
+                stage="copy",
+                message=f"processed {index}/3 files",
+                indeterminate=False,
+            )
+            time.sleep(0.02)
+        return {"output_dir": "."}
+
+    task_id = submit_task("unit_progress_task", runner=_runner)
+    payload = _wait_for_task(client, task_id)
+
+    assert payload["state"] == "succeeded"
+    assert payload["progress"]["percent"] == 100
+    assert payload["progress"]["stage"] == "completed"
 
 
 def test_task_cancel_removes_pending_queued_task(isolated_runtime) -> None:

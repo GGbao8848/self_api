@@ -8,7 +8,7 @@ from app.schemas.preprocess import (
     SplitYoloDatasetResponse,
     SplitYoloFileDetail,
 )
-from app.services.task_manager import ensure_current_task_active
+from app.services.task_manager import ensure_current_task_active, report_progress
 from app.utils.images import normalize_extensions
 
 _SPLIT_DIR_NAMES = {"train", "val", "test"}
@@ -72,15 +72,48 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
 
     normalized_exts = normalize_extensions(request.extensions)
     iterator = images_dir.rglob("*") if request.recursive else images_dir.glob("*")
+    candidate_paths = list(iterator)
     image_paths = []
-    for path in iterator:
+    report_progress(
+        current=0,
+        total=max(len(candidate_paths), 1),
+        unit="entry",
+        stage="scan_images",
+        message="scanning dataset images",
+        indeterminate=False,
+    )
+    for index, path in enumerate(candidate_paths, start=1):
         ensure_current_task_active()
         if not path.is_file() or path.suffix.lower() not in normalized_exts:
+            report_progress(
+                current=index,
+                total=len(candidate_paths),
+                unit="entry",
+                stage="scan_images",
+                message=f"scanned {index}/{len(candidate_paths)} entries",
+                indeterminate=False,
+            )
             continue
         rel = path.relative_to(images_dir)
         if request.ignore_existing_split_dirs and rel.parts and rel.parts[0] in _SPLIT_DIR_NAMES:
+            report_progress(
+                current=index,
+                total=len(candidate_paths),
+                unit="entry",
+                stage="scan_images",
+                message=f"scanned {index}/{len(candidate_paths)} entries",
+                indeterminate=False,
+            )
             continue
         image_paths.append(path)
+        report_progress(
+            current=index,
+            total=len(candidate_paths),
+            unit="entry",
+            stage="scan_images",
+            message=f"scanned {index}/{len(candidate_paths)} entries",
+            indeterminate=False,
+        )
     image_paths = sorted(image_paths)
 
     details: list[SplitYoloFileDetail] = []
@@ -105,7 +138,14 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
 
         pairs.append((image_path, label_path if label_path.exists() else None, rel_path))
 
-    working_pairs = list(pairs)
+    report_progress(
+        current=0,
+        total=max(len(working_pairs := list(pairs)), 1),
+        unit="image",
+        stage="split_copy",
+        message="copying split dataset",
+        indeterminate=False,
+    )
     if request.shuffle:
         random.Random(request.seed).shuffle(working_pairs)
 
@@ -141,6 +181,7 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
     val_images = 0
     test_images = 0
 
+    copied_items = 0
     for split_name in ordered_splits:
         for source_image, source_label, rel_path in split_assignments[split_name]:
             ensure_current_task_active()
@@ -167,6 +208,15 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
                         target_label=str(target_label),
                         skipped_reason="target file already exists",
                     )
+                )
+                copied_items += 1
+                report_progress(
+                    current=copied_items,
+                    total=max(len(working_pairs), 1),
+                    unit="image",
+                    stage="split_copy",
+                    message=f"processed {copied_items}/{len(working_pairs)} split items",
+                    indeterminate=False,
                 )
                 continue
 
@@ -197,6 +247,15 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
                         skipped_reason=f"failed to copy/move: {exc}",
                     )
                 )
+                copied_items += 1
+                report_progress(
+                    current=copied_items,
+                    total=max(len(working_pairs), 1),
+                    unit="image",
+                    stage="split_copy",
+                    message=f"processed {copied_items}/{len(working_pairs)} split items",
+                    indeterminate=False,
+                )
                 continue
 
             if split_name == "train":
@@ -215,10 +274,26 @@ def run_split_yolo_dataset(request: SplitYoloDatasetRequest) -> SplitYoloDataset
                     target_label=str(target_label),
                 )
             )
+            copied_items += 1
+            report_progress(
+                current=copied_items,
+                total=max(len(working_pairs), 1),
+                unit="image",
+                stage="split_copy",
+                message=f"processed {copied_items}/{len(working_pairs)} split items",
+                indeterminate=False,
+            )
 
     copied_classes_file = None
     classes_src = input_dir / "classes.txt"
     if classes_src.exists() and classes_src.is_file():
+        report_progress(
+            percent=98,
+            unit="image",
+            stage="copy_classes",
+            message="copying classes.txt",
+            indeterminate=False,
+        )
         classes_dst = output_dir / "classes.txt"
         classes_dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(classes_src, classes_dst)

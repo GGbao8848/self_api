@@ -145,6 +145,7 @@ def node_xml_to_yolo(state: PipelineState) -> dict[str, Any]:
     """调用 xml-to-yolo 服务（同步，含 class_name_map 支持）。"""
     from app.services.xml_to_yolo import run_xml_to_yolo
     from app.schemas.preprocess import XmlToYoloRequest
+    from app.services.task_manager import bind_pipeline_progress, report_progress
 
     final_classes = state.get("final_classes")
     class_index_map = state.get("class_index_map")
@@ -169,7 +170,9 @@ def node_xml_to_yolo(state: PipelineState) -> dict[str, Any]:
         write_classes_file=True,
     )
     try:
-        resp = run_xml_to_yolo(req)
+        with bind_pipeline_progress(state["run_id"], "xml_to_yolo"):
+            report_progress(percent=0, stage="scan_xml", message="starting xml-to-yolo conversion")
+            resp = run_xml_to_yolo(req)
     except (ValueError, OSError) as exc:
         return {
             **_set_step_result(state, "xml_to_yolo", StepResult(
@@ -233,6 +236,7 @@ def node_review_labels(state: PipelineState) -> dict[str, Any]:
 
     from app.schemas.preprocess import XmlToYoloRequest
     from app.services.xml_to_yolo import run_xml_to_yolo
+    from app.services.task_manager import bind_pipeline_progress, report_progress
 
     def _pick_ov(key: str) -> Any:
         if key in override:
@@ -265,7 +269,9 @@ def node_review_labels(state: PipelineState) -> dict[str, Any]:
         write_classes_file=True,
     )
     try:
-        resp = run_xml_to_yolo(req)
+        with bind_pipeline_progress(state["run_id"], "review_labels"):
+            report_progress(percent=0, stage="rebuild_labels", message="rebuilding labels from review overrides")
+            resp = run_xml_to_yolo(req)
     except (ValueError, OSError) as exc:
         return {
             **_set_step_result(state, "review_labels", StepResult(
@@ -306,6 +312,7 @@ def node_split_dataset(state: PipelineState) -> dict[str, Any]:
     """数据集 train/val 划分。"""
     from app.services.split_yolo_dataset import run_split_yolo_dataset
     from app.schemas.preprocess import SplitYoloDatasetRequest
+    from app.services.task_manager import bind_pipeline_progress, report_progress
     import datetime
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M")
@@ -358,7 +365,9 @@ def node_split_dataset(state: PipelineState) -> dict[str, Any]:
         copy_files=final_params["copy_files"],
     )
     try:
-        resp = run_split_yolo_dataset(req)
+        with bind_pipeline_progress(state["run_id"], "split_dataset"):
+            report_progress(percent=0, stage="split_dataset", message="starting dataset split")
+            resp = run_split_yolo_dataset(req)
     except (ValueError, OSError) as exc:
         return {
             **_set_step_result(state, "split_dataset", StepResult(
@@ -390,6 +399,7 @@ def node_crop_window(state: PipelineState) -> dict[str, Any]:
     from pathlib import Path as _Path
     from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
     from app.schemas.preprocess import YoloSlidingWindowCropRequest
+    from app.services.task_manager import bind_pipeline_progress, report_progress
 
     split_dir = state.get("split_output_dir", "")
     data_payload: dict[str, Any] = {"split_dir": split_dir}
@@ -446,11 +456,13 @@ def node_crop_window(state: PipelineState) -> dict[str, Any]:
         _shutil.rmtree(crop_params["output_dir"], ignore_errors=True)
 
     try:
-        crop_resp = run_yolo_sliding_window_crop(YoloSlidingWindowCropRequest(
-            input_dir=crop_params["input_dir"],
-            output_dir=crop_params["output_dir"],
-            only_wide=bool(crop_params["only_wide"]),
-        ))
+        with bind_pipeline_progress(state["run_id"], "crop_window"):
+            report_progress(percent=0, stage="crop_windows", message="starting sliding-window crop")
+            crop_resp = run_yolo_sliding_window_crop(YoloSlidingWindowCropRequest(
+                input_dir=crop_params["input_dir"],
+                output_dir=crop_params["output_dir"],
+                only_wide=bool(crop_params["only_wide"]),
+            ))
         data_payload["crop"] = {
             "output_dir": crop_resp.output_dir,
             "input_images": crop_resp.input_images,
@@ -503,6 +515,7 @@ def node_augment_only(state: PipelineState) -> dict[str, Any]:
     from pathlib import Path as _Path
     from app.services.yolo_augment import run_yolo_augment
     from app.schemas.preprocess import YoloAugmentRequest
+    from app.services.task_manager import bind_pipeline_progress, report_progress
 
     crop_root = state.get("crop_output_dir", "")
     data_payload: dict[str, Any] = {"crop_root": crop_root}
@@ -546,10 +559,12 @@ def node_augment_only(state: PipelineState) -> dict[str, Any]:
     )
 
     try:
-        aug_resp = run_yolo_augment(YoloAugmentRequest(
-            input_dir=augment_params["input_dir"],
-            output_dir=augment_params["output_dir"],
-        ))
+        with bind_pipeline_progress(state["run_id"], "augment_only"):
+            report_progress(percent=0, stage="augment_images", message="starting offline augmentation")
+            aug_resp = run_yolo_augment(YoloAugmentRequest(
+                input_dir=augment_params["input_dir"],
+                output_dir=augment_params["output_dir"],
+            ))
     except Exception as exc:
         logger.warning("augment_only: augment 失败", exc_info=True)
         return {
@@ -593,6 +608,7 @@ def node_publish_transfer(state: PipelineState) -> dict[str, Any]:
     remote 模式：zip → SFTP → 远端解压。
     """
     from pathlib import Path as _Path
+    from app.services.task_manager import bind_pipeline_progress, report_progress
 
     execution_mode = state.get("execution_mode", "local")
     split_output_dir = (state.get("split_output_dir") or "").rstrip("/")
@@ -640,7 +656,9 @@ def node_publish_transfer(state: PipelineState) -> dict[str, Any]:
 
     req = PublishYoloDatasetRequest(**publish_params)
     try:
-        resp = run_publish_yolo_dataset(req)
+        with bind_pipeline_progress(state["run_id"], "publish_transfer"):
+            report_progress(percent=0, stage="prepare_publish", message="starting dataset publish")
+            resp = run_publish_yolo_dataset(req)
     except (ValueError, OSError) as exc:
         return {
             **_set_step_result(state, "publish_transfer", StepResult(
@@ -735,7 +753,7 @@ def node_train(state: PipelineState) -> dict[str, Any]:
 
 def node_poll_train(state: PipelineState) -> dict[str, Any]:
     """轮询训练任务直到完成或失败（最长等待 12 小时，每 30 秒查一次）。"""
-    from app.services.task_manager import get_task
+    from app.services.task_manager import bind_pipeline_progress, get_task, report_progress
 
     task_id = state.get("train_task_id")
     if not task_id:
@@ -744,18 +762,29 @@ def node_poll_train(state: PipelineState) -> dict[str, Any]:
         ))
 
     max_polls = 1440  # 12h / 30s
-    for _ in range(max_polls):
-        task = get_task(task_id)
-        if task is None:
-            break
-        if task["state"] in ("succeeded", "failed", "cancelled"):
-            status = "ok" if task["state"] == "succeeded" else "failed"
-            return _set_step_result(state, "poll_train", StepResult(
-                status=status,
-                summary=f"训练 {task['state']}",
-                data=task.get("result") or {},
-            ))
-        time.sleep(30)
+    with bind_pipeline_progress(state["run_id"], "poll_train"):
+        for _ in range(max_polls):
+            task = get_task(task_id)
+            if task is None:
+                break
+            task_progress = task.get("progress") or {}
+            report_progress(
+                percent=task_progress.get("percent"),
+                current=task_progress.get("current"),
+                total=task_progress.get("total"),
+                unit=task_progress.get("unit"),
+                stage=task_progress.get("stage") or "train_task",
+                message=task_progress.get("message") or f"training task {task['state']}",
+                indeterminate=task_progress.get("indeterminate"),
+            )
+            if task["state"] in ("succeeded", "failed", "cancelled"):
+                status = "ok" if task["state"] == "succeeded" else "failed"
+                return _set_step_result(state, "poll_train", StepResult(
+                    status=status,
+                    summary=f"训练 {task['state']}",
+                    data=task.get("result") or {},
+                ))
+            time.sleep(30)
 
     return _set_step_result(state, "poll_train", StepResult(
         status="failed", summary="训练超时或任务丢失", data={}
@@ -822,19 +851,22 @@ def node_export_model(state: PipelineState) -> dict[str, Any]:
 
     from app.schemas.preprocess import YoloExportRequest
     from app.services.yolo_export import run_yolo_export
+    from app.services.task_manager import bind_pipeline_progress, report_progress
 
     project = str(train_data.get("project") or "").rstrip("/")
     run_name = str(train_data.get("name") or "").strip()
     best_pt_path = f"{project}/{run_name}/weights/best.pt" if project and run_name else ""
     try:
-        export_resp = run_yolo_export(
-            YoloExportRequest(
-                best_pt_path=best_pt_path,
-                project_root_dir=state.get("project_root_dir", ""),
-                yolo_train_env=state.get("yolo_train_env", ""),
-                overwrite=True,
+        with bind_pipeline_progress(state["run_id"], "export_model"):
+            report_progress(percent=0, stage="export_model", message="starting model export")
+            export_resp = run_yolo_export(
+                YoloExportRequest(
+                    best_pt_path=best_pt_path,
+                    project_root_dir=state.get("project_root_dir", ""),
+                    yolo_train_env=state.get("yolo_train_env", ""),
+                    overwrite=True,
+                )
             )
-        )
     except Exception as exc:
         return {
             **_set_step_result(state, "export_model", StepResult(
@@ -866,6 +898,7 @@ def node_model_infer(state: PipelineState) -> dict[str, Any]:
     """模型导出后推理：人工确认参数后执行批量推理。"""
     from app.schemas.preprocess import YoloInferRequest
     from app.services.yolo_infer import run_yolo_infer
+    from app.services.task_manager import bind_pipeline_progress, report_progress
 
     export_result = (state.get("step_results") or {}).get("export_model", {})
     export_data = export_result.get("data", {}) if isinstance(export_result, dict) else {}
@@ -948,7 +981,9 @@ def node_model_infer(state: PipelineState) -> dict[str, Any]:
         }
 
     try:
-        infer_resp = run_yolo_infer(YoloInferRequest(**final_params))
+        with bind_pipeline_progress(state["run_id"], "model_infer"):
+            report_progress(percent=0, stage="infer_images", message="starting model inference")
+            infer_resp = run_yolo_infer(YoloInferRequest(**final_params))
     except Exception as exc:
         return {
             **_set_step_result(state, "model_infer", StepResult(

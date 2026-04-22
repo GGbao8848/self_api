@@ -14,7 +14,7 @@ import {
 } from "/static/pipeline-ui/js/classMappingUi.js";
 
 const STORAGE_KEY = "self_api_pipeline_runs";
-const POLL_INTERVAL_MS = 3000;
+const POLL_INTERVAL_MS = 800;
 const API_BASE = `${location.origin}/api/v1/pipeline`;
 
 const STEP_META = {
@@ -225,6 +225,10 @@ function shouldShowExportStep(data) {
 }
 
 function getDisplaySteps(data) {
+  const progressOrderedSteps = getProgressSnapshot(data).ordered_steps;
+  if (Array.isArray(progressOrderedSteps) && progressOrderedSteps.length) {
+    return progressOrderedSteps;
+  }
   const steps = [...BASE_DISPLAY_STEPS];
   if (shouldShowSlidingWindowSteps(data)) {
     steps.splice(2, 0, "crop_window", "augment_only");
@@ -377,6 +381,9 @@ const el = {
   detailRefreshBtn: qs("detailRefreshBtn"),
   detailCopyBtn: qs("detailCopyBtn"),
   detailAbortBtn: qs("detailAbortBtn"),
+  progressOverviewMeta: qs("progressOverviewMeta"),
+  progressOverviewFill: qs("progressOverviewFill"),
+  progressOverviewHint: qs("progressOverviewHint"),
   statusTimeline: qs("statusTimeline"),
   stepList: qs("stepList"),
   reviewCard: qs("reviewCard"),
@@ -789,6 +796,40 @@ function getStepMeta(stepName) {
 
 function getStatusText(status) {
   return STATUS_TEXT[status] || status || STATUS_TEXT.unknown;
+}
+
+function getProgressSnapshot(runData) {
+  return runData?.progress || { ordered_steps: [], steps: {}, overall: {} };
+}
+
+function getProgressStep(runData, stepName) {
+  const progress = getProgressSnapshot(runData);
+  return progress.steps?.[stepName] || {
+    step: stepName,
+    percent: 0,
+    hint: "未开始",
+    tone: "pending",
+    indeterminate: false,
+  };
+}
+
+function getProgressOverall(runData) {
+  const progress = getProgressSnapshot(runData);
+  return progress.overall || {
+    percent: 0,
+    hint: "等待开始",
+    tone: "pending",
+    indeterminate: false,
+    active_step: null,
+    completed_steps: 0,
+    total_steps: 0,
+  };
+}
+
+function getProgressActiveDisplayStep(runData) {
+  const overall = getProgressOverall(runData);
+  const rawActiveStep = overall.active_step || runData.active_step || runData.current_step;
+  return resolveActiveDisplayStep(rawActiveStep);
 }
 
 function detectModelOperation({ stepName = "", taskType = "", pendingStep = "" } = {}) {
@@ -1764,12 +1805,32 @@ function renderDetail(data) {
   el.detailStatusPill.textContent = statusInfo.text;
   el.detailStatusPill.className = `pill ${statusInfo.key}`;
   const rawActiveStep = data.active_step || hintedStep || data.current_step;
-  const activeDisplayStep = resolveActiveDisplayStep(rawActiveStep);
+  const activeDisplayStep = getProgressActiveDisplayStep(data) || resolveActiveDisplayStep(rawActiveStep);
   const displaySteps = getDisplaySteps(data);
+  const overallProgress = getProgressOverall(data);
+
+  if (el.progressOverviewMeta) {
+    const total = overallProgress.total_steps || displaySteps.length || 0;
+    const completed = overallProgress.completed_steps || 0;
+    el.progressOverviewMeta.textContent = total > 0
+      ? `${overallProgress.percent}% · ${completed}/${total}`
+      : `${overallProgress.percent}%`;
+  }
+  if (el.progressOverviewHint) {
+    const activeMeta = overallProgress.active_step
+      ? ` · ${getStepMeta(resolveActiveDisplayStep(overallProgress.active_step) || overallProgress.active_step).label}`
+      : "";
+    el.progressOverviewHint.textContent = `${overallProgress.hint || "等待开始"}${activeMeta}`;
+  }
+  if (el.progressOverviewFill) {
+    el.progressOverviewFill.style.width = `${overallProgress.percent || 0}%`;
+    el.progressOverviewFill.className = `progress-fill ${overallProgress.tone || "pending"}${overallProgress.indeterminate ? " indeterminate" : ""}`;
+  }
 
   el.stepList.innerHTML = "";
   for (const stepName of displaySteps) {
     const result = resolveStepResultForDisplay(stepName, data);
+    const stepProgress = getProgressStep(data, stepName);
     const li = document.createElement("li");
     let cls = "";
     let statusInfoForStep = { key: "pending", text: getStatusText("pending") };
@@ -1824,7 +1885,25 @@ function renderDetail(data) {
     const summaryText = document.createElement("div");
     summaryText.className = "step__summary";
     summaryText.textContent = buildStepSummary(stepName, result, result?.data || {});
-    summaryLine.append(header, summaryText);
+    const progressWrap = document.createElement("div");
+    progressWrap.className = "step-progress";
+    const progressRow = document.createElement("div");
+    progressRow.className = "step-progress__row";
+    const progressHint = document.createElement("span");
+    progressHint.className = "step-progress__hint";
+    progressHint.textContent = stepProgress.hint || "未开始";
+    const progressMeta = document.createElement("span");
+    progressMeta.className = "step-progress__meta";
+    progressMeta.textContent = `${stepProgress.percent || 0}%`;
+    progressRow.append(progressHint, progressMeta);
+    const progressTrack = document.createElement("div");
+    progressTrack.className = "progress-track";
+    const progressFill = document.createElement("div");
+    progressFill.className = `progress-fill ${stepProgress.tone || "pending"}${stepProgress.indeterminate ? " indeterminate" : ""}`;
+    progressFill.style.width = `${stepProgress.percent || 0}%`;
+    progressTrack.appendChild(progressFill);
+    progressWrap.append(progressRow, progressTrack);
+    summaryLine.append(header, summaryText, progressWrap);
 
     const detailData = result?.data || {};
     const detailBody = document.createElement("div");
@@ -1958,7 +2037,7 @@ function startPolling(runId) {
   stopPolling();
   if (typeof EventSource !== "undefined") {
     try {
-      const es = new EventSource(`${API_BASE}/${runId}/events?poll_interval=1`);
+      const es = new EventSource(`${API_BASE}/${runId}/events?poll_interval=0.25`);
       state.eventSource = es;
       es.addEventListener("snapshot", (ev) => {
         if (runId !== state.activeRunId) return;

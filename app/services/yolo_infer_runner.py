@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import shutil
 from pathlib import Path
 
@@ -33,6 +34,25 @@ def _save_yolo_txt(label_path: Path, boxes_xyxy, cls_ids, img_w: int, img_h: int
         lines.append(f"{int(c)} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}")
     label_path.parent.mkdir(parents=True, exist_ok=True)
     label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def _emit_progress(*, current: int, total: int, stage: str, message: str) -> None:
+    sys.stdout.write(
+        "__SELF_API_PROGRESS__"
+        + json.dumps(
+            {
+                "current": current,
+                "total": total,
+                "stage": stage,
+                "message": message,
+                "unit": "image",
+                "indeterminate": False,
+            },
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
+    sys.stdout.flush()
 
 
 def main() -> None:
@@ -114,6 +134,12 @@ def main() -> None:
     no_detect_images = 0
     labels_written = 0
     for img_path in images:
+        _emit_progress(
+            current=detected_images + no_detect_images,
+            total=len(images),
+            stage="infer_images",
+            message=f"running inference on {img_path.name}",
+        )
         results = model.predict(
             source=str(img_path),
             imgsz=int(args.imgsz),
@@ -129,6 +155,12 @@ def main() -> None:
             no_detect_images += 1
             if bool(args.save_no_detect):
                 shutil.copy2(img_path, output_dir / "no_detect" / img_path.name)
+            _emit_progress(
+                current=detected_images + no_detect_images,
+                total=len(images),
+                stage="infer_images",
+                message=f"processed {detected_images + no_detect_images}/{len(images)} images",
+            )
             continue
 
         detected_images += 1
@@ -151,6 +183,12 @@ def main() -> None:
                 int(plotted.shape[0]),
             )
             labels_written += 1
+        _emit_progress(
+            current=detected_images + no_detect_images,
+            total=len(images),
+            stage="infer_images",
+            message=f"processed {detected_images + no_detect_images}/{len(images)} images",
+        )
 
     summary = {
         "status": "ok",

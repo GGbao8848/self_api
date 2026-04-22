@@ -1,6 +1,7 @@
 import logging
 import threading
 import uuid
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from json import dumps
@@ -41,6 +42,18 @@ class TaskRecord(TypedDict):
     artifacts: list[dict[str, Any]]
     queue_key: str | None
     queue_position: int | None
+    progress: dict[str, Any]
+
+
+class ProgressPayload(TypedDict):
+    percent: int
+    current: int | None
+    total: int | None
+    unit: str | None
+    stage: str | None
+    message: str | None
+    indeterminate: bool
+    updated_at: str | None
 
 
 _TASKS: dict[str, TaskRecord] = {}
@@ -50,6 +63,7 @@ _TASK_QUEUES: dict[str, list[str]] = {}
 _ACTIVE_QUEUED_TASKS: dict[str, str] = {}
 _CALLBACK_URL_LOCKS: dict[str, threading.Lock] = {}
 _CALLBACK_URL_LOCKS_GUARD = threading.Lock()
+_PIPELINE_PROGRESS: dict[str, dict[str, ProgressPayload]] = {}
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +77,57 @@ def _set_current_task_id(task_id: str | None) -> None:
 
 def get_current_task_id() -> str | None:
     return getattr(_TASK_LOCAL, "task_id", None)
+
+
+def _set_current_pipeline_context(run_id: str | None, step: str | None) -> None:
+    _TASK_LOCAL.pipeline_run_id = run_id
+    _TASK_LOCAL.pipeline_step = step
+
+
+def get_current_pipeline_context() -> tuple[str | None, str | None]:
+    return (
+        getattr(_TASK_LOCAL, "pipeline_run_id", None),
+        getattr(_TASK_LOCAL, "pipeline_step", None),
+    )
+
+
+def _clamp_percent(value: int | float | None) -> int:
+    if value is None:
+        return 0
+    return max(0, min(100, int(round(float(value)))))
+
+
+def _normalize_progress(
+    *,
+    percent: int | float | None = None,
+    current: int | None = None,
+    total: int | None = None,
+    unit: str | None = None,
+    stage: str | None = None,
+    message: str | None = None,
+    indeterminate: bool | None = None,
+    previous: dict[str, Any] | None = None,
+) -> ProgressPayload:
+    prev = previous or {}
+    resolved_total = total if total is not None else prev.get("total")
+    resolved_current = current if current is not None else prev.get("current")
+    inferred_percent = percent
+    if inferred_percent is None and resolved_total and resolved_current is not None and resolved_total > 0:
+        inferred_percent = (resolved_current / resolved_total) * 100
+    return {
+        "percent": _clamp_percent(inferred_percent if inferred_percent is not None else prev.get("percent", 0)),
+        "current": resolved_current,
+        "total": resolved_total,
+        "unit": unit if unit is not None else prev.get("unit"),
+        "stage": stage if stage is not None else prev.get("stage"),
+        "message": message if message is not None else prev.get("message"),
+        "indeterminate": bool(indeterminate if indeterminate is not None else prev.get("indeterminate", False)),
+        "updated_at": _now_iso(),
+    }
+
+
+def _default_progress() -> ProgressPayload:
+    return _normalize_progress()
 
 
 def ensure_current_task_active() -> None:
@@ -89,6 +154,7 @@ def _update_task(
     callback_event: dict[str, Any] | object = _UNSET,
     artifacts: list[dict[str, Any]] | object = _UNSET,
     queue_position: int | None | object = _UNSET,
+    progress: dict[str, Any] | object = _UNSET,
 ) -> None:
     with _LOCK:
         task = _TASKS.get(task_id)
@@ -118,7 +184,129 @@ def _update_task(
             task["artifacts"] = artifacts
         if queue_position is not _UNSET:
             task["queue_position"] = queue_position
+        if progress is not _UNSET:
+            task["progress"] = dict(progress)
         task["updated_at"] = _now_iso()
+
+
+def set_task_progress(
+    task_id: str,
+    *,
+    percent: int | float | None = None,
+    current: int | None = None,
+    total: int | None = None,
+    unit: str | None = None,
+    stage: str | None = None,
+    message: str | None = None,
+    indeterminate: bool | None = None,
+) -> None:
+    with _LOCK:
+        task = _TASKS.get(task_id)
+        if task is None:
+            return
+        task["progress"] = _normalize_progress(
+            percent=percent,
+            current=current,
+            total=total,
+            unit=unit,
+            stage=stage,
+            message=message,
+            indeterminate=indeterminate,
+            previous=task.get("progress"),
+        )
+        task["updated_at"] = _now_iso()
+
+
+def get_pipeline_progress(run_id: str) -> dict[str, ProgressPayload]:
+    with _LOCK:
+        progress = _PIPELINE_PROGRESS.get(run_id, {})
+        return deepcopy(progress)
+
+
+def set_pipeline_progress(
+    run_id: str,
+    step: str,
+    *,
+    percent: int | float | None = None,
+    current: int | None = None,
+    total: int | None = None,
+    unit: str | None = None,
+    stage: str | None = None,
+    message: str | None = None,
+    indeterminate: bool | None = None,
+) -> None:
+    with _LOCK:
+        run_progress = _PIPELINE_PROGRESS.setdefault(run_id, {})
+        run_progress[step] = _normalize_progress(
+            percent=percent,
+            current=current,
+            total=total,
+            unit=unit,
+            stage=stage,
+            message=message,
+            indeterminate=indeterminate,
+            previous=run_progress.get(step),
+        )
+
+
+def clear_pipeline_progress(run_id: str, step: str | None = None) -> None:
+    with _LOCK:
+        if step is None:
+            _PIPELINE_PROGRESS.pop(run_id, None)
+            return
+        run_progress = _PIPELINE_PROGRESS.get(run_id)
+        if not run_progress:
+            return
+        run_progress.pop(step, None)
+        if not run_progress:
+            _PIPELINE_PROGRESS.pop(run_id, None)
+
+
+@contextmanager
+def bind_pipeline_progress(run_id: str, step: str):
+    previous = get_current_pipeline_context()
+    _set_current_pipeline_context(run_id, step)
+    try:
+        yield
+    finally:
+        _set_current_pipeline_context(*previous)
+
+
+def report_progress(
+    *,
+    percent: int | float | None = None,
+    current: int | None = None,
+    total: int | None = None,
+    unit: str | None = None,
+    stage: str | None = None,
+    message: str | None = None,
+    indeterminate: bool | None = None,
+) -> None:
+    task_id = get_current_task_id()
+    if task_id:
+        set_task_progress(
+            task_id,
+            percent=percent,
+            current=current,
+            total=total,
+            unit=unit,
+            stage=stage,
+            message=message,
+            indeterminate=indeterminate,
+        )
+    run_id, step = get_current_pipeline_context()
+    if run_id and step:
+        set_pipeline_progress(
+            run_id,
+            step,
+            percent=percent,
+            current=current,
+            total=total,
+            unit=unit,
+            stage=stage,
+            message=message,
+            indeterminate=indeterminate,
+        )
 
 
 def _refresh_queue_positions(queue_key: str) -> None:
@@ -434,6 +622,7 @@ def submit_task(
             "artifacts": [],
             "queue_key": queue_key,
             "queue_position": None,
+            "progress": _default_progress(),
         }
     if queue_key:
         _enqueue_task(task_id, queue_key)
@@ -452,6 +641,7 @@ def submit_task(
                 return
             ensure_current_task_active()
             _update_task(task_id, state="running")
+            set_task_progress(task_id, percent=0, stage="starting", message="task started")
             task_result = runner()
             ensure_current_task_active()
         except TaskCancelledError as exc:
@@ -461,6 +651,13 @@ def submit_task(
                 error=str(exc),
                 result=None,
                 finished_at=_now_iso(),
+                progress=_normalize_progress(
+                    percent=100,
+                    stage="cancelled",
+                    message=str(exc),
+                    indeterminate=False,
+                    previous=get_task(task_id).get("progress") if get_task(task_id) else None,
+                ),
             )
             if callback_url:
                 _send_task_callback(task_id, callback_timeout_seconds)
@@ -471,6 +668,13 @@ def submit_task(
                 error=str(exc),
                 result=None,
                 finished_at=_now_iso(),
+                progress=_normalize_progress(
+                    percent=100,
+                    stage="failed",
+                    message=str(exc),
+                    indeterminate=False,
+                    previous=get_task(task_id).get("progress") if get_task(task_id) else None,
+                ),
             )
             if callback_url:
                 _send_task_callback(task_id, callback_timeout_seconds)
@@ -487,6 +691,13 @@ def submit_task(
                 error=None,
                 finished_at=_now_iso(),
                 artifacts=artifacts,
+                progress=_normalize_progress(
+                    percent=100,
+                    stage="completed",
+                    message="task completed",
+                    indeterminate=False,
+                    previous=get_task(task_id).get("progress") if get_task(task_id) else None,
+                ),
             )
             if callback_url:
                 _send_task_callback(task_id, callback_timeout_seconds)
@@ -554,6 +765,13 @@ def cancel_task(task_id: str) -> TaskRecord | None:
                 result=None,
                 finished_at=_now_iso(),
                 queue_position=None,
+                progress=_normalize_progress(
+                    percent=100,
+                    stage="cancelled",
+                    message=f"task cancelled: {task_id}",
+                    indeterminate=False,
+                    previous=updated.get("progress") if updated else None,
+                ),
             )
         updated = get_task(task_id)
     return updated

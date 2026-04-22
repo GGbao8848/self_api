@@ -31,6 +31,7 @@ from app.services.build_yolo_yaml import (
 from app.services.file_operations import run_zip_folder
 from app.services.remote_transfer import run_remote_transfer
 from app.services.remote_unzip import run_remote_unzip
+from app.services.task_manager import report_progress
 from app.utils.images import normalize_extensions
 
 
@@ -43,6 +44,7 @@ def _remote_posix_uri(host: str, path: PurePosixPath, port: int) -> str:
 
 def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloDatasetResponse:
     if request.publish_mode == "local":
+        report_progress(percent=5, stage="build_yaml", message="building dataset yaml", indeterminate=False)
         build_resp = run_build_yolo_yaml(
             BuildYoloYamlRequest(
                 input_dir=request.input_dir,
@@ -55,6 +57,7 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
                 sftp_port=request.sftp_port,
             )
         )
+        report_progress(percent=100, stage="build_yaml", message="dataset yaml ready", indeterminate=False)
         return PublishYoloDatasetResponse(
             publish_mode="local",
             output_yaml_path=build_resp.output_yaml_path,
@@ -69,6 +72,7 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
             last_yaml_source=build_resp.last_yaml_source,
         )
 
+    report_progress(percent=5, stage="prepare_publish", message="preparing publish package", indeterminate=False)
     root_input = resolve_safe_path(
         request.input_dir,
         field_name="input_dir",
@@ -165,6 +169,7 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
         encoding="utf-8",
     )
 
+    report_progress(percent=55, stage="zip_dataset", message="creating publish archive", indeterminate=False)
     zip_resp = run_zip_folder(
         ZipFolderRequest(
             input_dir=str(staging_dataset_dir),
@@ -174,6 +179,7 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
         )
     )
 
+    report_progress(percent=72, stage="transfer_archive", message="uploading dataset archive", indeterminate=False)
     remote_datasets_parent = remote_project_root / request.detector_name / "datasets"
     transfer_resp = run_remote_transfer(
         RemoteTransferRequest(
@@ -185,6 +191,7 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
             overwrite=False,
         )
     )
+    report_progress(percent=88, stage="unzip_archive", message="extracting remote dataset archive", indeterminate=False)
     run_remote_unzip(
         RemoteUnzipRequest(
             archive_path=_remote_posix_uri(
@@ -199,6 +206,7 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
             overwrite=False,
         )
     )
+    report_progress(percent=100, stage="publish_done", message="dataset publish completed", indeterminate=False)
 
     return PublishYoloDatasetResponse(
         publish_mode="remote_sftp",

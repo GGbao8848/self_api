@@ -9,7 +9,7 @@ from app.schemas.preprocess import (
     XmlToYoloRequest,
     XmlToYoloResponse,
 )
-from app.services.task_manager import ensure_current_task_active
+from app.services.task_manager import ensure_current_task_active, report_progress
 
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
 
@@ -156,6 +156,17 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
     ] = []
     discovered_classes: set[str] = set()
     details: list[XmlToYoloFileDetail] = []
+    total_work = max(len(xml_paths) * 2, 1)
+    completed_work = 0
+
+    report_progress(
+        current=0,
+        total=total_work,
+        unit="xml",
+        stage="scan_xml",
+        message="scanning xml annotations",
+        indeterminate=False,
+    )
 
     for xml_path in xml_paths:
         ensure_current_task_active()
@@ -165,6 +176,15 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
             include_difficult=request.include_difficult,
         )
         parsed_entries.append((xml_path, width, height, objects, error))
+        completed_work += 1
+        report_progress(
+            current=completed_work,
+            total=total_work,
+            unit="xml",
+            stage="scan_xml",
+            message=f"parsed {completed_work}/{len(xml_paths)} xml files",
+            indeterminate=False,
+        )
         if error:
             continue
         name_map = request.class_name_map or {}
@@ -225,6 +245,15 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
                     skipped_reason=error,
                 )
             )
+            completed_work += 1
+            report_progress(
+                current=completed_work,
+                total=total_work,
+                unit="xml",
+                stage="write_labels",
+                message=f"processed {completed_work - len(xml_paths)}/{len(parsed_entries)} label files",
+                indeterminate=False,
+            )
             continue
 
         if width <= 0 or height <= 0:
@@ -237,6 +266,15 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
                     skipped_reason="invalid image size",
                 )
             )
+            completed_work += 1
+            report_progress(
+                current=completed_work,
+                total=total_work,
+                unit="xml",
+                stage="write_labels",
+                message=f"processed {completed_work - len(xml_paths)}/{len(parsed_entries)} label files",
+                indeterminate=False,
+            )
             continue
 
         if label_path.exists() and not request.overwrite:
@@ -248,6 +286,15 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
                     written_lines=0,
                     skipped_reason="label file already exists",
                 )
+            )
+            completed_work += 1
+            report_progress(
+                current=completed_work,
+                total=total_work,
+                unit="xml",
+                stage="write_labels",
+                message=f"processed {completed_work - len(xml_paths)}/{len(parsed_entries)} label files",
+                indeterminate=False,
             )
             continue
 
@@ -280,6 +327,15 @@ def run_xml_to_yolo(request: XmlToYoloRequest) -> XmlToYoloResponse:
 
         converted_files += 1
         total_boxes += len(lines)
+        completed_work += 1
+        report_progress(
+            current=completed_work,
+            total=total_work,
+            unit="xml",
+            stage="write_labels",
+            message=f"processed {completed_work - len(xml_paths)}/{len(parsed_entries)} label files",
+            indeterminate=False,
+        )
         details.append(
             XmlToYoloFileDetail(
                 source_xml=str(xml_path),

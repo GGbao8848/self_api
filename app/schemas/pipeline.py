@@ -102,6 +102,30 @@ class PipelineStepStatus(BaseModel):
     data: dict[str, Any] = {}
 
 
+class PipelineStepProgress(BaseModel):
+    step: str
+    percent: int = 0
+    hint: str = ""
+    tone: str = "pending"
+    indeterminate: bool = False
+
+
+class PipelineOverallProgress(BaseModel):
+    percent: int = 0
+    hint: str = ""
+    tone: str = "pending"
+    indeterminate: bool = False
+    active_step: str | None = None
+    completed_steps: int = 0
+    total_steps: int = 0
+
+
+class PipelineProgressSnapshot(BaseModel):
+    ordered_steps: list[str] = Field(default_factory=list)
+    steps: dict[str, PipelineStepProgress] = Field(default_factory=dict)
+    overall: PipelineOverallProgress = Field(default_factory=PipelineOverallProgress)
+
+
 class PipelineLinkedTaskStatus(BaseModel):
     task_id: str
     task_type: str
@@ -121,6 +145,7 @@ class PipelineStatusResponse(BaseModel):
     step_results: dict[str, PipelineStepStatus] = {}
     interrupted: bool = Field(description="是否在等待人工确认（interrupt 暂停中）")
     model_task: PipelineLinkedTaskStatus | None = None
+    progress: PipelineProgressSnapshot = Field(default_factory=PipelineProgressSnapshot)
     initial_params: dict[str, Any] = Field(default_factory=dict, description="启动该 run 时的参数，用于复用")
 
 

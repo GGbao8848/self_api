@@ -297,6 +297,95 @@ body {
   gap: 16px;
 }
 
+.progress-overview {
+  background: linear-gradient(180deg, #fff, #f8fafc);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+.progress-overview__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.progress-overview__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.progress-overview__meta,
+.step-progress__meta {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.progress-overview__hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--neutral-text);
+}
+
+.progress-track {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--neutral-bg);
+  overflow: hidden;
+  border: 1px solid rgb(203 213 225 / 0.7);
+}
+
+.progress-track--lg {
+  height: 10px;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6366f1, #4f46e5);
+  transition: width 0.25s ease;
+}
+
+.progress-fill.ok {
+  background: linear-gradient(90deg, #10b981, #047857);
+}
+
+.progress-fill.failed {
+  background: linear-gradient(90deg, #ef4444, #b91c1c);
+}
+
+.progress-fill.skipped {
+  background: linear-gradient(90deg, #f59e0b, #b45309);
+}
+
+.progress-fill.waiting {
+  background: linear-gradient(90deg, #818cf8, #4f46e5);
+}
+
+.progress-fill.queued {
+  background: linear-gradient(90deg, #f59e0b, #b45309);
+}
+
+.progress-fill.indeterminate {
+  width: 42% !important;
+  background: linear-gradient(90deg, rgb(99 102 241 / 0.3), #4f46e5, rgb(99 102 241 / 0.3));
+  background-size: 200% 100%;
+  animation: progress-slide 1.2s linear infinite;
+}
+
+@keyframes progress-slide {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 .step-card {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -340,6 +429,23 @@ body {
   color: var(--neutral-text);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.step-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.step-progress__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.step-progress__hint {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .step-detail {

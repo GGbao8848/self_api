@@ -68,6 +68,7 @@ def isolated_runtime(monkeypatch: pytest.MonkeyPatch) -> Path:
     task_manager._TASK_QUEUES.clear()
     task_manager._ACTIVE_QUEUED_TASKS.clear()
     task_manager._CALLBACK_URL_LOCKS.clear()
+    task_manager._PIPELINE_PROGRESS.clear()
 
     yield storage_dir
 
@@ -75,6 +76,7 @@ def isolated_runtime(monkeypatch: pytest.MonkeyPatch) -> Path:
     task_manager._TASK_QUEUES.clear()
     task_manager._ACTIVE_QUEUED_TASKS.clear()
     task_manager._CALLBACK_URL_LOCKS.clear()
+    task_manager._PIPELINE_PROGRESS.clear()
     get_settings.cache_clear()
     if storage_dir.exists():
         shutil.rmtree(storage_dir)

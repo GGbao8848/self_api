@@ -313,6 +313,137 @@ def test_pipeline_status_includes_model_task_snapshot(
     assert status.model_task.task_type == "yolo_train"
     assert status.model_task.state == "pending"
     assert status.model_task.queue_position == 2
+    assert status.progress.overall.percent > 0
+    assert status.progress.steps["poll_train"].tone in {"queued", "pending"}
+
+
+def test_pipeline_status_prefers_runtime_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.api.v1.endpoints.pipeline as pipeline_endpoint
+
+    run_id = "run-runtime-progress"
+    gs = SimpleNamespace(
+        values={
+            "run_id": run_id,
+            "current_step": "split_dataset",
+            "completed": False,
+            "error": None,
+            "pending_review": None,
+            "step_results": {},
+            "train_task_id": None,
+            "original_dataset": "/tmp/raw",
+            "detector_name": "det",
+            "project_root_dir": "/tmp/workspace",
+            "execution_mode": "local",
+            "yolo_train_env": "yolo_pose",
+            "yolo_train_model": "yolo11s.pt",
+            "yolo_train_epochs": 100,
+            "yolo_train_imgsz": 640,
+            "full_access": True,
+            "class_name_map": None,
+            "final_classes": None,
+            "enable_sliding_window": False,
+            "yolo_export_after_train": False,
+        },
+        next=(),
+        tasks=(),
+    )
+
+    monkeypatch.setattr(pipeline_endpoint, "_get_graph_state", lambda _: gs)
+    monkeypatch.setattr(
+        pipeline_endpoint,
+        "get_pipeline_progress",
+        lambda _: {
+            "split_dataset": {
+                "percent": 43,
+                "current": 43,
+                "total": 100,
+                "unit": "image",
+                "stage": "split_copy",
+                "message": "processed 43/100 split items",
+                "indeterminate": False,
+                "updated_at": "2026-04-22T00:00:00+00:00",
+            }
+        },
+    )
+
+    status = pipeline_endpoint._to_status_response(run_id)
+
+    assert status.progress.steps["split_dataset"].percent == 43
+    assert status.progress.steps["split_dataset"].hint == "processed 43/100 split items"
+    assert status.progress.steps["split_dataset"].tone == "running"
+
+
+def test_snapshot_signature_changes_when_runtime_progress_changes() -> None:
+    import app.api.v1.endpoints.pipeline as pipeline_endpoint
+    from app.schemas.pipeline import (
+        PipelineOverallProgress,
+        PipelineProgressSnapshot,
+        PipelineStatusResponse,
+        PipelineStepProgress,
+    )
+
+    base = PipelineStatusResponse(
+        run_id="run-1",
+        current_step="split_dataset",
+        active_step="split_dataset",
+        completed=False,
+        error=None,
+        revision=1,
+        snapshot_id="snap-1",
+        pending_review=None,
+        step_results={},
+        interrupted=False,
+        progress=PipelineProgressSnapshot(
+            ordered_steps=["split_dataset"],
+            steps={
+                "split_dataset": PipelineStepProgress(
+                    step="split_dataset",
+                    percent=12,
+                    hint="processed 12/100 split items",
+                    tone="running",
+                    indeterminate=False,
+                )
+            },
+            overall=PipelineOverallProgress(
+                percent=12,
+                hint="正在执行：split_dataset",
+                tone="running",
+                indeterminate=False,
+                active_step="split_dataset",
+                completed_steps=0,
+                total_steps=1,
+            ),
+        ),
+    )
+    changed = base.model_copy(
+        update={
+            "progress": PipelineProgressSnapshot(
+                ordered_steps=["split_dataset"],
+                steps={
+                    "split_dataset": PipelineStepProgress(
+                        step="split_dataset",
+                        percent=13,
+                        hint="processed 13/100 split items",
+                        tone="running",
+                        indeterminate=False,
+                    )
+                },
+                overall=PipelineOverallProgress(
+                    percent=13,
+                    hint="正在执行：split_dataset",
+                    tone="running",
+                    indeterminate=False,
+                    active_step="split_dataset",
+                    completed_steps=0,
+                    total_steps=1,
+                ),
+            )
+        }
+    )
+
+    assert pipeline_endpoint._snapshot_signature(base) != pipeline_endpoint._snapshot_signature(changed)
 
 
 def test_pipeline_status_exposes_revision_and_active_step(

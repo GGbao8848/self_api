@@ -95,6 +95,17 @@ class AsyncTaskCallbackEvent(BaseModel):
     error: str | None = None
 
 
+class AsyncTaskProgress(BaseModel):
+    percent: int = 0
+    current: int | None = None
+    total: int | None = None
+    unit: str | None = None
+    stage: str | None = None
+    message: str | None = None
+    indeterminate: bool = False
+    updated_at: str | None = None
+
+
 class AsyncTaskStatusResponse(BaseModel):
     task_id: str
     task_type: str
@@ -113,6 +124,7 @@ class AsyncTaskStatusResponse(BaseModel):
     callback_events: list[AsyncTaskCallbackEvent] = Field(default_factory=list)
     artifacts: list[ArtifactSummary] = Field(default_factory=list)
     queue_position: int | None = None
+    progress: AsyncTaskProgress = Field(default_factory=AsyncTaskProgress)
 
 
 class AnnotateVisualizeRequest(BaseModel):

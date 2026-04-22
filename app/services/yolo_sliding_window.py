@@ -10,7 +10,7 @@ from app.schemas.preprocess import (
     YoloSlidingWindowCropRequest,
     YoloSlidingWindowCropResponse,
 )
-from app.services.task_manager import ensure_current_task_active
+from app.services.task_manager import ensure_current_task_active, report_progress
 from app.utils.images import list_image_paths
 
 _IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -275,6 +275,7 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
     generated_labels = 0
     input_images = 0
     labels_dirs: list[Path] = []
+    image_batches: list[tuple[Path, Path, Path | None]] = []
 
     for relative_root, images_dir, labels_dir in dataset_units:
         ensure_current_task_active()
@@ -292,8 +293,24 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
             extensions=list(_IMG_EXTS),
         )
         input_images += len(image_paths)
-
         for image_path in image_paths:
+            image_batches.append((image_path, images_dir, labels_dir))
+
+    report_progress(
+        current=0,
+        total=max(len(image_batches), 1),
+        unit="image",
+        stage="crop_windows",
+        message="cropping sliding windows",
+        indeterminate=False,
+    )
+
+    processed_count = 0
+    for relative_root, images_dir, labels_dir in dataset_units:
+        out_base_dir = output_dir if relative_root == Path(".") else output_dir / relative_root
+        out_img_dir = out_base_dir / "images"
+        out_lbl_dir = out_base_dir / "labels" if labels_dir is not None else None
+        for image_path in list_image_paths(images_dir, recursive=True, extensions=list(_IMG_EXTS)):
             ensure_current_task_active()
             label_path: Path | None = None
             if labels_dir is not None:
@@ -308,6 +325,15 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
                         source_label=str(label_path),
                         skipped_reason="label file not found",
                     )
+                )
+                processed_count += 1
+                report_progress(
+                    current=processed_count,
+                    total=max(input_images, 1),
+                    unit="image",
+                    stage="crop_windows",
+                    message=f"processed {processed_count}/{input_images} images",
+                    indeterminate=False,
                 )
                 continue
 
@@ -357,6 +383,15 @@ def run_yolo_sliding_window_crop(request: YoloSlidingWindowCropRequest) -> YoloS
                         skipped_reason=f"failed to open/process: {exc}",
                     )
                 )
+            processed_count += 1
+            report_progress(
+                current=processed_count,
+                total=max(input_images, 1),
+                unit="image",
+                stage="crop_windows",
+                message=f"processed {processed_count}/{input_images} images",
+                indeterminate=False,
+            )
 
     labels_dir_value: str | None = None
     if len(labels_dirs) == 1:

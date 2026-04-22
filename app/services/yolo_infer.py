@@ -8,7 +8,12 @@ import subprocess
 from pathlib import Path
 
 from app.schemas.preprocess import YoloInferRequest, YoloInferResponse
+from app.services.task_manager import report_progress
 from app.services.yolo_env import resolve_env_python
+
+
+_PROGRESS_PREFIX = "__SELF_API_PROGRESS__"
+
 
 def run_yolo_infer(request: YoloInferRequest) -> YoloInferResponse:
     model_path = Path(request.model_path).expanduser().resolve()
@@ -89,16 +94,36 @@ def run_yolo_infer(request: YoloInferRequest) -> YoloInferResponse:
     if request.classes:
         cmd.extend(["--classes", ",".join(str(c) for c in request.classes)])
 
-    proc = subprocess.run(
+    proc = subprocess.Popen(
         cmd,
         cwd=str(Path(request.project).expanduser().resolve().parent),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        check=False,
     )
-    if proc.returncode != 0:
+    stdout_lines: list[str] = []
+    assert proc.stdout is not None
+    for raw_line in proc.stdout:
+        line = raw_line.rstrip("\n")
+        if line.startswith(_PROGRESS_PREFIX):
+            payload = json.loads(line[len(_PROGRESS_PREFIX):])
+            report_progress(
+                current=payload.get("current"),
+                total=payload.get("total"),
+                unit=payload.get("unit"),
+                stage=payload.get("stage"),
+                message=payload.get("message"),
+                indeterminate=payload.get("indeterminate"),
+            )
+            continue
+        stdout_lines.append(raw_line)
+    stderr_text = proc.stderr.read() if proc.stderr is not None else ""
+    return_code = proc.wait()
+    stdout_text = "".join(stdout_lines)
+
+    if return_code != 0:
         raise ValueError(
-            f"yolo infer failed (exit_code={proc.returncode}): {proc.stderr or proc.stdout or shlex.join(cmd)}"
+            f"yolo infer failed (exit_code={return_code}): {stderr_text or stdout_text or shlex.join(cmd)}"
         )
 
     summary_path = output_dir / "summary.json"
