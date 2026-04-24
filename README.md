@@ -32,33 +32,44 @@
 self_api/
 ├── app/
 │   ├── api/
+│   │   ├── url_builder.py             # 对外 URL 生成
 │   │   └── v1/
-│   │       ├── endpoints/
-│   │       │   ├── preprocess.py      # 十一个预处理 API
-│   │       │   └── system.py          # 健康检查
+│   │       ├── endpoints/             # v1 接口定义（auth/files/tasks/preprocess 等）
 │   │       └── router.py              # v1 路由聚合
 │   ├── core/
 │   │   ├── config.py                  # 环境配置
-│   │   └── logging.py                 # 日志初始化
+│   │   ├── logging.py                 # 日志初始化
+│   │   ├── path_safety.py             # 路径访问约束
+│   │   └── security.py                # 安全与鉴权辅助
 │   ├── schemas/
-│   │   └── preprocess.py              # 请求/响应模型
+│   │   ├── auth.py                    # 鉴权模型
+│   │   ├── preprocess.py              # 预处理请求/响应模型
+│   │   ├── system.py                  # 系统接口模型
+│   │   └── tasks.py                   # 异步任务模型
 │   ├── services/
-│   │   ├── file_operations.py         # 压缩/解压/移动/复制服务
-│   │   ├── nested_dataset.py          # 多层目录发现/清洗/汇总服务
-│   │   ├── split_yolo_dataset.py      # YOLO 数据集划分服务
-│   │   ├── xml_to_yolo.py             # VOC XML 转 YOLO 标签服务
-│   │   └── yolo_sliding_window.py     # YOLO 大图数据集滑窗裁剪服务
+│   │   ├── file_operations.py         # 压缩/解压/移动/复制
+│   │   ├── nested_dataset.py          # 多层目录发现/清洗/汇总
+│   │   ├── remote_transfer.py         # SFTP 远程传输
+│   │   ├── split_yolo_dataset.py      # YOLO 数据集划分
+│   │   ├── task_manager.py            # 异步任务管理
+│   │   ├── xml_to_yolo.py             # VOC XML 转 YOLO
+│   │   ├── yolo_augment.py            # YOLO 数据增强
+│   │   ├── yolo_sliding_window.py     # YOLO 大图滑窗裁剪
+│   │   └── yolo_train.py              # YOLO 训练启动
+│   ├── static/
+│   │   └── train-ui/                  # 训练相关静态页面
 │   ├── utils/
 │   │   └── images.py                  # 图像文件扫描工具
 │   └── main.py                        # FastAPI 应用入口
+├── docs/
+│   ├── api_examples.md                # 接口调用示例
+│   └── n8n/                           # n8n 工作流样例
 ├── tests/
-│   ├── test_healthz_api.py
-│   ├── test_xml_to_yolo_api.py
-│   ├── test_split_yolo_dataset_api.py
-│   ├── test_zip_folder_api.py
-│   ├── test_unzip_archive_api.py
-│   ├── test_move_path_api.py
-│   └── test_yolo_sliding_window_crop_api.py
+│   ├── conftest.py
+│   ├── data_helpers.py
+│   └── test_*.py                      # API / 服务回归测试
+├── .env.example
+├── compose.yaml
 ├── Dockerfile
 ├── Makefile
 ├── pyproject.toml
@@ -167,100 +178,7 @@ make run
 | 清理悬空镜像与未使用网络等 | `docker system prune` |
 | 一并清理未使用的镜像与构建缓存（更激进，慎用） | `docker system prune -a` |
 
-## 4. API 要素与接口定义
-
-接口示例请求已拆分到独立文档：`docs/api_examples.md`。
-
-### 4.1 健康检查
-
-- `GET /api/v1/healthz`
-
-### 4.2 常用 SOP（按最常用 workflow）
-
-文档与接口说明以下面两条常用工作流为主线：
-
-- 小图 `images+xmls` 基线训练：`xml-to-yolo -> split-yolo-dataset -> yolo-augment（按需） -> build-yolo-yaml -> zip/move/unzip 或 remote-transfer/remote-unzip -> yolo-train / remote-sbatch-yolo-train`
-- 大图 `images+xmls` 常发迭代：`clean-nested-dataset（按需） -> xml-to-yolo -> reset-yolo-label-index（单类时） -> yolo-sliding-window-crop -> split-yolo-dataset 或直接 build-yolo-yaml -> zip/remote-transfer/remote-unzip -> yolo-train / remote-sbatch-yolo-train`
-- 多层目录整理：`discover-leaf-dirs -> clean-nested-dataset -> xml-to-yolo -> aggregate-nested-dataset`
-
-### 4.3 多层目录叶子数据目录发现
-
-- `POST /api/v1/preprocess/discover-leaf-dirs`
-
-用于先确认原始数据最底层的有效目录，适合作为多层目录清洗前的第一步。
-
-### 4.4 多层目录数据清洗
-
-- `POST /api/v1/preprocess/clean-nested-dataset`
-
-把原始图片/XML 规整成 `images` / `xmls`（及可选 `backgrounds`）；默认会自动识别常见目录布局，支持保留层级和扁平化输出，是大图迭代与多层目录整理链路的常见起点。
-
-### 4.5 多层目录数据集汇总
-
-- `POST /api/v1/preprocess/aggregate-nested-dataset`
-
-用于把多个碎片目录汇总为统一 `dataset/images`、`dataset/labels`、`dataset/backgrounds`，适合多批次数据合并。
-
-### 4.6 VOC XML 转 YOLO 标签
-
-- `POST /api/v1/preprocess/xml-to-yolo`
-
-要求输入目录下有 `images/` 与 `xmls/`，服务会把 YOLO 标签写到 `labels/`（目录名可配置）。这是两条训练工作流都会经过的标准步骤。
-
-### 4.7 标注检查与类别整理
-
-- `POST /api/v1/preprocess/annotate-visualize`
-- `POST /api/v1/preprocess/reset-yolo-label-index`
-
-前者用于把 YOLO/VOC 标注可视化做抽检；后者用于单类任务把所有 YOLO label 类别索引统一置为 `0`。
-`annotate-visualize` 现在按标准目录工作：传 `input_dir` 与 `output_dir` 即可，默认优先读取 `input_dir/labels`，若不存在则回退到 `input_dir/xmls`。
-`reset-yolo-label-index` 也已固定按 `input_dir/labels` 工作，最小调用只需 `input_dir`。
-
-### 4.8 YOLO 数据集划分
-
-- `POST /api/v1/preprocess/split-yolo-dataset`
-
-把标准 YOLO 数据集划分为 `train/val/test`，供后续增强、滑窗或直接训练使用。只认 `input_dir` / `output_dir`，固定读取 `input_dir/images` 与 `input_dir/labels`；最小调用仅需 `input_dir`（`output_dir` 缺省为 `<input_dir>/split_dataset`）。
-
-### 4.9 数据增强与滑窗裁剪
-
-- `POST /api/v1/preprocess/yolo-augment`
-- `POST /api/v1/preprocess/yolo-sliding-window-crop`
-
-`yolo-augment` 适合小图 baseline 的增强；`yolo-sliding-window-crop` 适合大图转小图训练：传 `input_dir`（含 `images/`），若 `labels/` 存在则自动同步输出裁剪后的 YOLO 标注。
-
-### 4.10 生成训练 YAML
-
-- `POST /api/v1/preprocess/build-yolo-yaml`（及 `/async`）
-
-根据数据集根目录与各划分下的 `images` 路径、`classes.txt` 生成 Ultralytics 风格 YAML；可选与上一版 `last_yaml` 合并路径。
-
-### 4.11 数据投放与远程准备
-
-- `POST /api/v1/preprocess/zip-folder`
-- `POST /api/v1/preprocess/unzip-archive`
-- `POST /api/v1/preprocess/move-path`
-- `POST /api/v1/preprocess/copy-path`
-- `POST /api/v1/preprocess/remote-transfer`（及 `/async`）
-- `POST /api/v1/preprocess/remote-unzip`（及 `/async`）
-
-这组接口主要用于把本地整理好的数据集放到训练目录，或者上传到远端机器后解压到目标位置。
-
-### 4.12 发起训练
-
-- `POST /api/v1/preprocess/yolo-train`（及 `/async`，conda 下执行 `yolo train`）
-- `POST /api/v1/preprocess/remote-sbatch-yolo-train`（及 `/async`）
-
-前者用于本地训练，后者用于远端集群上的 `sbatch` 提交训练。
-
-### 4.13 少用但独立的 VOC 裁剪修订链路
-
-- `POST /api/v1/preprocess/voc-bar-crop`
-- `POST /api/v1/preprocess/restore-voc-crops-batch`
-
-用于 VOC 大图局部裁剪编辑后再回贴原图，不属于当前最常用的两条训练 SOP，但仍保留在服务中。
-
-## 5. 一期最小生产版
+## 4. 一期最小生产版
 
 当前仓库已落地一期最小生产版，用于支持 LangGraph 的跨机器接入。
 
@@ -277,7 +195,7 @@ make run
 - `docs/architecture/langgraph_production_roadmap.md`
 - `docs/architecture/self_orchestrator_bootstrap.md`
 
-## 6. 开发命令
+## 5. 开发命令
 
 ```bash
 make run      # 启动服务
@@ -285,7 +203,7 @@ make test     # 运行测试
 make lint     # 基础语法检查
 ```
 
-## 7. 后续扩展建议
+## 6. 后续扩展建议
 
 1. 增加异步任务队列（如 Celery/RQ）处理大规模数据集
 2. 增加任务状态持久化（数据库 + task id）

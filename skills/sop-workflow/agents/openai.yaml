@@ -1,7 +1,0 @@
-interface:
-  display_name: "Self API Workflow SOP"
-  short_description: "Combined SOP router across data and model stages"
-  default_prompt: "Use $sop-workflow when my request spans both dataset preparation and model CLI work, or when you need to collect missing parameters and decide whether to route me to $data-preprocess, $ultralytics-yolo-modes, or both in sequence."
-
-policy:
-  allow_implicit_invocation: true

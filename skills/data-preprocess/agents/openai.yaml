@@ -1,7 +1,0 @@
-interface:
-  display_name: "Self API Data Preprocess"
-  short_description: "Dataset preprocess, merge, transfer via self_api"
-  default_prompt: "Use $data-preprocess to map my dataset preprocessing or transfer task into the correct synchronous self_api curl commands."
-
-policy:
-  allow_implicit_invocation: true

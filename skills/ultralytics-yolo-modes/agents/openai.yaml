@@ -1,7 +1,0 @@
-interface:
-  display_name: "Ultralytics YOLO Modes"
-  short_description: "Train, val, predict, export YOLO via CLI"
-  default_prompt: "Use $ultralytics-yolo-modes to generate a company-standard Ultralytics YOLO train, val, predict, or export CLI from my data, model path, and goal."
-
-policy:
-  allow_implicit_invocation: true
