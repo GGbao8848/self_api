@@ -30,7 +30,11 @@ class Settings(BaseSettings):
     n8n_base_url: str | None = None
     n8n_api_key: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="SELF_API_")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="SELF_API_",
+        extra="ignore",
+    )
 
     @property
     def project_root(self) -> Path:
