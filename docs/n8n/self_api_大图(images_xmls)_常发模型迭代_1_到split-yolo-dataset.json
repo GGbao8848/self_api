@@ -1,0 +1,390 @@
+{
+  "name": "self_api_大图(images/xmls)_常发模型迭代_1_到split-yolo-dataset",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "self-api-big-to-split",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        1552,
+        -240
+      ],
+      "id": "b30237f5-b207-4390-bc32-9fcda6ba9a40",
+      "name": "Webhook",
+      "webhookId": "5df47c16-8392-41eb-95cb-eca626eabe1f"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "self_api",
+              "value": "http://host.docker.internal:8666",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "original_dataset",
+              "value": "={{ $json.original_dataset || $json.body?.original_dataset }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "dataset_name",
+              "value": "={{ ($json.dataset_name || $json.body?.dataset_name || '').toString().trim() || (($json.original_dataset || $json.body?.original_dataset || '').toString().replace(/\\/+$/, '').split('/').pop()) }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1776,
+        -240
+      ],
+      "id": "02e357ca-fc16-4ff7-8100-ad835268de27",
+      "name": "base_config"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/healthz",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2000,
+        -240
+      ],
+      "id": "2ccc1401-9649-4b9a-bd12-1cdcf9ac9c30",
+      "name": "客户端是否开启"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').first().json.self_api }}/api/v1/preprocess/clean-nested-dataset",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $('base_config').first().json.original_dataset }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $('base_config').first().json.original_dataset }}/cleaned_flat"
+            },
+            {
+              "name": "recursive",
+              "value": "true"
+            },
+            {
+              "name": "pairing_mode",
+              "value": "images_xmls_subfolders"
+            },
+            {
+              "name": "flatten",
+              "value": "true"
+            },
+            {
+              "name": "include_backgrounds",
+              "value": "false"
+            },
+            {
+              "name": "images_dir_name",
+              "value": "images"
+            },
+            {
+              "name": "xmls_dir_name",
+              "value": "xml"
+            },
+            {
+              "name": "include_difficult",
+              "value": "false"
+            },
+            {
+              "name": "copy_files",
+              "value": "true"
+            },
+            {
+              "name": "overwrite",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2224,
+        -240
+      ],
+      "id": "239b5d4d-c5cf-4703-bc33-5e50cbfee01f",
+      "name": "数据扁平化整理"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/xml-to-yolo",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $json.output_dir }}"
+            },
+            {
+              "name": "images_dir_name",
+              "value": "images"
+            },
+            {
+              "name": "xmls_dir_name",
+              "value": "xml"
+            },
+            {
+              "name": "labels_dir_name",
+              "value": "labels"
+            },
+            {
+              "name": "recursive",
+              "value": "true"
+            },
+            {
+              "name": "include_difficult",
+              "value": "false"
+            },
+            {
+              "name": "write_classes_file",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2448,
+        -240
+      ],
+      "id": "013ba658-0181-4e42-8d85-b67b3b1497c2",
+      "name": "xml-to-yolo"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').first().json.self_api }}/api/v1/preprocess/reset-yolo-label-index",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $json.input_dir }}"
+            },
+            {
+              "name": "labels_dir_name",
+              "value": "labels"
+            },
+            {
+              "name": "recursive",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2672,
+        -240
+      ],
+      "id": "ca03ed6b-c714-4ec2-9678-dd56ff220dc5",
+      "name": "所有yolo标签转为0"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').first().json.self_api }}/api/v1/preprocess/yolo-sliding-window-crop",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $json.input_dir }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $json.input_dir }}/data_crops"
+            },
+            {
+              "name": "min_vis_ratio",
+              "value": "0.5"
+            },
+            {
+              "name": "stride_ratio",
+              "value": "0.2"
+            },
+            {
+              "name": "ignore_vis_ratio",
+              "value": "0.05"
+            },
+            {
+              "name": "only_wide",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2896,
+        -240
+      ],
+      "id": "0cde1468-5fc7-4621-9400-0d46df88661b",
+      "name": "yolo-sliding-window-crop"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('base_config').item.json.self_api }}/api/v1/preprocess/split-yolo-dataset",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $json.output_dir }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $('base_config').item.json.original_dataset }}/{{ $('base_config').first().json.dataset_name }}"
+            },
+            {
+              "name": "mode",
+              "value": "train_only"
+            },
+            {
+              "name": "copy_files",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3120,
+        -240
+      ],
+      "id": "7a06179f-c9b6-4647-b5ef-4354e633fb0c",
+      "name": "split-yolo-dataset"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "base_config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "base_config": {
+      "main": [
+        [
+          {
+            "node": "客户端是否开启",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "客户端是否开启": {
+      "main": [
+        [
+          {
+            "node": "数据扁平化整理",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "数据扁平化整理": {
+      "main": [
+        [
+          {
+            "node": "xml-to-yolo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "xml-to-yolo": {
+      "main": [
+        [
+          {
+            "node": "所有yolo标签转为0",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "所有yolo标签转为0": {
+      "main": [
+        [
+          {
+            "node": "yolo-sliding-window-crop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "yolo-sliding-window-crop": {
+      "main": [
+        [
+          {
+            "node": "split-yolo-dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Asia/Hong_Kong",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "50dc15ba-149d-4856-9233-39489f89f4b9",
+  "meta": {
+    "instanceId": "1b3e6ee362a456055e06758c3fd4e960c3621b1a8e2c51a10220c369f5f16c17"
+  },
+  "id": "jNesPecQ8mJMWR4K",
+  "tags": []
+}
