@@ -35,20 +35,41 @@ def _iter_label_files(labels_dir: Path, recursive: bool) -> list[Path]:
     return sorted(path for path in iterator if path.is_file())
 
 
-def run_reset_yolo_labels_index(
-    request: ResetYoloLabelIndexRequest,
-) -> ResetYoloLabelIndexResponse:
-    input_dir = resolve_safe_path(
-        request.input_dir,
+def _resolve_input_and_labels_dirs(input_dir: str) -> tuple[Path, list[Path]]:
+    resolved_input_dir = resolve_safe_path(
+        input_dir,
         field_name="input_dir",
         must_exist=True,
         expect_directory=True,
     )
-    labels_dir = input_dir / "labels"
-    if not labels_dir.exists() or not labels_dir.is_dir():
-        raise ValueError(f"labels_dir does not exist or is not a directory: {labels_dir}")
+    if resolved_input_dir.name == "labels":
+        return resolved_input_dir, [resolved_input_dir]
 
-    label_files = _iter_label_files(labels_dir, request.recursive)
+    labels_dir = resolved_input_dir / "labels"
+    if labels_dir.exists() and labels_dir.is_dir():
+        return resolved_input_dir, [labels_dir]
+
+    nested_labels_dirs = sorted(
+        path for path in resolved_input_dir.rglob("labels") if path.is_dir()
+    )
+    if nested_labels_dirs:
+        return resolved_input_dir, nested_labels_dirs
+
+    raise ValueError(
+        "input_dir must be a labels directory, a dataset root containing labels/, "
+        f"or a parent directory containing nested labels folders: {resolved_input_dir}"
+    )
+
+
+def run_reset_yolo_labels_index(
+    request: ResetYoloLabelIndexRequest,
+) -> ResetYoloLabelIndexResponse:
+    input_dir, labels_dirs = _resolve_input_and_labels_dirs(request.input_dir)
+    label_files = [
+        label_file
+        for labels_dir in labels_dirs
+        for label_file in _iter_label_files(labels_dir, request.recursive)
+    ]
     modified_label_files = 0
     unchanged_label_files = 0
     changed_lines = 0
@@ -77,7 +98,8 @@ def run_reset_yolo_labels_index(
 
     return ResetYoloLabelIndexResponse(
         input_dir=str(input_dir),
-        labels_dir=str(labels_dir),
+        labels_dir=str(labels_dirs[0]),
+        labels_dirs=[str(labels_dir) for labels_dir in labels_dirs],
         total_label_files=len(label_files),
         modified_label_files=modified_label_files,
         unchanged_label_files=unchanged_label_files,

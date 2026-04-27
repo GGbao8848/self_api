@@ -35,6 +35,12 @@ from app.schemas.preprocess import (
     ResetYoloLabelIndexAsyncRequest,
     ResetYoloLabelIndexRequest,
     ResetYoloLabelIndexResponse,
+    RewriteYoloLabelIndicesAsyncRequest,
+    RewriteYoloLabelIndicesRequest,
+    RewriteYoloLabelIndicesResponse,
+    ScanYoloLabelIndicesAsyncRequest,
+    ScanYoloLabelIndicesRequest,
+    ScanYoloLabelIndicesResponse,
     SplitYoloDatasetAsyncRequest,
     SplitYoloDatasetRequest,
     SplitYoloDatasetResponse,
@@ -95,6 +101,7 @@ from app.services.yolo_sliding_window import run_yolo_sliding_window_crop
 from app.services.voc_bar_crop import run_voc_bar_crop
 from app.services.restore_voc_crops_batch import run_restore_voc_crops_batch
 from app.services.reset_yolo_labels_index import run_reset_yolo_labels_index
+from app.services.yolo_label_indices import rewrite_yolo_label_indices, scan_yolo_label_indices
 
 router = APIRouter(
     prefix="/preprocess",
@@ -881,6 +888,82 @@ def reset_yolo_label_index_async(
     task_id = submit_task(
         task_type=task_type,
         runner=lambda: run_reset_yolo_labels_index(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/scan-yolo-label-indices", response_model=ScanYoloLabelIndicesResponse)
+def scan_yolo_label_indices_endpoint(
+    payload: ScanYoloLabelIndicesRequest,
+) -> ScanYoloLabelIndicesResponse:
+    try:
+        return scan_yolo_label_indices(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/scan-yolo-label-indices/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def scan_yolo_label_indices_async(
+    payload: ScanYoloLabelIndicesAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "scan_yolo_label_indices"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = ScanYoloLabelIndicesRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: scan_yolo_label_indices(sync_payload).model_dump(),
+        callback_url=callback_url,
+        callback_timeout_seconds=payload.callback_timeout_seconds,
+    )
+    return _build_async_submit_response(
+        request,
+        task_id=task_id,
+        task_type=task_type,
+        callback_url=callback_url,
+    )
+
+
+@router.post("/rewrite-yolo-label-indices", response_model=RewriteYoloLabelIndicesResponse)
+def rewrite_yolo_label_indices_endpoint(
+    payload: RewriteYoloLabelIndicesRequest,
+) -> RewriteYoloLabelIndicesResponse:
+    try:
+        return rewrite_yolo_label_indices(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/rewrite-yolo-label-indices/async",
+    response_model=AsyncTaskSubmitResponse,
+    status_code=202,
+)
+def rewrite_yolo_label_indices_async(
+    payload: RewriteYoloLabelIndicesAsyncRequest,
+    request: Request,
+) -> AsyncTaskSubmitResponse:
+    task_type = "rewrite_yolo_label_indices"
+    callback_url = str(payload.callback_url) if payload.callback_url else None
+    sync_payload = RewriteYoloLabelIndicesRequest(
+        **payload.model_dump(exclude={"callback_url", "callback_timeout_seconds"})
+    )
+    task_id = submit_task(
+        task_type=task_type,
+        runner=lambda: rewrite_yolo_label_indices(sync_payload).model_dump(),
         callback_url=callback_url,
         callback_timeout_seconds=payload.callback_timeout_seconds,
     )

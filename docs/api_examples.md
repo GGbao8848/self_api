@@ -14,6 +14,8 @@
 | `xml-to-yolo` | `input_dir` |
 | `annotate-visualize` | `input_dir`、`output_dir`；要求 `input_dir/images` 存在，默认优先使用 `input_dir/labels`，若不存在再回退到 `input_dir/xmls`；可选 `recursive`、`extensions`、`include_difficult`（仅 XML）、`line_width`、`overwrite`；YOLO 类别名可选 `classes` 或 `classes_file`（二选一，**均可省略**；均不提供或 `classes_file` 为空字符串时，框上显示**类别 id 数字**） |
 | `reset-yolo-label-index` | `input_dir`（其下需有 `labels/`）；可选 `recursive`（默认 `true`）；**原地**将各 `.txt` 每行首列类别 id 改为 `0`（§8） |
+| `scan-yolo-label-indices` | `input_dir`（其下需有 `labels/`）；可选 `recursive`（默认 `true`）；递归统计 labels 中出现过的类别索引及数量 |
+| `rewrite-yolo-label-indices` | `input_dir`（其下需有 `labels/`）；可选 `recursive`（默认 `true`）；`mapping` 指定部分索引映射，`default_target_index` 处理其余索引；**原地**批量改写类别 id |
 | `split-yolo-dataset` | `input_dir`（其下需有 `images/`、`labels/`）、`output_dir`（可选，默认 `<input_dir>/split_dataset`） |
 | `yolo-augment` | `input_dir`（支持根目录下直接有 `images/`、`labels/`，也支持递归发现 `*/images` 与同级 `labels/`，并保留相对目录层级输出）、`output_dir`（可选，默认 `<input_dir>/augment`）、七个增强开关（默认全开）；仅支持 YOLO TXT |
 | `yolo-sliding-window-crop` | `input_dir`（支持根目录下直接有 `images/`，也支持递归发现 `*/images`；若同级存在 `labels/` 则自动同步输出裁剪标注并保留相对目录层级）、`output_dir`；可选 `window_width`、`window_height`、`stride_x`、`stride_y`（传入即覆盖默认）；以及 `min_vis_ratio`、`stride_ratio`、`ignore_vis_ratio`、`only_wide` |

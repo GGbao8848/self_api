@@ -10,17 +10,17 @@
       "type": "@n8n/n8n-nodes-langchain.chatTrigger",
       "typeVersion": 1.4,
       "position": [
-        4288,
-        1904
+        6896,
+        912
       ],
-      "id": "f5c9e0d6-943b-491d-b9e1-d62f45fbd1d5",
+      "id": "3bdf4e42-3934-44fe-9729-63954576ea06",
       "name": "When chat message received",
       "webhookId": "76ba44d1-00ae-4fd5-b957-503d04f78532"
     },
     {
       "parameters": {
         "options": {
-          "systemMessage": "你是数据预处理执行代理，一次只执行一个任务（禁止自动串联其它任务）。\n\n规则：\n1) 先判断用户意图，只能多选一：\n   - 若用户要求“滑窗裁剪”，仅调用 yolo-sliding-window-crop。\n   - 若用户要求“数据增强/augment/aug”，仅调用 yolo-augment。\n   - 若用户要求“划分数据集/split”，仅调用 split-yolo-dataset，并提取mode与划分比例\n2) 提交异步任务后，必须使用“查询任务状态”工具轮询该 task_id。\n3) 轮询逻辑：\n   - state 为 pending/running：继续轮询（建议间隔 5 秒）。\n   - state 为 succeeded/failed：立即停止轮询。\n4) 查询状态时只允许使用 task_id，不允许使用 status_url。\n5) 未经用户明确要求，禁止执行第二个任务（例如做完 sliding 后禁止自动做 augment）。\n6) 若缺少必要参数（如 input_dir），先向用户追问，不得猜测路径。\n7) 最终只返回：task_id、task_type、state、output_dir（若有）、error（若有）。",
+          "systemMessage": "你是数据预处理执行代理，一次只执行一个任务（禁止自动串联其它任务）。\n\n规则：\n1) 先判断用户意图，只能多选一：\n   - 若用户要求“xml转yolo / xml-to-yolo / VOC转YOLO / 生成labels”，仅调用 xml-to-yolo。\n   - 若用户要求“滑窗裁剪”，仅调用 yolo-sliding-window-crop。\n   - 若用户要求“数据增强/augment/aug”，仅调用 yolo-augment。\n   - 若用户要求“划分数据集/split”，仅调用 split-yolo-dataset，并提取 mode 与划分比例。\n   - 若用户要求“查看/统计/检查 YOLO 标签索引”，仅调用 scan-yolo-label-indices。\n   - 若用户要求“修改/重映射/合并 YOLO 标签索引”，仅调用 rewrite-yolo-label-indices。\n2) 对于 rewrite-yolo-label-indices：\n   - 若用户明确要求“全部改成某个索引”，直接调用改索引工具，不要先查。\n   - 若用户给出映射规则（如 0到5改成0，其余改成1），直接调用改索引工具。\n   - 仅当用户明确要求先查看、或映射规则依赖现有索引但用户未说明时，才调用 scan-yolo-label-indices。\n3) 对于 xml-to-yolo：默认只需 input_dir。仅当用户明确要求时，才额外指定 classes、include_difficult、overwrite 等参数。\n4) 仅以下工具为异步任务：xml-to-yolo、yolo-sliding-window-crop、yolo-augment、split-yolo-dataset。提交后必须使用“查询任务状态”工具轮询该 task_id。\n5) 轮询逻辑：\n   - state 为 pending/running：继续查询（建议间隔 5 秒）。\n   - state 为 succeeded/failed：立即停止。\n6) 查询状态时只允许使用 task_id，不允许使用 status_url。\n7) 未经用户明确要求，禁止执行第二个任务（例如做完 xml-to-yolo 后禁止自动做 split，做完 sliding 后禁止自动做 augment，做完 scan 后禁止自动 rewrite，反之亦然）。\n8) 若缺少必要参数（如 input_dir，或改索引规则不完整），先向用户追问，不得猜测路径。\n9) 异步任务最终只返回：task_id、task_type、state、output_dir（若有）、error（若有）。同步索引工具最终返回关键统计或修改结果，不要输出无关解释。",
           "maxIterations": 10,
           "returnIntermediateSteps": true,
           "passthroughBinaryImages": true,
@@ -33,11 +33,36 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        4768,
-        1904
+        7560,
+        912
       ],
-      "id": "9a2d1101-0784-42ab-9d5f-faf504466685",
+      "id": "672c5b14-48a6-4993-9734-efd8cf39e65d",
       "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "toolDescription": "【XML 转 YOLO】仅处理一个数据集根目录 input_dir（绝对路径），目录下通常需包含 images/ 与 xmls/。默认使用服务端默认参数：images_dir_name=images、xmls_dir_name=xmls、labels_dir_name=labels、recursive=true、include_difficult=false、write_classes_file=true、classes_file_name=classes.txt、overwrite=true。必须调用异步接口并返回 task_id；随后必须用“查询任务状态”轮询到 succeeded/failed。除非用户明确要求，否则不要自作主张传 classes 或改默认参数。",
+        "method": "POST",
+        "url": "http://192.168.2.26:8666/api/v1/preprocess/xml-to-yolo/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        7504,
+        1136
+      ],
+      "id": "b1309983-da35-4d84-8f45-3b9123780adc",
+      "name": "xml-to-yolo"
     },
     {
       "parameters": {
@@ -62,10 +87,10 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        4768,
-        2128
+        7376,
+        1136
       ],
-      "id": "cc87d431-e28c-470d-9afb-547abd21f594",
+      "id": "b31d30d6-efa1-419a-82c9-a7f4434de54a",
       "name": "yolo-sliding-window-crop"
     },
     {
@@ -78,10 +103,10 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        4512,
-        2128
+        7120,
+        1136
       ],
-      "id": "a13a7655-22fe-40bd-8295-722d071fa0ed",
+      "id": "fcf6cc18-d33b-47e0-be50-4a495b0e7162",
       "name": "OpenRouter Chat Model",
       "credentials": {
         "openRouterApi": {
@@ -113,10 +138,10 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        4896,
-        2128
+        7632,
+        1136
       ],
-      "id": "751ce865-1985-4bda-a1c0-18adf319fead",
+      "id": "1463fd07-fc8e-4d95-ae3c-d6e9efe97287",
       "name": "yolo-augment",
       "notesInFlow": false
     },
@@ -129,10 +154,10 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        5024,
-        2128
+        7760,
+        1136
       ],
-      "id": "7760dad7-d84c-4da2-b37d-7526add01008",
+      "id": "fe90c289-e0c2-44b0-8a7e-618b2a929f83",
       "name": "查询任务状态"
     },
     {
@@ -140,10 +165,10 @@
       "type": "@n8n/n8n-nodes-langchain.memoryRedisChat",
       "typeVersion": 1.5,
       "position": [
-        4640,
-        2128
+        7248,
+        1136
       ],
-      "id": "ec2708ef-16df-44d3-8cce-30cec98276e5",
+      "id": "ac32785d-9465-4eef-b2a1-7de1fd5f89fc",
       "name": "Redis Chat Memory",
       "credentials": {
         "redis": {
@@ -203,11 +228,77 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        5152,
-        2128
+        7888,
+        1136
       ],
-      "id": "d6df13c1-a1e8-4798-a598-ed529fdf0177",
+      "id": "18520142-6772-4b6e-9a1e-9af36c9a4198",
       "name": "split-yolo-dataset"
+    },
+    {
+      "parameters": {
+        "toolDescription": "【YOLO 标签索引查询】input_dir 可传三种路径：1) labels 目录本身；2) 数据集根目录（其下有 labels/）；3) 更上层父目录（将递归发现其中所有名为 labels 的文件夹）。默认 recursive=true，递归统计所有命中的 labels 目录及其子目录下 .txt 中出现过的类别索引与数量。该工具是同步接口，不需要轮询任务状态。适用于“查看有哪些索引”“统计标签索引分布”等请求。",
+        "method": "POST",
+        "url": "http://192.168.2.26:8666/api/v1/preprocess/scan-yolo-label-indices",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') }}"
+            },
+            {
+              "name": "recursive",
+              "value": "={{ (($fromAI('recursive', 'true', 'string') || 'true').trim().toLowerCase()) !== 'false' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        8016,
+        1136
+      ],
+      "id": "7c4cf4d1-491c-490a-aabc-9dffbea3a282",
+      "name": "scan-yolo-label-indices"
+    },
+    {
+      "parameters": {
+        "toolDescription": "【YOLO 标签索引修改】input_dir 可传三种路径：1) labels 目录本身；2) 数据集根目录（其下有 labels/）；3) 更上层父目录（将递归发现其中所有名为 labels 的文件夹）。该工具是同步接口，直接原地修改所有命中的 labels 目录及其子目录下 .txt，不需要轮询。支持两种主要模式：1) 盲改全部到指定索引：只传 default_target_index，例如全部改成1；2) 自定义映射：传 mapping_json（JSON对象字符串，例如 {\"0\":0,\"1\":0,\"2\":0}），并可选 default_target_index 处理未列出的其余索引，例如 0到5改成0，其余改成1。若用户明确要求直接修改，不要先调用查询工具。",
+        "method": "POST",
+        "url": "http://192.168.2.26:8666/api/v1/preprocess/rewrite-yolo-label-indices",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') }}"
+            },
+            {
+              "name": "recursive",
+              "value": "={{ (($fromAI('recursive', 'true', 'string') || 'true').trim().toLowerCase()) !== 'false' }}"
+            },
+            {
+              "name": "mapping",
+              "value": "={{ (() => { const raw = ($fromAI('mapping_json', '{}', 'string') || '{}').trim(); return JSON.parse(raw || '{}'); })() }}"
+            },
+            {
+              "name": "default_target_index",
+              "value": "={{ (() => { const raw = ($fromAI('default_target_index', '', 'string') || '').trim(); return raw === '' ? null : Number(raw); })() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        8144,
+        1136
+      ],
+      "id": "5e95df9f-6204-4c08-b741-9d55d56eb1c1",
+      "name": "rewrite-yolo-label-indices"
     }
   ],
   "pinData": {},
@@ -224,6 +315,17 @@
       ]
     },
     "yolo-sliding-window-crop": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "xml-to-yolo": {
       "ai_tool": [
         [
           {
@@ -288,6 +390,28 @@
           }
         ]
       ]
+    },
+    "scan-yolo-label-indices": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "rewrite-yolo-label-indices": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -295,7 +419,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "fb7c3476-e8d0-4c90-8d42-6c1256744ec4",
+  "versionId": "d613c2c8-2d65-432d-addd-fc4fe244751d",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "1b3e6ee362a456055e06758c3fd4e960c3621b1a8e2c51a10220c369f5f16c17"

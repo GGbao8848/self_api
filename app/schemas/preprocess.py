@@ -1375,7 +1375,7 @@ class YoloAugmentAsyncRequest(YoloAugmentRequest):
 
 class ResetYoloLabelIndexRequest(BaseModel):
     input_dir: str = Field(
-        description="输入数据集根目录，目录下需包含 labels/ 子目录",
+        description="输入可为 labels 目录本身、数据集根目录（其下有 labels/），或更上层父目录（将递归发现所有 labels 文件夹）",
     )
     recursive: bool = Field(default=True, description="是否递归扫描 labels 目录")
 
@@ -1384,6 +1384,7 @@ class ResetYoloLabelIndexResponse(BaseModel):
     status: str = "ok"
     input_dir: str
     labels_dir: str
+    labels_dirs: list[str] = Field(default_factory=list)
     total_label_files: int
     modified_label_files: int
     unchanged_label_files: int
@@ -1392,6 +1393,97 @@ class ResetYoloLabelIndexResponse(BaseModel):
 
 
 class ResetYoloLabelIndexAsyncRequest(ResetYoloLabelIndexRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class YoloLabelIndexCount(BaseModel):
+    index: int
+    count: int
+
+
+class ScanYoloLabelIndicesRequest(BaseModel):
+    input_dir: str = Field(
+        description="输入可为 labels 目录本身、数据集根目录（其下有 labels/），或更上层父目录（将递归发现所有 labels 文件夹）",
+    )
+    recursive: bool = Field(default=True, description="是否递归扫描 labels 目录")
+
+
+class ScanYoloLabelIndicesResponse(BaseModel):
+    status: str = "ok"
+    input_dir: str
+    labels_dir: str
+    labels_dirs: list[str] = Field(default_factory=list)
+    total_label_files: int
+    total_objects: int
+    skipped_invalid_lines: int
+    indices: list[YoloLabelIndexCount]
+
+
+class ScanYoloLabelIndicesAsyncRequest(ScanYoloLabelIndicesRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class RewriteYoloLabelIndicesRequest(BaseModel):
+    input_dir: str = Field(
+        description="输入可为 labels 目录本身、数据集根目录（其下有 labels/），或更上层父目录（将递归发现所有 labels 文件夹）；原地修改标签文件",
+    )
+    recursive: bool = Field(default=True, description="是否递归扫描 labels 目录")
+    mapping: dict[int, int] = Field(
+        default_factory=dict,
+        description="指定源类别索引到目标类别索引的映射，例如 {0: 0, 1: 0, 2: 1}",
+    )
+    default_target_index: int | None = Field(
+        default=None,
+        ge=0,
+        description="未出现在 mapping 中的类别统一改成该索引；为空则保持原值",
+    )
+
+    @model_validator(mode="after")
+    def _validate_rewrite_rule(self) -> "RewriteYoloLabelIndicesRequest":
+        if self.default_target_index is None and not self.mapping:
+            raise ValueError("mapping 与 default_target_index 不能同时为空")
+        for source_index, target_index in self.mapping.items():
+            if source_index < 0:
+                raise ValueError("mapping 的源类别索引必须 >= 0")
+            if target_index < 0:
+                raise ValueError("mapping 的目标类别索引必须 >= 0")
+        return self
+
+
+class RewriteYoloLabelIndicesResponse(BaseModel):
+    status: str = "ok"
+    input_dir: str
+    labels_dir: str
+    labels_dirs: list[str] = Field(default_factory=list)
+    total_label_files: int
+    total_objects: int
+    modified_label_files: int
+    unchanged_label_files: int
+    changed_lines: int
+    skipped_invalid_lines: int
+    mapping: dict[str, int]
+    default_target_index: int | None = None
+
+
+class RewriteYoloLabelIndicesAsyncRequest(RewriteYoloLabelIndicesRequest):
     callback_url: AnyHttpUrl | None = Field(
         default=None,
         description="Optional webhook URL that receives task result when finished",
