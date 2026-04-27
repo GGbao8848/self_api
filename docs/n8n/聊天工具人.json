@@ -1,0 +1,305 @@
+{
+  "name": "聊天工具人",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "initialMessages": "我是聊天助手，精通各种Ultralystics  YOLO CLI命令",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        4288,
+        1904
+      ],
+      "id": "f5c9e0d6-943b-491d-b9e1-d62f45fbd1d5",
+      "name": "When chat message received",
+      "webhookId": "76ba44d1-00ae-4fd5-b957-503d04f78532"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "你是数据预处理执行代理，一次只执行一个任务（禁止自动串联其它任务）。\n\n规则：\n1) 先判断用户意图，只能多选一：\n   - 若用户要求“滑窗裁剪”，仅调用 yolo-sliding-window-crop。\n   - 若用户要求“数据增强/augment/aug”，仅调用 yolo-augment。\n   - 若用户要求“划分数据集/split”，仅调用 split-yolo-dataset，并提取mode与划分比例\n2) 提交异步任务后，必须使用“查询任务状态”工具轮询该 task_id。\n3) 轮询逻辑：\n   - state 为 pending/running：继续轮询（建议间隔 5 秒）。\n   - state 为 succeeded/failed：立即停止轮询。\n4) 查询状态时只允许使用 task_id，不允许使用 status_url。\n5) 未经用户明确要求，禁止执行第二个任务（例如做完 sliding 后禁止自动做 augment）。\n6) 若缺少必要参数（如 input_dir），先向用户追问，不得猜测路径。\n7) 最终只返回：task_id、task_type、state、output_dir（若有）、error（若有）。",
+          "maxIterations": 10,
+          "returnIntermediateSteps": true,
+          "passthroughBinaryImages": true,
+          "enableStreaming": true,
+          "batching": {
+            "batchSize": 3
+          }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        4768,
+        1904
+      ],
+      "id": "9a2d1101-0784-42ab-9d5f-faf504466685",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "toolDescription": "【强约束目录层级】仅处理一个数据集根目录 input_dir（绝对路径）。input_dir 必须是待处理数据集目录，不可指向单文件。output_dir 不允许自由输入，固定为与 input_dir 同级目录：<input_dir去掉末尾斜杠> + _yolo-sliding-window-crop。必须调用异步接口并返回 task_id；随后必须用“查询任务状态”轮询到 succeeded/failed。",
+        "method": "POST",
+        "url": "http://192.168.2.26:8666/api/v1/preprocess/yolo-sliding-window-crop/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') + '_yolo-sliding-window-crop' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        4768,
+        2128
+      ],
+      "id": "cc87d431-e28c-470d-9afb-547abd21f594",
+      "name": "yolo-sliding-window-crop"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-20b:free",
+        "options": {
+          "maxTokens": 1000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        4512,
+        2128
+      ],
+      "id": "a13a7655-22fe-40bd-8295-722d071fa0ed",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "EWZlesCvp7AhRs2q",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "【强约束目录层级】input_dir 必须是滑窗输出目录（建议以 _yolo-sliding-window-crop 结尾）。output_dir 不允许自由输入，固定为 input_dir + _aug（同级后缀扩展）。必须调用异步接口并返回 task_id；随后必须用“查询任务状态”轮询到 succeeded/failed。",
+        "method": "POST",
+        "url": "http://192.168.2.26:8666/api/v1/preprocess/yolo-augment/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') + '_aug' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        4896,
+        2128
+      ],
+      "id": "751ce865-1985-4bda-a1c0-18adf319fead",
+      "name": "yolo-augment",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "toolDescription": "【强约束入参】仅允许 task_id（32位hex）查询，禁止 status_url。固定请求：GET http://192.168.2.26:8666/api/v1/preprocess/tasks/{task_id}。轮询规则：state=pending/running 继续查询；state=succeeded/failed 结束并只返回 task_id、state、result/error。 该工具固定追加 query 参数 compact=1，以避免返回 result.details 大列表造成 token 爆炸。",
+        "url": "={{ 'http://192.168.2.26:8666/api/v1/preprocess/tasks/' + $fromAI('task_id', '', 'string').trim() + '?compact=1' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        5024,
+        2128
+      ],
+      "id": "7760dad7-d84c-4da2-b37d-7526add01008",
+      "name": "查询任务状态"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryRedisChat",
+      "typeVersion": 1.5,
+      "position": [
+        4640,
+        2128
+      ],
+      "id": "ec2708ef-16df-44d3-8cce-30cec98276e5",
+      "name": "Redis Chat Memory",
+      "credentials": {
+        "redis": {
+          "id": "9XxEyikoSHjrBgFB",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "【强约束目录层级】仅处理一个 YOLO 数据集根目录 input_dir（绝对路径，需包含 images/ 与 labels/）。output_dir 不允许自由输入，固定为 <input_dir去掉末尾斜杠> + _split。mode 仅允许 train_val_test / train_val / train_only。若用户表达“8:2”，则 mode=train_val 且 train_ratio=0.8、val_ratio=0.2；若用户仅训练集，则 mode=train_only（val/test 比例为 0）；若用户未给比例，默认 train_val_test=0.8/0.1/0.1。该工具为异步任务，返回 task_id 后必须调用“查询任务状态”轮询到 succeeded/failed。",
+        "method": "POST",
+        "url": "http://192.168.2.26:8666/api/v1/preprocess/split-yolo-dataset/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') + '_split' }}"
+            },
+            {
+              "name": "mode",
+              "value": "={{ ($fromAI('mode', '', 'string') || 'train_val_test').trim() }}"
+            },
+            {
+              "name": "train_ratio",
+              "value": "={{ $fromAI('train_ratio', '', 'number') || 0.8 }}"
+            },
+            {
+              "name": "val_ratio",
+              "value": "={{ $fromAI('val_ratio', '', 'number') || 0.1 }}"
+            },
+            {
+              "name": "test_ratio",
+              "value": "={{ $fromAI('test_ratio', '', 'number') || 0.1 }}"
+            },
+            {
+              "name": "shuffle",
+              "value": "true"
+            },
+            {
+              "name": "seed",
+              "value": "42"
+            },
+            {
+              "name": "copy_files",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        5152,
+        2128
+      ],
+      "id": "d6df13c1-a1e8-4798-a598-ed529fdf0177",
+      "name": "split-yolo-dataset"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "yolo-sliding-window-crop": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "yolo-augment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询任务状态": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "split-yolo-dataset": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "fb7c3476-e8d0-4c90-8d42-6c1256744ec4",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1b3e6ee362a456055e06758c3fd4e960c3621b1a8e2c51a10220c369f5f16c17"
+  },
+  "id": "lbri1j9w0siM3Hi2",
+  "tags": []
+}

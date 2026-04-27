@@ -50,3 +50,9 @@ app.mount(
 @app.get("/train-ui")
 def train_ui() -> FileResponse:
     return FileResponse(settings.project_root / "app" / "static" / "train-ui" / "index.html")
+
+
+@app.get("/n8n-big-to-split")
+def n8n_big_to_split_ui() -> FileResponse:
+    """最小前端：大图流程 Webhook 启动 + Wait 恢复审核。"""
+    return FileResponse(settings.project_root / "app" / "static" / "n8n-big-to-split" / "index.html")

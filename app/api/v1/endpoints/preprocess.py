@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.url_builder import build_route_url
 from app.core.security import require_api_auth
@@ -122,15 +122,37 @@ def _build_async_submit_response(
     )
 
 
+def _compact_task_payload(task: dict) -> dict:
+    """Trim heavy fields for LLM/tool polling use-cases."""
+    compact = dict(task)
+    result = compact.get("result")
+    if isinstance(result, dict):
+        result_copy = dict(result)
+        details = result_copy.get("details")
+        if isinstance(details, list):
+            result_copy["details_count"] = len(details)
+            result_copy.pop("details", None)
+        compact["result"] = result_copy
+    return compact
+
+
 @router.get(
     "/tasks/{task_id}",
     response_model=AsyncTaskStatusResponse,
     name="get_preprocess_task_status",
 )
-def get_preprocess_task_status(task_id: str) -> AsyncTaskStatusResponse:
+def get_preprocess_task_status(
+    task_id: str,
+    compact: bool = Query(
+        default=False,
+        description="When true, remove heavy result.details payload and return details_count",
+    ),
+) -> AsyncTaskStatusResponse:
     task = get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"task not found: {task_id}")
+    if compact:
+        task = _compact_task_payload(task)
     return AsyncTaskStatusResponse(**task)
 
 

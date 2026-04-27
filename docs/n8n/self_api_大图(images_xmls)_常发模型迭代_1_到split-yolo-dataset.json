@@ -5,7 +5,8 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "self-api-big-to-split",
-        "options": {}
+        "options": {},
+        "responseMode": "responseNode"
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
@@ -213,6 +214,85 @@
     },
     {
       "parameters": {
+        "content": "## 恢复 URL 去哪看？\n\n你在 **Wait 节点配置页**只看到的英文说明是正常的——**编辑器里永远不显示真实链接**。\n\n真实地址 **$execution.resumeUrl** 要等这次运行**执行到 Wait 并进入 Waiting** 后才会生成。\n\n请在 n8n 顶部/侧栏打开 **Executions（执行）** → 选中**当前这条执行** → 画布上点开 **Wait_审核通过后继续滑窗** → 右侧或节点提示里复制 **Resume / 恢复 URL**（含 `?` 后整段）。\n\n不要在「编辑工作流」界面里找链接。",
+        "height": 340,
+        "width": 380,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2660,
+        -520
+      ],
+      "id": "f1e2d3c4-b5a6-7890-abcd-ef1234567890",
+      "name": "便签：恢复链接在哪"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "resume-1",
+              "name": "approve_resume_url",
+              "value": "={{ $execution.resumeUrl }}",
+              "type": "string"
+            },
+            {
+              "id": "resume-2",
+              "name": "review_status",
+              "value": "waiting_for_review",
+              "type": "string"
+            },
+            {
+              "id": "resume-3",
+              "name": "review_options",
+              "value": "approve",
+              "type": "string"
+            },
+            {
+              "id": "resume-4",
+              "name": "review_instruction",
+              "value": "open approve_resume_url by GET to continue workflow",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2784,
+        -240
+      ],
+      "id": "d18488a6-d95b-4f2c-9f8e-0a2ae893dd1e",
+      "name": "生成审核恢复URL"
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "none",
+        "httpMethod": "GET",
+        "responseCode": 200,
+        "responseMode": "lastNode",
+        "limitWaitTime": false,
+        "options": {},
+        "responseData": "firstEntryJson"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3008,
+        -240
+      ],
+      "id": "a8f3c2e1-9d4b-4e5f-a6b7-c8d9e0f1a2b3",
+      "name": "Wait_审核通过后继续滑窗",
+      "webhookId": "c4d5e6f7-a8b9-4012-cdef-345678901234"
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "={{ $('base_config').first().json.self_api }}/api/v1/preprocess/yolo-sliding-window-crop",
         "sendBody": true,
@@ -220,11 +300,11 @@
           "parameters": [
             {
               "name": "input_dir",
-              "value": "={{ $json.input_dir }}"
+              "value": "={{ $('所有yolo标签转为0').item.json.input_dir }}"
             },
             {
               "name": "output_dir",
-              "value": "={{ $json.input_dir }}/data_crops"
+              "value": "={{ $('所有yolo标签转为0').item.json.input_dir + '/data_crops' }}"
             },
             {
               "name": "min_vis_ratio",
@@ -249,7 +329,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2896,
+        3120,
         -240
       ],
       "id": "0cde1468-5fc7-4621-9400-0d46df88661b",
@@ -285,11 +365,83 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3120,
+        3344,
         -240
       ],
       "id": "7a06179f-c9b6-4647-b5ef-4354e633fb0c",
       "name": "split-yolo-dataset"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3008,
+        -432
+      ],
+      "id": "35f145c8-d3ef-4372-ae3c-bf7ea83be24d",
+      "name": "回传审核信息到前端"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "resume-5",
+              "name": "approve_resume_url_after_sliding",
+              "value": "={{ $execution.resumeUrl }}",
+              "type": "string"
+            },
+            {
+              "id": "resume-6",
+              "name": "review_stage",
+              "value": "after_sliding",
+              "type": "string"
+            },
+            {
+              "id": "resume-7",
+              "name": "review_options_after_sliding",
+              "value": "approve",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3344,
+        -240
+      ],
+      "id": "6f1a7a7a-4f5b-4d1e-8f2f-31b7b1d67d61",
+      "name": "生成滑窗后审核恢复URL"
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "none",
+        "httpMethod": "GET",
+        "responseCode": 200,
+        "responseMode": "onReceived",
+        "limitWaitTime": false,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3568,
+        -240
+      ],
+      "id": "8f7f2b4d-8c63-4d6f-9d5d-42f08d8f2d3f",
+      "name": "Wait_滑窗后审核通过再切分",
+      "webhookId": "9d2585ce-5ef3-4c72-b97d-02d4d1777c73"
     }
   ],
   "pinData": {},
@@ -353,6 +505,33 @@
       "main": [
         [
           {
+            "node": "生成审核恢复URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "生成审核恢复URL": {
+      "main": [
+        [
+          {
+            "node": "回传审核信息到前端",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait_审核通过后继续滑窗",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait_审核通过后继续滑窗": {
+      "main": [
+        [
+          {
             "node": "yolo-sliding-window-crop",
             "type": "main",
             "index": 0
@@ -361,6 +540,28 @@
       ]
     },
     "yolo-sliding-window-crop": {
+      "main": [
+        [
+          {
+            "node": "生成滑窗后审核恢复URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "生成滑窗后审核恢复URL": {
+      "main": [
+        [
+          {
+            "node": "Wait_滑窗后审核通过再切分",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait_滑窗后审核通过再切分": {
       "main": [
         [
           {
