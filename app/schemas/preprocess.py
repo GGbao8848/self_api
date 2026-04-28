@@ -656,6 +656,20 @@ class CleanNestedDatasetRequest(BaseModel):
     )
     images_dir_name: str = Field(default="images", description="Output folder name for labeled images")
     xmls_dir_name: str = Field(default="xmls", description="Output folder name for xml annotations")
+    images_dir_aliases: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional input folder aliases for image subdirectories when pairing_mode is "
+            "images_xmls_subfolders, e.g. ['images', 'image']. Output still uses images_dir_name"
+        ),
+    )
+    xmls_dir_aliases: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional input folder aliases for xml subdirectories when pairing_mode is "
+            "images_xmls_subfolders, e.g. ['xmls', 'xml']. Output still uses xmls_dir_name"
+        ),
+    )
     backgrounds_dir_name: str = Field(
         default="backgrounds",
         description="Output folder name for background images",
@@ -689,8 +703,8 @@ class CleanNestedDatasetRequest(BaseModel):
         description=(
             "auto: detect the layout automatically. "
             "same_directory: each leaf folder contains image and xml files as direct siblings. "
-            "images_xmls_subfolders: each unit folder contains subfolders named images_dir_name "
-            "and xmls_dir_name with files inside (VOC-style layout)"
+            "images_xmls_subfolders: each unit folder contains image/xml subfolders matched by "
+            "images_dir_name/xmls_dir_name or their aliases (VOC-style layout)"
         ),
     )
 

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.path_safety import resolve_safe_path
@@ -37,6 +38,22 @@ def _iter_direct_annotation_files(directory: Path, image_exts: set[str]) -> tupl
         elif suffix == ".xml":
             xmls.append(child)
     return images, xmls
+
+
+@dataclass(frozen=True)
+class _ImagesXmlsPairRoot:
+    unit_dir: Path
+    images_subdir_name: str
+    xmls_subdir_name: str
+
+
+def _normalize_dir_aliases(primary_name: str, aliases: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for name in [primary_name, *(aliases or [])]:
+        clean = name.strip()
+        if clean and clean not in normalized:
+            normalized.append(clean)
+    return normalized
 
 
 def _discover_leaf_dirs(
@@ -77,12 +94,12 @@ def _discover_images_xmls_pair_roots(
     input_dir: Path,
     *,
     recursive: bool,
-    images_dir_name: str,
-    xmls_dir_name: str,
+    images_dir_names: list[str],
+    xmls_dir_names: list[str],
     image_exts: set[str],
     skip_dirs: list[Path] | None = None,
-) -> list[Path]:
-    """Directories that directly contain both ``images_dir_name`` and ``xmls_dir_name`` subfolders with at least one file."""
+) -> list[_ImagesXmlsPairRoot]:
+    """Directories that directly contain matching image/xml subfolder pairs with at least one file."""
     skip_dirs = skip_dirs or []
 
     def _should_skip(path: Path) -> bool:
@@ -94,21 +111,35 @@ def _discover_images_xmls_pair_roots(
     else:
         dirs_to_visit = [input_dir]
 
-    candidates: list[Path] = []
+    candidates: list[_ImagesXmlsPairRoot] = []
     for path in dirs_to_visit:
         ensure_current_task_active()
         if _should_skip(path):
             continue
-        img_sub = path / images_dir_name
-        xml_sub = path / xmls_dir_name
-        if not img_sub.is_dir() or not xml_sub.is_dir():
+        matched_images_name = next(
+            (name for name in images_dir_names if (path / name).is_dir()),
+            None,
+        )
+        matched_xmls_name = next(
+            (name for name in xmls_dir_names if (path / name).is_dir()),
+            None,
+        )
+        if not matched_images_name or not matched_xmls_name:
             continue
+        img_sub = path / matched_images_name
+        xml_sub = path / matched_xmls_name
         imgs, _ = _iter_direct_annotation_files(img_sub, image_exts)
         _, xmls = _iter_direct_annotation_files(xml_sub, image_exts)
         if not imgs and not xmls:
             continue
-        candidates.append(path)
-    return sorted(candidates)
+        candidates.append(
+            _ImagesXmlsPairRoot(
+                unit_dir=path,
+                images_subdir_name=matched_images_name,
+                xmls_subdir_name=matched_xmls_name,
+            )
+        )
+    return sorted(candidates, key=lambda item: str(item.unit_dir))
 
 
 def run_discover_leaf_dirs(request: DiscoverLeafDirsRequest) -> DiscoverLeafDirsResponse:
@@ -173,31 +204,35 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
     )
     image_exts = normalize_extensions(request.extensions)
     skip_dirs = [output_dir] if _is_within(output_dir, input_dir) else []
+    images_dir_aliases = _normalize_dir_aliases(request.images_dir_name, request.images_dir_aliases)
+    xmls_dir_aliases = _normalize_dir_aliases(request.xmls_dir_name, request.xmls_dir_aliases)
     pairing_mode = request.pairing_mode
     if pairing_mode == "auto":
         split_roots = _discover_images_xmls_pair_roots(
             input_dir,
             recursive=request.recursive,
-            images_dir_name=request.images_dir_name,
-            xmls_dir_name=request.xmls_dir_name,
+            images_dir_names=images_dir_aliases,
+            xmls_dir_names=xmls_dir_aliases,
             image_exts=image_exts,
             skip_dirs=skip_dirs,
         )
         pairing_mode = "images_xmls_subfolders" if split_roots else "same_directory"
 
     if pairing_mode == "same_directory":
-        leaf_dirs = _discover_leaf_dirs(
+        same_directory_leaf_dirs = _discover_leaf_dirs(
             input_dir,
             recursive=request.recursive,
             image_exts=image_exts,
             skip_dirs=skip_dirs,
         )
+        subfolder_pair_roots: list[_ImagesXmlsPairRoot] = []
     else:
-        leaf_dirs = _discover_images_xmls_pair_roots(
+        same_directory_leaf_dirs = []
+        subfolder_pair_roots = _discover_images_xmls_pair_roots(
             input_dir,
             recursive=request.recursive,
-            images_dir_name=request.images_dir_name,
-            xmls_dir_name=request.xmls_dir_name,
+            images_dir_names=images_dir_aliases,
+            xmls_dir_names=xmls_dir_aliases,
             image_exts=image_exts,
             skip_dirs=skip_dirs,
         )
@@ -212,8 +247,12 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
     empty_or_invalid_xml_files = 0
     orphan_xml_files = 0
 
-    for unit_dir in leaf_dirs:
+    units: list[Path | _ImagesXmlsPairRoot]
+    units = same_directory_leaf_dirs if pairing_mode == "same_directory" else subfolder_pair_roots
+
+    for unit in units:
         ensure_current_task_active()
+        unit_dir = unit if isinstance(unit, Path) else unit.unit_dir
         rel_dir = unit_dir.relative_to(input_dir)
         leaf_output_dir = output_dir if request.flatten else output_dir / rel_dir
         if pairing_mode == "same_directory":
@@ -221,8 +260,9 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
             xmls_src = unit_dir
             images, xml_paths = _iter_direct_annotation_files(images_src, image_exts)
         else:
-            images_src = unit_dir / request.images_dir_name
-            xmls_src = unit_dir / request.xmls_dir_name
+            assert isinstance(unit, _ImagesXmlsPairRoot)
+            images_src = unit_dir / unit.images_subdir_name
+            xmls_src = unit_dir / unit.xmls_subdir_name
             images, _ = _iter_direct_annotation_files(images_src, image_exts)
             _, xml_paths = _iter_direct_annotation_files(xmls_src, image_exts)
         xml_by_stem = {path.stem: path for path in xml_paths}
@@ -325,7 +365,7 @@ def run_clean_nested_dataset(request: CleanNestedDatasetRequest) -> CleanNestedD
     return CleanNestedDatasetResponse(
         input_dir=str(input_dir),
         output_dir=str(output_dir),
-        discovered_leaf_dirs=len(leaf_dirs),
+        discovered_leaf_dirs=len(units),
         processed_leaf_dirs=processed_leaf_dirs,
         total_images=total_images,
         labeled_images=labeled_images,

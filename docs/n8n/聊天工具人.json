@@ -4,14 +4,14 @@
     {
       "parameters": {
         "public": true,
-        "initialMessages": "我是聊天助手，精通各种Ultralystics  YOLO CLI命令",
+        "initialMessages": "可以执行以下单个任务：\n\nxml-to-yolo：XML/VOC 转 YOLO，需提供 input_dir\nyolo-sliding-window-crop：滑窗裁剪，需提供输入路径和裁剪参数\nyolo-augment：YOLO 数据增强，需提供输入路径和增强参数\nsplit-yolo-dataset：划分数据集，需提供路径、mode、划分比例\nannotate-visualize：标注可视化，需提供数据集路径\nclean-nested-dataset-flat：扁平化输出，需提供原始数据根目录\nscan-yolo-label-indices：查看/统计/检查 YOLO 标签索引，需提供标签路径\nrewrite-yolo-label-indices：修改/重映射/合并 YOLO 标签索引，需提供标签路径和修改规则",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.chatTrigger",
       "typeVersion": 1.4,
       "position": [
-        6896,
-        912
+        6928,
+        736
       ],
       "id": "3bdf4e42-3934-44fe-9729-63954576ea06",
       "name": "When chat message received",
@@ -20,7 +20,7 @@
     {
       "parameters": {
         "options": {
-          "systemMessage": "你是数据预处理执行代理，一次只执行一个任务（禁止自动串联其它任务）。\n\n规则：\n1) 先判断用户意图，只能多选一：\n   - 若用户要求“xml转yolo / xml-to-yolo / VOC转YOLO / 生成labels”，仅调用 xml-to-yolo。\n   - 若用户要求“滑窗裁剪”，仅调用 yolo-sliding-window-crop。\n   - 若用户要求“数据增强/augment/aug”，仅调用 yolo-augment。\n   - 若用户要求“划分数据集/split”，仅调用 split-yolo-dataset，并提取 mode 与划分比例。\n   - 若用户要求“查看/统计/检查 YOLO 标签索引”，仅调用 scan-yolo-label-indices。\n   - 若用户要求“修改/重映射/合并 YOLO 标签索引”，仅调用 rewrite-yolo-label-indices。\n2) 对于 rewrite-yolo-label-indices：\n   - 若用户明确要求“全部改成某个索引”，直接调用改索引工具，不要先查。\n   - 若用户给出映射规则（如 0到5改成0，其余改成1），直接调用改索引工具。\n   - 仅当用户明确要求先查看、或映射规则依赖现有索引但用户未说明时，才调用 scan-yolo-label-indices。\n3) 对于 xml-to-yolo：默认只需 input_dir。仅当用户明确要求时，才额外指定 classes、include_difficult、overwrite 等参数。\n4) 仅以下工具为异步任务：xml-to-yolo、yolo-sliding-window-crop、yolo-augment、split-yolo-dataset。提交后必须使用“查询任务状态”工具轮询该 task_id。\n5) 轮询逻辑：\n   - state 为 pending/running：继续查询（建议间隔 5 秒）。\n   - state 为 succeeded/failed：立即停止。\n6) 查询状态时只允许使用 task_id，不允许使用 status_url。\n7) 未经用户明确要求，禁止执行第二个任务（例如做完 xml-to-yolo 后禁止自动做 split，做完 sliding 后禁止自动做 augment，做完 scan 后禁止自动 rewrite，反之亦然）。\n8) 若缺少必要参数（如 input_dir，或改索引规则不完整），先向用户追问，不得猜测路径。\n9) 异步任务最终只返回：task_id、task_type、state、output_dir（若有）、error（若有）。同步索引工具最终返回关键统计或修改结果，不要输出无关解释。",
+          "systemMessage": "你是数据预处理执行代理，一次只执行一个任务（禁止自动串联其它任务）。\n\n规则：\n1) 先判断用户意图，只能多选一：\n   - 若用户要求“xml转yolo / xml-to-yolo / VOC转YOLO / 生成labels”，仅调用 xml-to-yolo。\n   - 若用户要求“滑窗裁剪”，仅调用 yolo-sliding-window-crop。\n   - 若用户要求“数据增强/augment/aug”，仅调用 yolo-augment。\n   - 若用户要求“划分数据集/split”，仅调用 split-yolo-dataset，并提取 mode 与划分比例。\n   - 若用户要求“标注可视化 / 可视化框 / 画框预览”，仅调用 annotate-visualize。\n   - 若用户要求“扁平化输出 / 数据扁平化 / 整理多层 images xmls 目录”，仅调用 clean-nested-dataset-flat。\n   - 若用户要求“查看/统计/检查 YOLO 标签索引”，仅调用 scan-yolo-label-indices。\n   - 若用户要求“修改/重映射/合并 YOLO 标签索引”，仅调用 rewrite-yolo-label-indices。\n2) 对于 rewrite-yolo-label-indices：\n   - 若用户明确要求“全部改成某个索引”，直接调用改索引工具，不要先查。\n   - 若用户给出映射规则（如 0到5改成0，其余改成1），直接调用改索引工具。\n   - 仅当用户明确要求先查看、或映射规则依赖现有索引但用户未说明时，才调用 scan-yolo-label-indices。\n3) 对于 xml-to-yolo：默认只需 input_dir。仅当用户明确要求时，才额外指定 classes、include_difficult、overwrite 等参数。\n4) 对于 clean-nested-dataset-flat：默认 output_dir 固定为 input_dir + _cleaned_flat，默认 flatten=true、include_backgrounds=false、pairing_mode=images_xmls_subfolders，且默认支持图片子目录别名 images/image、标注子目录别名 xmls/xml。仅当用户明确要求时，才覆盖 aliases。\n5) 仅以下工具为异步任务：xml-to-yolo、yolo-sliding-window-crop、yolo-augment、split-yolo-dataset、annotate-visualize、clean-nested-dataset-flat。提交后必须使用“查询任务状态”工具轮询该 task_id。\n6) 轮询逻辑：\n   - state 为 pending/running：继续查询（建议间隔 5 秒）。\n   - state 为 succeeded/failed：立即停止。\n7) 查询状态时只允许使用 task_id，不允许使用 status_url。\n8) 未经用户明确要求，禁止执行第二个任务（例如做完 xml-to-yolo 后禁止自动做 split，做完 sliding 后禁止自动做 augment，做完 scan 后禁止自动 rewrite，反之亦然）。\n9) 若缺少必要参数（如 input_dir，或改索引规则不完整），先向用户追问，不得猜测路径。\n10) 异步任务最终只返回：task_id、task_type、state、output_dir（若有）、error（若有）。同步索引工具最终返回关键统计或修改结果，不要输出无关解释。",
           "maxIterations": 10,
           "returnIntermediateSteps": true,
           "passthroughBinaryImages": true,
@@ -33,8 +33,8 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        7560,
-        912
+        7592,
+        736
       ],
       "id": "672c5b14-48a6-4993-9734-efd8cf39e65d",
       "name": "AI Agent"
@@ -58,8 +58,8 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        7504,
-        1136
+        7536,
+        960
       ],
       "id": "b1309983-da35-4d84-8f45-3b9123780adc",
       "name": "xml-to-yolo"
@@ -87,8 +87,8 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        7376,
-        1136
+        7408,
+        960
       ],
       "id": "b31d30d6-efa1-419a-82c9-a7f4434de54a",
       "name": "yolo-sliding-window-crop"
@@ -103,8 +103,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        7120,
-        1136
+        7152,
+        960
       ],
       "id": "fcf6cc18-d33b-47e0-be50-4a495b0e7162",
       "name": "OpenRouter Chat Model",
@@ -138,8 +138,8 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        7632,
-        1136
+        7664,
+        960
       ],
       "id": "1463fd07-fc8e-4d95-ae3c-d6e9efe97287",
       "name": "yolo-augment",
@@ -154,8 +154,8 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        7760,
-        1136
+        7792,
+        960
       ],
       "id": "fe90c289-e0c2-44b0-8a7e-618b2a929f83",
       "name": "查询任务状态"
@@ -165,8 +165,8 @@
       "type": "@n8n/n8n-nodes-langchain.memoryRedisChat",
       "typeVersion": 1.5,
       "position": [
-        7248,
-        1136
+        7280,
+        960
       ],
       "id": "ac32785d-9465-4eef-b2a1-7de1fd5f89fc",
       "name": "Redis Chat Memory",
@@ -228,8 +228,8 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        7888,
-        1136
+        7920,
+        960
       ],
       "id": "18520142-6772-4b6e-9a1e-9af36c9a4198",
       "name": "split-yolo-dataset"
@@ -257,8 +257,8 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        8016,
-        1136
+        8048,
+        960
       ],
       "id": "7c4cf4d1-491c-490a-aabc-9dffbea3a282",
       "name": "scan-yolo-label-indices"
@@ -294,11 +294,113 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        8144,
-        1136
+        8176,
+        960
       ],
       "id": "5e95df9f-6204-4c08-b741-9d55d56eb1c1",
       "name": "rewrite-yolo-label-indices"
+    },
+    {
+      "parameters": {
+        "toolDescription": "【标注可视化】仅处理一个数据集根目录 input_dir（绝对路径）。output_dir 不允许自由输入，固定为 <input_dir去掉末尾斜杠> + _visualized。接口会自动优先使用 input_dir/labels，若不存在则回退到 input_dir/xmls。必须调用异步接口并返回 task_id；随后必须用“查询任务状态”轮询到 succeeded/failed。除非用户明确要求，否则不要额外传 classes、classes_file、line_width、include_difficult。",
+        "method": "POST",
+        "url": "http://192.168.2.26:8666/api/v1/preprocess/annotate-visualize/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') + '_visualized' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        8304,
+        960
+      ],
+      "id": "e3b36d0e-0b91-4d4b-9478-6ae1d0f9c1a2",
+      "name": "annotate-visualize"
+    },
+    {
+      "parameters": {
+        "toolDescription": "【扁平化输出】仅处理一个原始数据根目录 input_dir（绝对路径）。用于把多层目录下的图片/XML 整理为单层标准输出。output_dir 固定为 <input_dir去掉末尾斜杠> + _cleaned_flat。固定 flatten=true、include_backgrounds=false、copy_files=true、overwrite=true。默认 pairing_mode=images_xmls_subfolders，并默认支持图片子目录别名 images/image、标注子目录别名 xmls/xml；若用户明确给出其它别名，可传逗号分隔字符串覆盖。必须调用异步接口并返回 task_id；随后必须用“查询任务状态”轮询到 succeeded/failed。",
+        "method": "POST",
+        "url": "http://192.168.2.26:8666/api/v1/preprocess/clean-nested-dataset/async",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') }}"
+            },
+            {
+              "name": "output_dir",
+              "value": "={{ $fromAI('input_dir', '', 'string').trim().replace(/\\/+$/,'') + '_cleaned_flat' }}"
+            },
+            {
+              "name": "recursive",
+              "value": "true"
+            },
+            {
+              "name": "pairing_mode",
+              "value": "={{ (($fromAI('pairing_mode', 'images_xmls_subfolders', 'string') || 'images_xmls_subfolders').trim()) }}"
+            },
+            {
+              "name": "flatten",
+              "value": "true"
+            },
+            {
+              "name": "include_backgrounds",
+              "value": "false"
+            },
+            {
+              "name": "images_dir_name",
+              "value": "images"
+            },
+            {
+              "name": "xmls_dir_name",
+              "value": "xmls"
+            },
+            {
+              "name": "images_dir_aliases",
+              "value": "={{ (() => { const raw = ($fromAI('images_dir_aliases', 'images,image', 'string') || 'images,image').trim(); return raw.split(/[，,\\s]+/).map(s => s.trim()).filter(Boolean); })() }}"
+            },
+            {
+              "name": "xmls_dir_aliases",
+              "value": "={{ (() => { const raw = ($fromAI('xmls_dir_aliases', 'xmls,xml', 'string') || 'xmls,xml').trim(); return raw.split(/[，,\\s]+/).map(s => s.trim()).filter(Boolean); })() }}"
+            },
+            {
+              "name": "include_difficult",
+              "value": "false"
+            },
+            {
+              "name": "copy_files",
+              "value": "true"
+            },
+            {
+              "name": "overwrite",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        8432,
+        960
+      ],
+      "id": "04e8d4c9-e2e2-49de-8b93-2e9e6bb2f1cd",
+      "name": "clean-nested-dataset-flat"
     }
   ],
   "pinData": {},
@@ -412,6 +514,28 @@
           }
         ]
       ]
+    },
+    "annotate-visualize": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "clean-nested-dataset-flat": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -419,7 +543,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "d613c2c8-2d65-432d-addd-fc4fe244751d",
+  "versionId": "847f2f32-3283-4461-9e4b-614d8112ded1",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "1b3e6ee362a456055e06758c3fd4e960c3621b1a8e2c51a10220c369f5f16c17"

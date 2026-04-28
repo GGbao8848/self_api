@@ -221,6 +221,75 @@ def test_clean_nested_dataset_auto_detects_images_xmls_subfolders(
     assert (out_leaf / "backgrounds" / "bg.jpg").exists()
 
 
+def test_clean_nested_dataset_supports_subfolder_aliases(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    root_dir = case_dir / "voc_style_aliases"
+    sample = root_dir / "session_alias"
+    create_image(sample / "image" / "a.jpg", color=(255, 0, 0), size=(16, 16))
+    create_voc_xml(
+        sample / "xml" / "a.xml",
+        filename="a.jpg",
+        size=(16, 16),
+        objects=[("cat", (2, 2, 8, 8))],
+    )
+
+    output_dir = case_dir / "voc_cleaned_aliases"
+    response = client.post(
+        "/api/v1/preprocess/clean-nested-dataset",
+        json={
+            "input_dir": str(root_dir),
+            "output_dir": str(output_dir),
+            "pairing_mode": "images_xmls_subfolders",
+            "images_dir_aliases": ["image"],
+            "xmls_dir_aliases": ["xml"],
+        },
+    )
+    data = response.json()
+    assert response.status_code == 200
+    assert data["discovered_leaf_dirs"] == 1
+    assert data["labeled_images"] == 1
+
+    out_leaf = output_dir / "session_alias"
+    assert (out_leaf / "images" / "a.jpg").exists()
+    assert (out_leaf / "xmls" / "a.xml").exists()
+
+
+def test_clean_nested_dataset_auto_detects_subfolder_aliases(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    root_dir = case_dir / "voc_style_auto_aliases"
+    sample = root_dir / "session_auto_alias"
+    create_image(sample / "image" / "a.jpg", color=(255, 0, 0), size=(16, 16))
+    create_voc_xml(
+        sample / "xml" / "a.xml",
+        filename="a.jpg",
+        size=(16, 16),
+        objects=[("cat", (2, 2, 8, 8))],
+    )
+
+    output_dir = case_dir / "voc_cleaned_auto_aliases"
+    response = client.post(
+        "/api/v1/preprocess/clean-nested-dataset",
+        json={
+            "input_dir": str(root_dir),
+            "output_dir": str(output_dir),
+            "images_dir_aliases": ["image"],
+            "xmls_dir_aliases": ["xml"],
+        },
+    )
+    data = response.json()
+    assert response.status_code == 200
+    assert data["discovered_leaf_dirs"] == 1
+    assert data["labeled_images"] == 1
+
+    out_leaf = output_dir / "session_auto_alias"
+    assert (out_leaf / "images" / "a.jpg").exists()
+    assert (out_leaf / "xmls" / "a.xml").exists()
+
+
 def test_clean_nested_dataset_skip_backgrounds_endpoint(client: TestClient, case_dir: Path) -> None:
     root_dir = case_dir / "raw_nested_skip_bg"
     leaf_dir = root_dir / "project" / "batch_1"

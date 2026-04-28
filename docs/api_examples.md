@@ -9,7 +9,7 @@
 | 端点 | 主要字段 |
 |------|----------|
 | `discover-leaf-dirs` | `input_dir`；可选 `recursive`、`extensions` |
-| `clean-nested-dataset` | `input_dir`、可选 `output_dir`；默认自动识别目录布局；高级参数含 `pairing_mode`、`flatten`、`include_backgrounds`、`copy_files`、`overwrite`，以及 `images_dir_name`、`xmls_dir_name`、`backgrounds_dir_name` |
+| `clean-nested-dataset` | `input_dir`、可选 `output_dir`；默认自动识别目录布局；高级参数含 `pairing_mode`、`flatten`、`include_backgrounds`、`copy_files`、`overwrite`，以及 `images_dir_name`、`xmls_dir_name`、`images_dir_aliases`、`xmls_dir_aliases`、`backgrounds_dir_name` |
 | `aggregate-nested-dataset` | `input_dir`、可选 `output_dir`；`images_dir_name`、`labels_dir_name`、`backgrounds_dir_name`、`classes_file_name`、`require_non_empty_labels`、`overwrite` |
 | `xml-to-yolo` | `input_dir` |
 | `annotate-visualize` | `input_dir`、`output_dir`；要求 `input_dir/images` 存在，默认优先使用 `input_dir/labels`，若不存在再回退到 `input_dir/xmls`；可选 `recursive`、`extensions`、`include_difficult`（仅 XML）、`line_width`、`overwrite`；YOLO 类别名可选 `classes` 或 `classes_file`（二选一，**均可省略**；均不提供或 `classes_file` 为空字符串时，框上显示**类别 id 数字**） |
@@ -88,7 +88,7 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/discover-leaf-dirs/asyn
 
 - **`auto`**：自动识别当前数据更像 `same_directory` 还是 `images_xmls_subfolders`
 - **`same_directory`**：递归识别「叶子目录」（目录内**直接**含有图片或 XML 文件），在同一目录内按 stem 配对。
-- **`images_xmls_subfolders`**：识别同时含有子目录 `images_dir_name` 与 `xmls_dir_name` 的文件夹（VOC 常见布局：`样本/images/*.jpg` 与 `样本/xmls/*.xml`），在**该父目录**范围内配对；不要求图与 XML 在同一子文件夹内。
+- **`images_xmls_subfolders`**：识别同时含有子目录 `images_dir_name` 与 `xmls_dir_name` 的文件夹（VOC 常见布局：`样本/images/*.jpg` 与 `样本/xmls/*.xml`），在**该父目录**范围内配对；不要求图与 XML 在同一子文件夹内。若原始目录名不固定，可额外传 `images_dir_aliases` / `xmls_dir_aliases`，例如 `["images", "image"]` 与 `["xmls", "xml"]`。
 
 有有效标注的写入 `images/` 与 `xmls/`；无标注或 XML 无效的图默认写入 `backgrounds/`（可通过 `include_backgrounds` 关闭，仅保留成对输出）。
 
@@ -145,6 +145,8 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/clean-nested-dataset" \
     "include_backgrounds": false,
     "images_dir_name": "images",
     "xmls_dir_name": "xmls",
+    "images_dir_aliases": ["images", "image"],
+    "xmls_dir_aliases": ["xmls", "xml"],
     "include_difficult": false,
     "copy_files": true,
     "overwrite": true
@@ -162,6 +164,8 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/clean-nested-dataset/as
     "include_backgrounds": false,
     "images_dir_name": "images",
     "xmls_dir_name": "xmls",
+    "images_dir_aliases": ["images", "image"],
+    "xmls_dir_aliases": ["xmls", "xml"],
     "include_difficult": false,
     "copy_files": true,
     "overwrite": true,
