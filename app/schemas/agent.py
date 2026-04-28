@@ -25,6 +25,7 @@ class AgentToolSpecResponse(BaseModel):
     name: str
     description: str
     async_task: bool = False
+    argument_hint: str | None = None
 
 
 class AgentToolCallResponse(BaseModel):

@@ -75,6 +75,7 @@ def list_tools() -> AgentToolsResponse:
             name=tool.name,
             description=tool.description,
             async_task=tool.async_task,
+            argument_hint=tool.argument_hint,
         )
         for tool in get_tool_specs()
     ]

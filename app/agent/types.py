@@ -16,6 +16,7 @@ class ToolSpec:
     name: str
     description: str
     async_task: bool = False
+    argument_hint: str | None = None
 
 
 @dataclass(frozen=True)

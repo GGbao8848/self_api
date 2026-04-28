@@ -162,6 +162,12 @@ def _build_system_prompt(tools: list[ToolSpec]) -> str:
         for tool in tools
     ]
     tools_text = "\n".join(tool_lines)
+    argument_lines = [
+        f"- {tool.name}: {tool.argument_hint}"
+        for tool in tools
+        if tool.argument_hint
+    ]
+    argument_text = "\n".join(argument_lines)
     return (
         "You are a tool-selection agent for dataset preprocessing.\n"
         "Choose at most one tool.\n"
@@ -176,11 +182,14 @@ def _build_system_prompt(tools: list[ToolSpec]) -> str:
         "6. Use exact argument keys expected by the tool.\n"
         "7. Use input_dir for dataset or labels paths.\n"
         "8. For split-yolo-dataset, include output_dir as <input_dir>_split unless user gives one.\n"
+        "9. For yolo-sliding-window-crop, include output_dir as <input_dir>_yolo-sliding-window-crop unless user gives one.\n"
+        "10. For yolo-augment, include output_dir as <input_dir>_aug unless user gives one.\n"
+        "11. For annotate-visualize, include output_dir as <input_dir>_visualized unless user gives one.\n"
+        "12. For clean-nested-dataset-flat, include output_dir as <input_dir>_cleaned_flat and default flatten=true, include_backgrounds=false, pairing_mode=images_xmls_subfolders, recursive=true, copy_files=true, overwrite=true unless user gives overrides.\n"
+        "13. For publish-incremental-yolo-dataset, use {last_yaml, local_paths}; if the user gives one local dataset path, local_paths should contain exactly one item.\n"
+        "14. For build-yolo-yaml, include output_yaml_path as <input_dir>/data.yaml unless project_root_dir and detector_name are both provided.\n"
         "Available tools:\n"
         f"{tools_text}\n"
         "Argument hints:\n"
-        "- scan-yolo-label-indices: {input_dir}\n"
-        "- rewrite-yolo-label-indices: {input_dir, mapping?, default_target_index?}\n"
-        "- xml-to-yolo: {input_dir}\n"
-        "- split-yolo-dataset: {input_dir, output_dir, mode?, train_ratio?, val_ratio?, test_ratio?}"
+        f"{argument_text}"
     )
