@@ -22,13 +22,22 @@ class Settings(BaseSettings):
     session_cookie_name: str = "self_api_session"
     session_cookie_secure: bool = False
     cors_allow_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    llm_default_provider: str | None = None
+    llm_default_model: str | None = None
+    llm_request_timeout_seconds: int = 60
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str | None = None
+    agent_max_steps: int = 8
+    agent_tool_call_limit: int = 1
+    agent_enable_streaming: bool = False
     postgres_dsn: str | None = None
     redis_url: str | None = None
     s3_endpoint_url: str | None = None
     max_upload_size_mb: int = 512
-    # 供与 n8n 集成时使用（.env：SELF_API_N8N_BASE_URL / SELF_API_N8N_API_KEY）
-    n8n_base_url: str | None = None
-    n8n_api_key: str | None = None
     publish_project_root_dir: str | None = None
     remote_sftp_host: str | None = None
     remote_sftp_project_root_dir: str | None = None

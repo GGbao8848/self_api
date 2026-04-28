@@ -1,6 +1,8 @@
-# self_api - 图像/数据集预处理 API
+# self_api - 图像/数据集预处理 Agent API
 
-用于图像与图像数据集预处理的最小可交付 API 服务，当前提供 12 个核心能力：
+用于图像与图像数据集预处理的 Agent API 服务。当前正在从外部编排模式收敛为内建智能体模式：`services/*` 继续作为工具执行层，`/api/v1/agent/*` 提供聊天、会话和工具注册入口，`/api/v1/preprocess/*` 保留为兼容的直接工具 API。
+
+当前提供 12 个核心工具能力：
 
 1. 指定目录图像按滑窗规则裁剪并保存
 2. Pascal VOC XML 标注转换为 YOLO 标注
@@ -22,6 +24,7 @@
 - 健康检查（`/api/v1/healthz`）
 - 请求/响应模型与参数校验（Pydantic）
 - 统一错误处理（非法输入返回 `400`）
+- 内建 Agent API 骨架（`/api/v1/agent/chat`、run/session、tool registry）
 - 核心业务服务分层（`services`）
 - 基础可运行测试（`pytest`）
 - Docker 化运行支持
@@ -34,14 +37,20 @@ self_api/
 │   ├── api/
 │   │   ├── url_builder.py             # 对外 URL 生成
 │   │   └── v1/
-│   │       ├── endpoints/             # v1 接口定义（auth/files/tasks/preprocess 等）
+│   │       ├── endpoints/             # v1 接口定义（agent/auth/files/tasks/preprocess 等）
 │   │       └── router.py              # v1 路由聚合
+│   ├── agent/
+│   │   ├── providers/                 # LLM provider 选择与配置
+│   │   ├── tools/                     # Agent 工具注册表
+│   │   ├── runtime.py                 # Agent runtime 入口
+│   │   └── sessions.py                # Agent run/session 存储
 │   ├── core/
 │   │   ├── config.py                  # 环境配置
 │   │   ├── logging.py                 # 日志初始化
 │   │   ├── path_safety.py             # 路径访问约束
 │   │   └── security.py                # 安全与鉴权辅助
 │   ├── schemas/
+│   │   ├── agent.py                   # Agent API 模型
 │   │   ├── auth.py                    # 鉴权模型
 │   │   ├── preprocess.py              # 预处理请求/响应模型
 │   │   ├── system.py                  # 系统接口模型
@@ -56,8 +65,6 @@ self_api/
 │   │   ├── yolo_augment.py            # YOLO 数据增强
 │   │   ├── yolo_sliding_window.py     # YOLO 大图滑窗裁剪
 │   │   └── yolo_train.py              # YOLO 训练启动
-│   ├── static/
-│   │   └── train-ui/                  # 训练相关静态页面
 │   ├── utils/
 │   │   └── images.py                  # 图像文件扫描工具
 │   └── main.py                        # FastAPI 应用入口
@@ -92,8 +99,9 @@ cp .env.example .env
 - `SELF_API_FILE_ACCESS_ROOTS`（必须改，本API客户端可以读写的文件路径）
 - `SELF_API_STORAGE_ROOT`（必须改，本API客户端可以读写的文件路径）
 - `SELF_API_AUTH_ENABLED`（非必要，鉴权相关字段，不需要鉴权的时候，设置false，下面的账户密码注销掉）
-- `SELF_API_N8N_BASE_URL`（必须改，流程编排系统 n8n 部署的机器）
-- `SELF_API_N8N_API_KEY`（非必要，将 n8n 的 API 暴露给智能体后，可让智能体直接调用工作流）
+- `SELF_API_LLM_DEFAULT_PROVIDER`（内建 Agent 默认 provider，可选 `openai` / `openrouter` / `ollama`）
+- `SELF_API_LLM_DEFAULT_MODEL`（默认模型）
+- `SELF_API_OPENAI_API_KEY` / `SELF_API_OPENROUTER_API_KEY` / `SELF_API_OLLAMA_BASE_URL`（按 provider 配置）
 - `SELF_API_PUBLISH_PROJECT_ROOT_DIR`
   增量数据远程发布时，本地 staging 工作区默认放这里；若不配置，则自动回落到 `SELF_API_STORAGE_ROOT/publish_workspace`
 - `SELF_API_REMOTE_SFTP_HOST` / `SELF_API_REMOTE_SFTP_PROJECT_ROOT_DIR` / `SELF_API_REMOTE_SFTP_USERNAME` / `SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH`
@@ -182,22 +190,24 @@ make run
 | 清理悬空镜像与未使用网络等 | `docker system prune` |
 | 一并清理未使用的镜像与构建缓存（更激进，慎用） | `docker system prune -a` |
 
-## 4. 一期最小生产版
+## 4. Agent API
 
-当前仓库已落地一期最小生产版，用于支持 LangGraph 的跨机器接入。
+当前 Agent 层已完成原生入口骨架，后续会逐步把 `docs/n8n/聊天工具人.json` 中的工具调用规则迁入本仓库。
 
-关键约定：
+已提供接口：
 
-- 长任务优先调用 `/async` 接口
-- `SELF_API_PUBLIC_BASE_URL` 用于生成对外可访问的 `status_url`
-- 生产环境必须显式配置 `SELF_API_FILE_ACCESS_ROOTS`
-- 当前跨机器模式依赖共享文件系统，不直接解决任务恢复
+- `POST /api/v1/agent/chat`：创建一次 Agent run
+- `GET /api/v1/agent/runs/{run_id}`：查询单次 run
+- `GET /api/v1/agent/sessions/{session_id}`：查询会话 run 列表
+- `GET /api/v1/agent/tools`：查看已注册工具
 
-相关文档：
+当前约束：
 
-- `docs/langgraph_min_prod.md`
-- `docs/architecture/langgraph_production_roadmap.md`
-- `docs/architecture/self_orchestrator_bootstrap.md`
+- 工具注册表已内置首批数据预处理工具名称和异步标记
+- `scan-yolo-label-indices` / `rewrite-yolo-label-indices` 已支持通过 Agent 同步执行
+- `xml-to-yolo` / `split-yolo-dataset` 已支持通过 Agent 提交异步任务并轮询到终态
+- 其余异步预处理工具和模型真实调用会在后续迁移步骤接入
+- `n8n` 训练 webhook 与静态训练页面已从运行路径移除
 
 ## 5. 开发命令
 
