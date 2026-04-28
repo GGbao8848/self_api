@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # 供与 n8n 集成时使用（.env：SELF_API_N8N_BASE_URL / SELF_API_N8N_API_KEY）
     n8n_base_url: str | None = None
     n8n_api_key: str | None = None
+    publish_project_root_dir: str | None = None
+    remote_sftp_host: str | None = None
+    remote_sftp_project_root_dir: str | None = None
+    remote_sftp_username: str | None = None
+    remote_sftp_private_key_path: str | None = None
+    remote_sftp_port: int = 22
 
     model_config = SettingsConfigDict(
         env_file=".env",

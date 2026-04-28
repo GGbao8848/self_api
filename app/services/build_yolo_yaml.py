@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from app.core.config import get_settings
 from app.core.path_safety import resolve_safe_path
 from app.schemas.preprocess import BuildYoloYamlRequest, BuildYoloYamlResponse
 from app.services.remote_transfer import read_sftp_file_text
@@ -101,15 +102,20 @@ def _merge_split_path_dicts(
 def _load_last_yaml_text(request: BuildYoloYamlRequest) -> tuple[str, str]:
     assert request.last_yaml is not None
     if _looks_remote_last_yaml(request.last_yaml):
-        if not request.sftp_username or not request.sftp_private_key_path:
+        settings = get_settings()
+        sftp_username = request.sftp_username or settings.remote_sftp_username
+        sftp_private_key_path = request.sftp_private_key_path or settings.remote_sftp_private_key_path
+        sftp_port = request.sftp_port or settings.remote_sftp_port
+        if not sftp_username or not sftp_private_key_path:
             raise ValueError(
-                "sftp_username and sftp_private_key_path are required when last_yaml is a remote SFTP path"
+                "sftp_username and sftp_private_key_path are required when last_yaml is a remote SFTP path "
+                "(or configure SELF_API_REMOTE_SFTP_USERNAME / SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH in .env)"
             )
         text = read_sftp_file_text(
             request.last_yaml,
-            username=request.sftp_username,
-            private_key_path=request.sftp_private_key_path,
-            port=request.sftp_port,
+            username=sftp_username,
+            private_key_path=sftp_private_key_path,
+            port=sftp_port,
         )
         return text, "sftp"
     path = resolve_safe_path(

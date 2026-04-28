@@ -1124,15 +1124,29 @@ class PublishYoloDatasetRequest(BaseModel):
             "Input dataset root to scan and publish. Supports the same split discovery rules as build-yolo-yaml"
         ),
     )
-    project_root_dir: str = Field(
+    input_dirs: list[str] | None = Field(
+        default=None,
         description=(
-            "Local project workspace root. Published datasets land under "
-            "<project_root_dir>/<detector_name>/datasets/<dataset_version> in local mode, "
-            "or use this path as the local staging root in remote mode"
+            "Optional additional dataset roots to merge into the same published dataset version. "
+            "Each path is scanned like input_dir, then all discovered split image dirs are combined"
         ),
     )
-    detector_name: str = Field(
-        description="Stable detector family name used for dataset version naming and placement",
+    project_root_dir: str | None = Field(
+        default=None,
+        description=(
+            "Optional local project workspace root. Published datasets land under "
+            "<project_root_dir>/<detector_name>/datasets/<dataset_version> in local mode, "
+            "or use this path as the local staging root in remote mode. When omitted, "
+            "the service uses SELF_API_PUBLISH_PROJECT_ROOT_DIR or falls back to "
+            "<SELF_API_STORAGE_ROOT>/publish_workspace"
+        ),
+    )
+    detector_name: str | None = Field(
+        default=None,
+        description=(
+            "Stable detector family name used for dataset version naming and placement. "
+            "When omitted and last_yaml is set, it is inferred from the last_yaml parent folder name"
+        ),
     )
     dataset_version: str | None = Field(
         default=None,
@@ -1161,11 +1175,11 @@ class PublishYoloDatasetRequest(BaseModel):
         default=None,
         description="Required when publish_mode=remote_sftp unless password auth is added later",
     )
-    remote_port: int = Field(
-        default=22,
+    remote_port: int | None = Field(
+        default=None,
         ge=1,
         le=65535,
-        description="SSH port for remote publish",
+        description="SSH port for remote publish; defaults to .env value or 22",
     )
     last_yaml: str | None = Field(
         default=None,
@@ -1188,25 +1202,51 @@ class PublishYoloDatasetRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _validate_remote_publish_fields(self) -> "PublishYoloDatasetRequest":
-        if self.publish_mode == "remote_sftp":
-            missing: list[str] = []
-            if not self.remote_host:
-                missing.append("remote_host")
-            if not self.remote_project_root_dir:
-                missing.append("remote_project_root_dir")
-            if not self.remote_username:
-                missing.append("remote_username")
-            if not self.remote_private_key_path:
-                missing.append("remote_private_key_path")
-            if missing:
-                raise ValueError(
-                    "publish_mode=remote_sftp requires: " + ", ".join(missing)
-                )
+    def _validate_inputs(self) -> "PublishYoloDatasetRequest":
+        extras = [p.strip() for p in (self.input_dirs or []) if p and p.strip()]
+        if not self.input_dir.strip() and not extras:
+            raise ValueError("input_dir or input_dirs must provide at least one dataset path")
         return self
 
 
 class PublishYoloDatasetAsyncRequest(PublishYoloDatasetRequest):
+    callback_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Optional webhook URL that receives task result when finished",
+    )
+    callback_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Callback HTTP timeout in seconds",
+    )
+
+
+class PublishIncrementalYoloDatasetRequest(BaseModel):
+    last_yaml: str = Field(
+        description=(
+            "Previous remote dataset yaml path, typically "
+            "sftp://host/<root>/<detector_name>/dataset(s)/<old_version>/<old_version>.yaml"
+        ),
+    )
+    local_paths: list[str] = Field(
+        description=(
+            "One or more local dataset directories to append. If only one base directory is given, "
+            "the service auto-discovers a sibling '<dir>_aug' when present; if only one '_aug' "
+            "directory is given, it auto-discovers the base sibling"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_local_paths(self) -> "PublishIncrementalYoloDatasetRequest":
+        cleaned = [p.strip() for p in self.local_paths if p and p.strip()]
+        if not cleaned:
+            raise ValueError("local_paths must contain at least one local dataset directory")
+        self.local_paths = cleaned
+        return self
+
+
+class PublishIncrementalYoloDatasetAsyncRequest(PublishIncrementalYoloDatasetRequest):
     callback_url: AnyHttpUrl | None = Field(
         default=None,
         description="Optional webhook URL that receives task result when finished",
@@ -1227,6 +1267,10 @@ class PublishYoloDatasetResponse(BaseModel):
     )
     dataset_root: str = Field(
         description="Resolved dataset root on disk used to locate splits before publication",
+    )
+    source_dataset_roots: list[str] = Field(
+        default_factory=list,
+        description="Resolved dataset roots on disk merged into this publication",
     )
     splits_included: list[str]
     classes_count: int

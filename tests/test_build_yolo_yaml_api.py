@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from tests.data_helpers import create_image
 
 
@@ -377,6 +378,43 @@ def test_build_yolo_yaml_last_yaml_remote_requires_sftp_fields(
     )
     assert r.status_code == 400
     assert "sftp_username" in r.json()["detail"]
+
+
+def test_build_yolo_yaml_last_yaml_remote_uses_env_defaults(
+    client: TestClient,
+    case_dir: Path,
+    monkeypatch,
+) -> None:
+    from app.services import build_yolo_yaml as build_service
+
+    ds = case_dir / "dataset_sftp_env"
+    _make_yolo_splits(ds, ("train", "val"))
+    out = ds / "out.yaml"
+
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_USERNAME", "sk")
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH", "/tmp/fake_env_key")
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PORT", "2222")
+    get_settings.cache_clear()
+
+    def fake_read_sftp_file_text(target, username, private_key_path, port=None):
+        assert target == "sftp://example.com/var/data.yaml"
+        assert username == "sk"
+        assert private_key_path == "/tmp/fake_env_key"
+        assert port == 2222
+        return "train: /remote/old/train/images\nnc: 2\nnames:\n  0: dog\n  1: cat\n"
+
+    monkeypatch.setattr(build_service, "read_sftp_file_text", fake_read_sftp_file_text)
+
+    r = client.post(
+        "/api/v1/preprocess/build-yolo-yaml",
+        json={
+            "input_dir": str(ds),
+            "last_yaml": "sftp://example.com/var/data.yaml",
+            "output_yaml_path": str(out),
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["last_yaml_source"] == "sftp"
 
 
 def test_build_yolo_yaml_can_publish_dataset_into_project_structure(

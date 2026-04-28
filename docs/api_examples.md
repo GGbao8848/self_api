@@ -20,7 +20,8 @@
 | `yolo-augment` | `input_dir`（支持根目录下直接有 `images/`、`labels/`，也支持递归发现 `*/images` 与同级 `labels/`，并保留相对目录层级输出）、`output_dir`（可选，默认 `<input_dir>/augment`）、七个增强开关（默认全开）；仅支持 YOLO TXT |
 | `yolo-sliding-window-crop` | `input_dir`（支持根目录下直接有 `images/`，也支持递归发现 `*/images`；若同级存在 `labels/` 则自动同步输出裁剪标注并保留相对目录层级）、`output_dir`；可选 `window_width`、`window_height`、`stride_x`、`stride_y`（传入即覆盖默认）；以及 `min_vis_ratio`、`stride_ratio`、`ignore_vis_ratio`、`only_wide` |
 | `build-yolo-yaml` | 同上；**`last_yaml`** 与当前扫描路径合并（旧路径在前、去重）。**`classes.txt` 有有效类别行时**：`nc`/`names` 以该文件为准。**`classes.txt` 为空或不存在时**：必须提供 **`last_yaml`**，且其中需含 **`names`**（及通常的 `nc`），类别表从该 YAML 读取；当前数据集各划分路径仍按扫描结果**追加**到对应 `train`/`val`/…。远程 `last_yaml` 需 **`sftp_username`**、**`sftp_private_key_path`** |
-| `publish-yolo-dataset` | `input_dir`、`project_root_dir`、`detector_name`；可选 `dataset_version`。`publish_mode=local` 时发布到本地规范目录并生成 yaml；`publish_mode=remote_sftp` 时额外需要 `remote_host`、`remote_project_root_dir`、`remote_username`、`remote_private_key_path`，内部走 zip + SFTP 上传 + 远端解压 |
+| `publish-yolo-dataset` | `input_dir`、可选 `input_dirs`（多数据集合并）、可选 `project_root_dir`、可选 `detector_name`；`publish_mode=local` 时发布到本地规范目录并生成 yaml；`publish_mode=remote_sftp` 时内部走 zip + SFTP 上传 + 远端解压。若 `.env` 已配置 `SELF_API_REMOTE_SFTP_*`，则可省略远端 SSH 参数；若未传 `project_root_dir`，则使用 `SELF_API_PUBLISH_PROJECT_ROOT_DIR` 或回落到 `SELF_API_STORAGE_ROOT/publish_workspace` |
+| `publish-incremental-yolo-dataset` | 面向“远程增量发布”的最小化专用接口；仅需 `last_yaml` + `local_paths`。其余字段都由 `last_yaml` 路径和服务端 `.env` 自动推导/补齐 |
 | `zip-folder` | `input_dir`、`output_zip_path`（可选，默认 `<input_dir_parent>/<input_dir_name>.zip`）、`include_root_dir`、`overwrite` |
 | `remote-transfer` | `source_path`、`target`；以及 `username`、`password` / `private_key_path`、`port`、`overwrite` |
 | `remote-unzip` | `archive_path`、`output_dir`；以及 `username`、`password` / `private_key_path`、`port`、`overwrite` |
@@ -789,6 +790,92 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/remote-sbatch-yolo-trai
 - 若要覆盖默认日志路径，可传 `stdout_path`、`stderr_path`
 
 异步示例在同步 body 上增加 `callback_url`、`callback_timeout_seconds` 即可（同 §0）。
+
+## 19. 增量 YOLO 数据集远程发布（`publish-yolo-dataset`）
+
+适用于“保留旧 YAML 中已有训练路径，再把本次新数据集追加进去，并同步发布到远端 SFTP”。
+
+- `POST /api/v1/preprocess/publish-yolo-dataset`
+- `POST /api/v1/preprocess/publish-yolo-dataset/async`
+
+支持以下能力：
+
+- 最简输入模型：只传本地目录路径与远端 `last_yaml`
+- `input_dir` + `input_dirs`：一次合并多个本地 YOLO 数据集目录，例如原始滑窗集和增强集
+- 若只传一个基础目录，服务端会自动匹配同级 `<input_dir>_aug`
+- 若只传一个 `_aug` 目录，服务端也会自动回找同级基础目录
+- `last_yaml`：把旧 YAML 中已有的 `train` / `val` / `test` 路径保留在前，再把本次数据追加在后
+- `publish_mode=remote_sftp`：自动在远端创建 `<remote_project_root_dir>/<detector_name>/datasets/<dataset_version>`，本地先打包 zip，上传后再远端解压
+- 若 `.env` 已配置 `SELF_API_REMOTE_SFTP_HOST`、`SELF_API_REMOTE_SFTP_PROJECT_ROOT_DIR`、`SELF_API_REMOTE_SFTP_USERNAME`、`SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH`，请求体里可省略这些远端字段
+- 若未传 `project_root_dir`，则使用 `SELF_API_PUBLISH_PROJECT_ROOT_DIR`；若该项也未配置，则自动回落到 `SELF_API_STORAGE_ROOT/publish_workspace`
+- 若 `last_yaml` 形如 `sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/nzxj_louyou/dataset/nzxj_louyou_20260423_2033/nzxj_louyou_20260423_2033.yaml`，则会自动推导：
+  `remote_host=172.31.1.42`、`remote_project_root_dir=/mnt/usrhome/sk/ndata/TEDS_n8n`、`detector_name=nzxj_louyou`，并沿用旧路径中的 `dataset` 或 `datasets` 目录命名风格
+
+```bash
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/publish-yolo-dataset/async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/TEDS/langgraph_workspace/download-2026-04-07_10-32-30/teds/整车图/正线/20260407_非转数据拟合_cleaned_flat_split_yolo-sliding-window-crop",
+    "publish_mode": "remote_sftp",
+    "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/nzxj_louyou/dataset/nzxj_louyou_20260423_2033/nzxj_louyou_20260423_2033.yaml"
+  }'
+```
+
+如果同级 `_aug` 不存在，或你需要显式指定两份本地目录，则再补 `input_dirs`：
+
+```json
+{
+  "input_dir": "/path/to/base_dataset",
+  "input_dirs": ["/path/to/base_dataset_aug"],
+  "last_yaml": "sftp://host/root/project/dataset/old_ver/old_ver.yaml",
+  "publish_mode": "remote_sftp"
+}
+```
+
+**响应要点**：`dataset_version` 为本次新目录名；`published_dataset_dir` 为远端最终目录；`output_yaml_path` 为远端新 YAML；`local_archive_path` 为本地 zip；`remote_archive_path` 为远端 zip；`source_dataset_roots` 为本次合并发布的本地数据集根目录列表。
+
+### 19.1 最小化远程增量发布（`publish-incremental-yolo-dataset`）
+
+这是面向日常使用的简化接口，不再暴露远端 SSH 参数，也不要求调用方拼接 `input_dir/input_dirs/project_root_dir/detector_name`。
+
+- `POST /api/v1/preprocess/publish-incremental-yolo-dataset`
+- `POST /api/v1/preprocess/publish-incremental-yolo-dataset/async`
+
+只需两个字段：
+
+- `last_yaml`：旧数据集 YAML 的远程完整路径
+- `local_paths`：一个或多个本地补充数据集目录
+
+自动规则：
+
+- 如果 `local_paths` 只给一个基础目录，服务端自动匹配同级 `<dir>_aug`
+- 如果只给一个 `_aug` 目录，服务端自动回找基础目录
+- 从 `last_yaml` 自动推导 `remote_host`、`remote_project_root_dir`、`detector_name`、`dataset/datasets` 目录风格
+- `remote_username`、`remote_private_key_path`、`remote_port` 从服务端 `.env` 读取
+- 新的 `dataset_version` 自动生成
+
+```bash
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/publish-incremental-yolo-dataset/async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/nzxj_louyou/dataset/nzxj_louyou_20260423_2033/nzxj_louyou_20260423_2033.yaml",
+    "local_paths": [
+      "/media/qzq/16T/TEDS/langgraph_workspace/download-2026-04-07_10-32-30/teds/整车图/正线/20260407_非转数据拟合_cleaned_flat_split_yolo-sliding-window-crop"
+    ]
+  }'
+```
+
+若同级 `_aug` 不存在，或你想显式指定两份新数据目录：
+
+```json
+{
+  "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/nzxj_louyou/dataset/nzxj_louyou_20260423_2033/nzxj_louyou_20260423_2033.yaml",
+  "local_paths": [
+    "/path/to/base_dataset",
+    "/path/to/base_dataset_aug"
+  ]
+}
+```
 
 ## 17. VOC 横向条带正方形裁剪（`voc-bar-crop`）
 
