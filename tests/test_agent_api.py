@@ -58,6 +58,17 @@ def test_agent_sessions_list(client, monkeypatch, isolated_runtime) -> None:
     assert data[0]["messageCount"] == 1
 
 
+def test_agent_empty_session_returns_empty_runs(client, isolated_runtime) -> None:
+    agent_session_store.clear()
+
+    response = client.get("/api/v1/agent/sessions/nonexistent-session")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_id"] == "nonexistent-session"
+    assert data["runs"] == []
+
+
 def test_agent_chat_accepts_configured_ollama(client, monkeypatch, isolated_runtime) -> None:
     agent_session_store.clear()
     monkeypatch.setenv("SELF_API_LLM_DEFAULT_PROVIDER", "ollama")

@@ -1,5 +1,5 @@
 from app.agent.providers import ProviderCallError, request_tool_decision, select_provider
-from app.agent.sessions import InMemoryAgentSessionStore, agent_session_store
+from app.agent.sessions import SQLiteAgentSessionStore, agent_session_store
 from app.agent.tools.catalog import get_executable_tool_specs
 from app.agent.tools.executor import AgentToolError, execute_tool
 from app.agent.types import AgentRunRecord, LLMToolDecision
@@ -8,7 +8,7 @@ from app.schemas.agent import AgentChatRequest
 
 
 class AgentRuntime:
-    def __init__(self, store: InMemoryAgentSessionStore | None = None) -> None:
+    def __init__(self, store: SQLiteAgentSessionStore | None = None) -> None:
         self._store = store or agent_session_store
 
     def chat(self, payload: AgentChatRequest) -> AgentRunRecord:

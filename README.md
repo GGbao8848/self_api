@@ -93,19 +93,6 @@ self_api/
 cp .env.example .env
 ```
 
-至少建议确认这些项：
-
-- `SELF_API_PUBLIC_BASE_URL`（必须改，自己主机的IP）
-- `SELF_API_FILE_ACCESS_ROOTS`（必须改，本API客户端可以读写的文件路径）
-- `SELF_API_STORAGE_ROOT`（必须改，本API客户端可以读写的文件路径）
-- `SELF_API_AUTH_ENABLED`（非必要，鉴权相关字段，不需要鉴权的时候，设置false，下面的账户密码注销掉）
-- `SELF_API_LLM_DEFAULT_PROVIDER`（内建 Agent 默认 provider，可选 `openai` / `openrouter` / `ollama`）
-- `SELF_API_LLM_DEFAULT_MODEL`（默认模型）
-- `SELF_API_OPENAI_API_KEY` / `SELF_API_OPENROUTER_API_KEY` / `SELF_API_OLLAMA_BASE_URL`（按 provider 配置）
-- `SELF_API_PUBLISH_PROJECT_ROOT_DIR`
-  增量数据远程发布时，本地 staging 工作区默认放这里；若不配置，则自动回落到 `SELF_API_STORAGE_ROOT/publish_workspace`
-- `SELF_API_REMOTE_SFTP_HOST` / `SELF_API_REMOTE_SFTP_PROJECT_ROOT_DIR` / `SELF_API_REMOTE_SFTP_USERNAME` / `SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH`
-  远端增量数据发布、远端 `last_yaml` 读取默认使用这组 `.env` 配置，避免在工作流里写死私钥路径
 
 ### 3.2 本地（不推荐此方式启动）
 

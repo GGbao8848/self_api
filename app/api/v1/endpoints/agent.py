@@ -85,8 +85,6 @@ def get_run(run_id: str) -> AgentRunResponse:
 @router.get("/sessions/{session_id}", response_model=AgentSessionResponse)
 def get_session(session_id: str) -> AgentSessionResponse:
     runs = agent_session_store.list_session_runs(session_id)
-    if runs is None:
-        raise HTTPException(status_code=404, detail=f"agent session not found: {session_id}")
     return AgentSessionResponse(
         session_id=session_id,
         runs=[_serialize_run(run) for run in runs],
