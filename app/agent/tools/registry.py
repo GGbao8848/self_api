@@ -287,7 +287,7 @@ def _run_restore_voc_crops_batch(payload: BaseModel) -> BaseModel:
 _TOOL_DEFINITIONS = [
     AgentToolDefinition(
         name="discover-leaf-dirs",
-        description="Discover lowest-level leaf data folders under a root directory.",
+        description="扫描根目录下最底层的叶子数据文件夹。",
         request_model=DiscoverLeafDirsRequest,
         runner=lambda payload: _run_discover_leaf_dirs(payload),
         normalize_arguments=_normalize_discover_leaf_dirs,
@@ -295,7 +295,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="xml-to-yolo",
-        description="Convert Pascal VOC XML annotations to YOLO labels.",
+        description="将 Pascal VOC XML 标注转换为 YOLO 标签。",
         request_model=XmlToYoloRequest,
         runner=lambda payload: _run_xml_to_yolo(payload),
         async_task=True,
@@ -304,7 +304,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="yolo-sliding-window-crop",
-        description="Crop large YOLO images with synchronized sliding-window labels.",
+        description="对 YOLO 大图执行滑窗裁剪，并同步生成对应标签。",
         request_model=YoloSlidingWindowCropRequest,
         runner=lambda payload: _run_yolo_sliding_window_crop(payload),
         async_task=True,
@@ -314,7 +314,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="yolo-augment",
-        description="Apply YOLO dataset augmentation.",
+        description="对 YOLO 数据集执行数据增强。",
         request_model=YoloAugmentRequest,
         runner=lambda payload: _run_yolo_augment(payload),
         async_task=True,
@@ -324,7 +324,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="split-yolo-dataset",
-        description="Split a YOLO dataset into train, val, and test subsets.",
+        description="将 YOLO 数据集拆分为 train、val、test 子集。",
         request_model=SplitYoloDatasetRequest,
         runner=lambda payload: _run_split_yolo_dataset(payload),
         async_task=True,
@@ -334,7 +334,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="annotate-visualize",
-        description="Render annotation preview images for a dataset.",
+        description="为数据集生成标注可视化预览图。",
         request_model=AnnotateVisualizeRequest,
         runner=lambda payload: _run_annotate_visualize(payload),
         async_task=True,
@@ -344,7 +344,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="clean-nested-dataset-flat",
-        description="Flatten nested image/XML datasets into images and xmls folders.",
+        description="将嵌套的图像/XML 数据集整理为扁平的 images 和 xmls 目录。",
         request_model=CleanNestedDatasetRequest,
         runner=lambda payload: _run_clean_nested_dataset(payload),
         async_task=True,
@@ -354,7 +354,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="aggregate-nested-dataset",
-        description="Aggregate cleaned dataset fragments into a unified dataset root.",
+        description="将清洗后的多个数据集片段汇总为统一的数据集根目录。",
         request_model=AggregateNestedDatasetRequest,
         runner=lambda payload: _run_aggregate_nested_dataset(payload),
         async_task=True,
@@ -364,7 +364,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="build-yolo-yaml",
-        description="Build a YOLO data.yaml from a dataset root.",
+        description="根据数据集根目录生成 YOLO 的 data.yaml。",
         request_model=BuildYoloYamlRequest,
         runner=lambda payload: _run_build_yolo_yaml(payload),
         async_task=True,
@@ -374,7 +374,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="zip-folder",
-        description="Package a directory into a zip archive.",
+        description="将目录打包为 zip 压缩包。",
         request_model=ZipFolderRequest,
         runner=lambda payload: _run_zip_folder(payload),
         normalize_arguments=_normalize_zip_folder,
@@ -382,7 +382,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="unzip-archive",
-        description="Extract a zip archive into a directory.",
+        description="将 zip 压缩包解压到目录中。",
         request_model=UnzipArchiveRequest,
         runner=lambda payload: _run_unzip_archive(payload),
         normalize_arguments=_normalize_unzip_archive,
@@ -390,21 +390,21 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="move-path",
-        description="Move a file or directory into a target directory.",
+        description="将文件或目录移动到目标目录。",
         request_model=MovePathRequest,
         runner=lambda payload: _run_move_path(payload),
         argument_hint="{source_path, target_dir, overwrite?}",
     ),
     AgentToolDefinition(
         name="copy-path",
-        description="Copy a file or directory into a target directory.",
+        description="将文件或目录复制到目标目录。",
         request_model=CopyPathRequest,
         runner=lambda payload: _run_copy_path(payload),
         argument_hint="{source_path, target_dir, overwrite?}",
     ),
     AgentToolDefinition(
         name="publish-incremental-yolo-dataset",
-        description="Publish incremental YOLO data to a remote dataset location.",
+        description="将增量 YOLO 数据发布到远端数据集位置。",
         request_model=PublishIncrementalYoloDatasetRequest,
         runner=lambda payload: _run_publish_incremental_yolo_dataset(payload),
         async_task=True,
@@ -414,7 +414,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="reset-yolo-label-index",
-        description="Rewrite all YOLO label indices to zero across labels directories.",
+        description="将 labels 目录中的所有 YOLO 类别索引重写为 0。",
         request_model=ResetYoloLabelIndexRequest,
         runner=lambda payload: _run_reset_yolo_label_index(payload),
         normalize_arguments=_normalize_reset_yolo_label_index,
@@ -422,21 +422,21 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="scan-yolo-label-indices",
-        description="Scan YOLO label index usage and counts.",
+        description="扫描 YOLO 类别索引的使用情况和计数。",
         request_model=ScanYoloLabelIndicesRequest,
         runner=lambda payload: _run_scan_yolo_label_indices(payload),
         argument_hint="{input_dir}",
     ),
     AgentToolDefinition(
         name="rewrite-yolo-label-indices",
-        description="Rewrite or remap YOLO label indices.",
+        description="按映射规则重写或重映射 YOLO 类别索引。",
         request_model=RewriteYoloLabelIndicesRequest,
         runner=lambda payload: _run_rewrite_yolo_label_indices(payload),
         argument_hint="{input_dir, mapping?, default_target_index?}",
     ),
     AgentToolDefinition(
         name="voc-bar-crop",
-        description="Crop square VOC patches centered on horizontal bar-like objects.",
+        description="以横杆类目标为中心裁剪方形 VOC 图块。",
         request_model=VocBarCropRequest,
         runner=lambda payload: _run_voc_bar_crop(payload),
         async_task=True,
@@ -446,7 +446,7 @@ _TOOL_DEFINITIONS = [
     ),
     AgentToolDefinition(
         name="restore-voc-crops-batch",
-        description="Paste edited voc-bar crops back onto originals and merge VOC XMLs.",
+        description="将编辑后的 voc-bar 裁剪图回贴到原图，并合并 VOC XML 标注。",
         request_model=RestoreVocCropsBatchRequest,
         runner=lambda payload: _run_restore_voc_crops_batch(payload),
         async_task=True,

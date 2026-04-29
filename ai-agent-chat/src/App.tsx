@@ -108,9 +108,11 @@ export default function App() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const nextScrollBehaviorRef = useRef<ScrollBehavior>('smooth');
 
   useEffect(() => {
     localStorage.setItem('agent_session_id', sessionId);
+    nextScrollBehaviorRef.current = 'auto';
     void fetchHistory(sessionId);
   }, [sessionId]);
 
@@ -124,7 +126,10 @@ export default function App() {
   }, [history]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: nextScrollBehaviorRef.current,
+    });
+    nextScrollBehaviorRef.current = 'smooth';
   }, [history, loading]);
 
   const fetchSessions = async () => {
@@ -163,6 +168,7 @@ export default function App() {
         credentials: 'include',
       });
       if (res.status === 404) {
+        nextScrollBehaviorRef.current = 'auto';
         setHistory([]);
         return;
       }
@@ -170,6 +176,7 @@ export default function App() {
         return;
       }
       const data: AgentSessionResponse = await res.json();
+      nextScrollBehaviorRef.current = 'auto';
       setHistory(buildHistoryFromRuns(data.runs || []));
     } catch (error) {
       console.error('Failed to fetch history:', error);
@@ -457,37 +464,63 @@ export default function App() {
           </h3>
           <div className="space-y-4">
             {tools.map((tool) => (
-              <div key={tool.name} className="rounded-2xl border border-stone-200 bg-white p-3">
-                <div className="mb-2 flex items-start gap-2">
-                  <Wrench className="mt-0.5 h-4 w-4 text-teal-600" />
-                  <div>
-                    <h4 className="text-sm font-medium">{tool.name}</h4>
-                    <p className="mt-1 text-xs text-stone-600">{tool.description}</p>
-                  </div>
-                </div>
-                <div className="mt-3 grid gap-2 text-[11px]">
-                  <div>
-                    <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                      Async
-                    </span>
-                    <div className="rounded-lg bg-stone-50 px-2 py-1 text-stone-700">
-                      {tool.async_task ? 'true' : 'false'}
-                    </div>
-                  </div>
-                  <div>
-                    <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                      Argument Hint
-                    </span>
-                    <pre className="overflow-x-auto rounded-lg bg-stone-50 p-2 text-stone-700 whitespace-pre-wrap">
-                      {tool.argument_hint || 'No hint'}
-                    </pre>
-                  </div>
-                </div>
+              <div key={tool.name}>
+                <ToolSpecCard tool={tool} />
               </div>
             ))}
           </div>
         </div>
       </aside>
+    </div>
+  );
+}
+
+function ToolSpecCard({ tool }: { tool: ToolDef }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
+      <button
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+        className="flex w-full items-center justify-between gap-3 p-3 text-left transition-colors hover:bg-stone-50"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <Wrench className="h-4 w-4 flex-shrink-0 text-teal-600" />
+          <div className="min-w-0">
+            <h4 className="text-sm font-medium text-stone-900">{tool.name}</h4>
+            <p className="mt-1 text-xs text-stone-600">{tool.description}</p>
+          </div>
+        </div>
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 flex-shrink-0 text-stone-400" />
+        ) : (
+          <ChevronRight className="h-4 w-4 flex-shrink-0 text-stone-400" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="border-t border-stone-100 px-3 py-3 text-[11px]">
+          <div className="grid gap-2">
+            <div>
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+                Async
+              </span>
+              <div className="rounded-lg bg-stone-50 px-2 py-1 text-stone-700">
+                {tool.async_task ? 'true' : 'false'}
+              </div>
+            </div>
+            <div>
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+                Argument Hint
+              </span>
+              <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-stone-50 p-2 text-stone-700">
+                {tool.argument_hint || 'No hint'}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

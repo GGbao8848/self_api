@@ -117,11 +117,14 @@ def test_agent_tools_list(client, isolated_runtime) -> None:
     assert "restore-voc-crops-batch" in names
     assert "publish-incremental-yolo-dataset" in names
     hints = {item["name"]: item["argument_hint"] for item in data["items"]}
+    descriptions = {item["name"]: item["description"] for item in data["items"]}
     assert hints["build-yolo-yaml"]
     assert "output_yaml_path" in hints["build-yolo-yaml"]
     assert hints["publish-incremental-yolo-dataset"] == "{last_yaml, local_paths}"
     assert "archive_path" in hints["unzip-archive"]
     assert "edited_crops_images_dir" in hints["restore-voc-crops-batch"]
+    assert descriptions["xml-to-yolo"] == "将 Pascal VOC XML 标注转换为 YOLO 标签。"
+    assert descriptions["build-yolo-yaml"] == "根据数据集根目录生成 YOLO 的 data.yaml。"
     assert "yolo-train" not in names
     assert "remote-sbatch-yolo-train" not in names
 
