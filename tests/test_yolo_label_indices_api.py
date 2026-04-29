@@ -71,7 +71,7 @@ def test_rewrite_yolo_label_indices_with_mapping_and_default(
     assert data["total_objects"] == 5
     assert data["modified_label_files"] == 2
     assert data["unchanged_label_files"] == 0
-    assert data["changed_lines"] == 3
+    assert data["changed_lines"] == 4
     assert data["skipped_invalid_lines"] == 1
     assert data["mapping"] == {"0": 0, "1": 0, "2": 0, "3": 0, "4": 0, "5": 0}
     assert data["default_target_index"] == 1

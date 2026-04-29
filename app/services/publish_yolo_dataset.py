@@ -151,10 +151,10 @@ def _resolve_publish_remote_defaults(request: PublishYoloDatasetRequest) -> tupl
     settings = get_settings()
     inferred = _infer_publish_context_from_last_yaml(request.last_yaml) or {}
     return (
-        request.remote_host or inferred.get("remote_host") or settings.remote_sftp_host,
-        request.remote_project_root_dir or inferred.get("remote_project_root_dir") or settings.remote_sftp_project_root_dir,
+        request.remote_host or settings.remote_sftp_host or inferred.get("remote_host"),
+        request.remote_project_root_dir or settings.remote_sftp_project_root_dir or inferred.get("remote_project_root_dir"),
         request.remote_username or settings.remote_sftp_username,
-        request.remote_port or inferred.get("remote_port") or settings.remote_sftp_port,
+        request.remote_port or settings.remote_sftp_port or inferred.get("remote_port"),
     )
 
 
@@ -173,6 +173,21 @@ def _resolve_publish_project_root_dir(request: PublishYoloDatasetRequest) -> Pat
             must_exist=False,
         )
     return (settings.resolved_storage_root / "publish_workspace").resolve()
+
+
+def _dedupe_default_dataset_version(
+    *,
+    project_root_dir: Path,
+    detector_name: str,
+    dataset_version: str,
+) -> str:
+    base_dir = project_root_dir / detector_name / "datasets"
+    candidate = dataset_version
+    index = 2
+    while (base_dir / candidate).exists():
+        candidate = f"{dataset_version}_{index}"
+        index += 1
+    return candidate
 
 
 def _collect_source_specs(
@@ -240,12 +255,22 @@ def _publish_merged_dataset_tree(
     published_split_dirs: dict[str, list[Path]] = {split: [] for split in split_names}
     published_classes_path: Path | None = None
     used_names: set[str] = set()
+    flatten_single_source = len(source_specs) == 1
 
     for spec in source_specs:
         effective_root: Path = spec["effective_root"]
-        source_name = _unique_child_name(effective_root.name, used_names)
-        target_root = dataset_dir / source_name
-        shutil.copytree(effective_root, target_root)
+        if flatten_single_source:
+            target_root = dataset_dir
+            for child in effective_root.iterdir():
+                destination = target_root / child.name
+                if child.is_dir():
+                    shutil.copytree(child, destination)
+                else:
+                    shutil.copy2(child, destination)
+        else:
+            source_name = _unique_child_name(effective_root.name, used_names)
+            target_root = dataset_dir / source_name
+            shutil.copytree(effective_root, target_root)
 
         for split, paths in spec["split_dirs"].items():
             published_split_dirs.setdefault(split, [])
@@ -275,8 +300,14 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
     detector_name = (request.detector_name or _infer_detector_name_from_last_yaml(request.last_yaml) or "").strip()
     if not detector_name:
         raise ValueError("detector_name is required unless it can be inferred from last_yaml")
-    dataset_version = request.dataset_version or _default_dataset_version(detector_name)
     project_root_dir = _resolve_publish_project_root_dir(request)
+    dataset_version = request.dataset_version or _default_dataset_version(detector_name)
+    if not request.dataset_version:
+        dataset_version = _dedupe_default_dataset_version(
+            project_root_dir=project_root_dir,
+            detector_name=detector_name,
+            dataset_version=dataset_version,
+        )
     split_names = list(_DEFAULT_SPLITS)
     source_specs, source_roots, class_names, first_dataset_root = _collect_source_specs(input_dirs, split_names)
 
@@ -370,7 +401,9 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
         )
 
     remote_project_root = PurePosixPath(remote_project_root_dir or "/")
-    dataset_bucket = str(inferred_ctx.get("dataset_bucket") or "datasets")
+    dataset_bucket = "datasets"
+    if not (request.remote_project_root_dir or get_settings().remote_sftp_project_root_dir):
+        dataset_bucket = str(inferred_ctx.get("dataset_bucket") or dataset_bucket)
     remote_dataset_dir = remote_project_root / detector_name / dataset_bucket / dataset_version
     remote_train_project = (remote_project_root / detector_name / "runs" / "detect").as_posix()
     remote_yaml_path = (remote_dataset_dir / f"{dataset_version}.yaml").as_posix()

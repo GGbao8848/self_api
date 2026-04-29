@@ -151,11 +151,8 @@ class AnnotateVisualizeRequest(BaseModel):
         classes_path = (self.classes_file or "").strip()
         if classes_inline and classes_path:
             raise ValueError("classes 与 classes_file 只能填其一")
-        return self.model_copy(
-            update={
-                "classes_file": classes_path or None,
-            }
-        )
+        self.classes_file = classes_path or None
+        return self
 
 
 class AnnotateVisualizeDetail(BaseModel):

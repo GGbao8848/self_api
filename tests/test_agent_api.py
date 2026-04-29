@@ -1,7 +1,9 @@
+import zipfile
+
 from app.agent.sessions import agent_session_store
 from app.agent.types import LLMToolDecision
 from app.core.config import get_settings
-from tests.data_helpers import create_image, create_voc_xml, create_yolo_dataset
+from tests.data_helpers import create_image, create_text_file, create_voc_xml, create_yolo_dataset
 
 
 def test_agent_chat_requires_provider(client, monkeypatch, isolated_runtime) -> None:
@@ -34,7 +36,7 @@ def test_agent_chat_requires_provider(client, monkeypatch, isolated_runtime) -> 
 def test_agent_chat_accepts_configured_ollama(client, monkeypatch, isolated_runtime) -> None:
     agent_session_store.clear()
     monkeypatch.setenv("SELF_API_LLM_DEFAULT_PROVIDER", "ollama")
-    monkeypatch.setenv("SELF_API_OLLAMA_MODEL", "qwen3.5:9b")
+    monkeypatch.setenv("SELF_API_OLLAMA_MODEL", "gemma4:e4b")
     from app.agent import runtime as runtime_module
 
     monkeypatch.setattr(
@@ -50,7 +52,7 @@ def test_agent_chat_accepts_configured_ollama(client, monkeypatch, isolated_runt
     data = response.json()
     assert data["final_state"] == "completed"
     assert data["provider"] == "ollama"
-    assert data["model"] == "qwen3.5:9b"
+    assert data["model"] == "gemma4:e4b"
 
 
 def test_agent_tools_list(client, isolated_runtime) -> None:
@@ -66,13 +68,24 @@ def test_agent_tools_list(client, isolated_runtime) -> None:
     assert "yolo-sliding-window-crop" in names
     assert "yolo-augment" in names
     assert "annotate-visualize" in names
+    assert "discover-leaf-dirs" in names
     assert "clean-nested-dataset-flat" in names
+    assert "aggregate-nested-dataset" in names
     assert "build-yolo-yaml" in names
+    assert "zip-folder" in names
+    assert "unzip-archive" in names
+    assert "move-path" in names
+    assert "copy-path" in names
+    assert "reset-yolo-label-index" in names
+    assert "voc-bar-crop" in names
+    assert "restore-voc-crops-batch" in names
     assert "publish-incremental-yolo-dataset" in names
     hints = {item["name"]: item["argument_hint"] for item in data["items"]}
     assert hints["build-yolo-yaml"]
     assert "output_yaml_path" in hints["build-yolo-yaml"]
     assert hints["publish-incremental-yolo-dataset"] == "{last_yaml, local_paths}"
+    assert "archive_path" in hints["unzip-archive"]
+    assert "edited_crops_images_dir" in hints["restore-voc-crops-batch"]
     assert "yolo-train" not in names
     assert "remote-sbatch-yolo-train" not in names
 
@@ -394,6 +407,296 @@ def test_agent_executes_structured_clean_nested_dataset_flat_tool(
     assert tool_call["result"]["result"]["labeled_images"] == 1
 
 
+def test_agent_executes_structured_discover_leaf_dirs_tool(
+    client,
+    case_dir,
+    isolated_runtime,
+) -> None:
+    root_dir = case_dir / "leaf_root"
+    create_image(root_dir / "group_a" / "leaf_1" / "a.jpg", color=(255, 0, 0), size=(16, 16))
+    create_image(root_dir / "group_b" / "b.jpg", color=(0, 255, 0), size=(16, 16))
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "discover leaf dirs",
+            "tool_name": "discover-leaf-dirs",
+            "tool_arguments": {"input_dir": str(root_dir)},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["final_state"] == "completed"
+    tool_call = data["tool_calls"][0]
+    assert tool_call["name"] == "discover-leaf-dirs"
+    assert tool_call["result"]["total_leaf_dirs"] == 2
+    assert tool_call["result"]["leaf_dirs"] == [
+        str(root_dir / "group_a" / "leaf_1"),
+        str(root_dir / "group_b"),
+    ]
+
+
+def test_agent_executes_structured_aggregate_nested_dataset_tool(
+    client,
+    case_dir,
+    isolated_runtime,
+) -> None:
+    root_dir = case_dir / "cleaned_fragments"
+    fragment_dir = root_dir / "session_a"
+    create_image(fragment_dir / "images" / "a.jpg", color=(255, 0, 0), size=(16, 16))
+    (fragment_dir / "labels").mkdir(parents=True, exist_ok=True)
+    (fragment_dir / "labels" / "a.txt").write_text("0 0.5 0.5 0.5 0.5\n", encoding="utf-8")
+    (fragment_dir / "classes.txt").write_text("cat\n", encoding="utf-8")
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "aggregate dataset",
+            "tool_name": "aggregate-nested-dataset",
+            "tool_arguments": {"input_dir": str(root_dir)},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["final_state"] == "completed"
+    tool_call = data["tool_calls"][0]
+    assert tool_call["name"] == "aggregate-nested-dataset"
+    assert tool_call["arguments"]["output_dir"] == f"{root_dir}_dataset"
+    assert tool_call["result"]["state"] == "succeeded"
+    assert tool_call["result"]["result"]["aggregated_images"] == 1
+
+
+def test_agent_executes_structured_zip_folder_tool(
+    client,
+    case_dir,
+    isolated_runtime,
+) -> None:
+    source_dir = case_dir / "source_pack"
+    create_text_file(source_dir / "a.txt", "hello")
+    create_text_file(source_dir / "nested" / "b.txt", "world")
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "zip folder",
+            "tool_name": "zip-folder",
+            "tool_arguments": {"input_dir": str(source_dir)},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    tool_call = data["tool_calls"][0]
+    assert data["final_state"] == "completed"
+    assert tool_call["name"] == "zip-folder"
+    assert tool_call["arguments"]["output_zip_path"] == f"{source_dir}.zip"
+    assert tool_call["result"]["packed_files"] == 2
+    with zipfile.ZipFile(tool_call["result"]["output_zip_path"], mode="r") as zipf:
+        assert sorted(zipf.namelist()) == [
+            f"{source_dir.name}/a.txt",
+            f"{source_dir.name}/nested/b.txt",
+        ]
+
+
+def test_agent_executes_structured_unzip_archive_tool(
+    client,
+    case_dir,
+    isolated_runtime,
+) -> None:
+    archive_path = case_dir / "sample.zip"
+    with zipfile.ZipFile(archive_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
+        zipf.writestr("sample/x.txt", "x")
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "unzip archive",
+            "tool_name": "unzip-archive",
+            "tool_arguments": {"archive_path": str(archive_path)},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    tool_call = data["tool_calls"][0]
+    assert data["final_state"] == "completed"
+    assert tool_call["name"] == "unzip-archive"
+    assert tool_call["arguments"]["output_dir"] == str(case_dir / "sample")
+    assert tool_call["result"]["extracted_files"] == 1
+    assert (case_dir / "sample" / "sample" / "x.txt").read_text(encoding="utf-8") == "x"
+
+
+def test_agent_executes_structured_copy_path_tool(
+    client,
+    case_dir,
+    isolated_runtime,
+) -> None:
+    source_file = case_dir / "one.txt"
+    create_text_file(source_file, "payload")
+    target_dir = case_dir / "target"
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "copy file",
+            "tool_name": "copy-path",
+            "tool_arguments": {"source_path": str(source_file), "target_dir": str(target_dir)},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    tool_call = data["tool_calls"][0]
+    assert data["final_state"] == "completed"
+    assert tool_call["name"] == "copy-path"
+    assert tool_call["result"]["copied_type"] == "file"
+    assert (target_dir / "one.txt").read_text(encoding="utf-8") == "payload"
+    assert source_file.exists()
+
+
+def test_agent_executes_structured_move_path_tool(
+    client,
+    case_dir,
+    isolated_runtime,
+) -> None:
+    source_dir = case_dir / "folder_a"
+    create_text_file(source_dir / "nested" / "k.txt", "v")
+    target_dir = case_dir / "target_root"
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "move folder",
+            "tool_name": "move-path",
+            "tool_arguments": {"source_path": str(source_dir), "target_dir": str(target_dir)},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    tool_call = data["tool_calls"][0]
+    assert data["final_state"] == "completed"
+    assert tool_call["name"] == "move-path"
+    assert tool_call["result"]["moved_type"] == "directory"
+    assert (target_dir / "folder_a" / "nested" / "k.txt").read_text(encoding="utf-8") == "v"
+    assert not source_dir.exists()
+
+
+def test_agent_executes_structured_reset_yolo_label_index_tool(
+    client,
+    case_dir,
+    isolated_runtime,
+) -> None:
+    dataset_dir = case_dir / "reset_dataset"
+    labels_dir = dataset_dir / "labels"
+    labels_dir.mkdir(parents=True)
+    (labels_dir / "a.txt").write_text("3 0.1 0.2 0.3 0.4\n0 0.2 0.3 0.4 0.5\n", encoding="utf-8")
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "reset labels",
+            "tool_name": "reset-yolo-label-index",
+            "tool_arguments": {"input_dir": str(dataset_dir)},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    tool_call = data["tool_calls"][0]
+    assert data["final_state"] == "completed"
+    assert tool_call["name"] == "reset-yolo-label-index"
+    assert tool_call["result"]["changed_lines"] == 1
+    assert (labels_dir / "a.txt").read_text(encoding="utf-8").startswith("0 ")
+
+
+def test_agent_executes_structured_voc_bar_crop_tool(
+    client,
+    case_dir,
+    isolated_runtime,
+) -> None:
+    dataset_dir = case_dir / "voc_bar_dataset"
+    create_image(dataset_dir / "images" / "wide.jpg", color=(200, 200, 200), size=(200, 100))
+    create_voc_xml(
+        dataset_dir / "xmls" / "wide.xml",
+        filename="wide.jpg",
+        size=(200, 100),
+        objects=[("bar", (40, 30, 160, 45))],
+    )
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "crop voc bars",
+            "tool_name": "voc-bar-crop",
+            "tool_arguments": {"input_dir": str(dataset_dir), "recursive": False},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    tool_call = data["tool_calls"][0]
+    assert data["final_state"] == "completed"
+    assert tool_call["name"] == "voc-bar-crop"
+    assert tool_call["arguments"]["output_dir"] == f"{dataset_dir}_voc-bar-crop"
+    assert tool_call["result"]["state"] == "succeeded"
+    assert tool_call["result"]["result"]["generated_crops"] == 1
+
+
+def test_agent_executes_structured_restore_voc_crops_batch_tool(
+    client,
+    case_dir,
+    isolated_runtime,
+) -> None:
+    original_dir = case_dir / "original"
+    create_image(original_dir / "images" / "wide.jpg", color=(200, 200, 200), size=(100, 100))
+    create_voc_xml(
+        original_dir / "xmls" / "wide.xml",
+        filename="wide.jpg",
+        size=(100, 100),
+        objects=[("bar", (5, 5, 20, 20))],
+    )
+    edited_dir = case_dir / "edited"
+    create_image(
+        edited_dir / "images" / "wide_cx25_cy25_S50.jpg",
+        color=(255, 0, 0),
+        size=(50, 50),
+    )
+    create_voc_xml(
+        edited_dir / "xmls" / "wide_cx25_cy25_S50.xml",
+        filename="wide_cx25_cy25_S50.jpg",
+        size=(50, 50),
+        objects=[("bar", (10, 10, 30, 30))],
+    )
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "restore voc crops",
+            "tool_name": "restore-voc-crops-batch",
+            "tool_arguments": {
+                "original_images_dir": str(original_dir / "images"),
+                "original_xmls_dir": str(original_dir / "xmls"),
+                "edited_crops_images_dir": str(edited_dir / "images"),
+                "edited_crops_xmls_dir": str(edited_dir / "xmls"),
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    tool_call = data["tool_calls"][0]
+    assert data["final_state"] == "completed"
+    assert tool_call["name"] == "restore-voc-crops-batch"
+    assert tool_call["arguments"]["output_dir"] == f"{edited_dir / 'images'}_restored"
+    assert tool_call["result"]["state"] == "succeeded"
+    assert tool_call["result"]["result"]["originals_processed"] == 1
+    assert (edited_dir / "images_restored" / "images" / "wide.jpg").exists()
+    assert (edited_dir / "images_restored" / "xmls" / "wide.xml").exists()
+
+
 def test_agent_executes_structured_build_yolo_yaml_tool(
     client,
     case_dir,
@@ -484,6 +787,33 @@ def test_agent_executes_structured_publish_incremental_yolo_dataset_tool(
     assert tool_call["arguments"]["local_paths"] == [str(dataset_dir)]
     assert tool_call["result"]["state"] == "succeeded"
     assert tool_call["result"]["result"]["published_dataset_dir"] == "/remote/datasets/demo_20260428"
+
+
+def test_agent_routes_chinese_zip_request(client, case_dir, monkeypatch, isolated_runtime) -> None:
+    from app.agent import runtime as runtime_module
+
+    source_dir = case_dir / "source_pack_cn"
+    create_text_file(source_dir / "a.txt", "hello")
+    monkeypatch.setattr(
+        runtime_module,
+        "request_tool_decision",
+        lambda **_: LLMToolDecision(
+            action="execute",
+            tool_name="zip-folder",
+            tool_arguments={"input_dir": str(source_dir)},
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={"message": f"把这个目录打包成zip {source_dir}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["final_state"] == "completed"
+    assert data["tool_calls"][0]["name"] == "zip-folder"
+    assert data["tool_calls"][0]["result"]["packed_files"] == 1
 
 
 def test_agent_api_requires_auth_when_enabled(client, monkeypatch, isolated_runtime) -> None:
