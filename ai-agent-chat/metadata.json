@@ -1,0 +1,6 @@
+{
+  "name": "AI Agent Chat",
+  "description": "An interactive agent chat interface showing tool calls and session history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

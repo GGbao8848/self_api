@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
@@ -33,7 +34,40 @@ def root() -> dict[str, str]:
         "version": settings.app_version,
         "env": settings.app_env,
         "docs": "/docs",
+        "agent_ui": "/agent-ui",
     }
 
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+_agent_ui_dist = settings.project_root / "ai-agent-chat" / "dist"
+
+
+@app.get("/agent-ui")
+def agent_ui_index() -> FileResponse:
+    index_path = _agent_ui_dist / "index.html"
+    if not index_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="agent UI is not built yet; expected dist/index.html under ai-agent-chat",
+        )
+    return FileResponse(index_path)
+
+
+@app.get("/agent-ui/{asset_path:path}")
+def agent_ui_assets(asset_path: str) -> FileResponse:
+    requested_path = (_agent_ui_dist / asset_path).resolve()
+    dist_root = _agent_ui_dist.resolve()
+    if not str(requested_path).startswith(str(dist_root)):
+        raise HTTPException(status_code=404, detail="invalid agent UI asset path")
+
+    if requested_path.is_file():
+        return FileResponse(requested_path)
+
+    index_path = _agent_ui_dist / "index.html"
+    if index_path.is_file():
+        return FileResponse(index_path)
+    raise HTTPException(
+        status_code=404,
+        detail="agent UI is not built yet; expected dist/index.html under ai-agent-chat",
+    )

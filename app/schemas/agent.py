@@ -38,6 +38,7 @@ class AgentToolCallResponse(BaseModel):
 class AgentChatResponse(BaseModel):
     session_id: str
     run_id: str
+    user_message: str | None = None
     message: str
     final_state: AgentRunState
     provider: str | None = None
@@ -48,6 +49,7 @@ class AgentChatResponse(BaseModel):
 class AgentRunResponse(BaseModel):
     session_id: str
     run_id: str
+    user_message: str | None = None
     message: str
     final_state: AgentRunState
     provider: str | None = None

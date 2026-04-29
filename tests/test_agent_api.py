@@ -31,6 +31,31 @@ def test_agent_chat_requires_provider(client, monkeypatch, isolated_runtime) -> 
     session_response = client.get(f"/api/v1/agent/sessions/{data['session_id']}")
     assert session_response.status_code == 200
     assert session_response.json()["runs"][0]["run_id"] == data["run_id"]
+    assert session_response.json()["runs"][0]["user_message"] == "你好"
+
+
+def test_agent_sessions_list(client, monkeypatch, isolated_runtime) -> None:
+    agent_session_store.clear()
+    monkeypatch.setenv("SELF_API_LLM_DEFAULT_PROVIDER", "ollama")
+    monkeypatch.setenv("SELF_API_OLLAMA_MODEL", "gemma4:e4b")
+    from app.agent import runtime as runtime_module
+
+    monkeypatch.setattr(
+        runtime_module,
+        "request_tool_decision",
+        lambda **_: LLMToolDecision(action="respond", message="可以执行工具"),
+    )
+    get_settings.cache_clear()
+
+    response = client.post("/api/v1/agent/chat", json={"message": "列出能力"})
+    assert response.status_code == 200
+
+    sessions_response = client.get("/api/v1/agent/sessions")
+    assert sessions_response.status_code == 200
+    data = sessions_response.json()
+    assert len(data) == 1
+    assert data[0]["preview"] == "列出能力"
+    assert data[0]["messageCount"] == 1
 
 
 def test_agent_chat_accepts_configured_ollama(client, monkeypatch, isolated_runtime) -> None:

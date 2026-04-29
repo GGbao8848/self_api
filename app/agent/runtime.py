@@ -34,6 +34,7 @@ class AgentRuntime:
                 run = AgentRunRecord(
                     session_id=session_id,
                     run_id=run_id,
+                    user_message=payload.message,
                     message=str(exc),
                     final_state="failed",
                     provider=provider.provider or None,
@@ -48,6 +49,7 @@ class AgentRuntime:
             run = AgentRunRecord(
                 session_id=session_id,
                 run_id=run_id,
+                user_message=payload.message,
                 message=message,
                 final_state=state,
                 provider=provider.provider or None,
@@ -61,6 +63,7 @@ class AgentRuntime:
             run = AgentRunRecord(
                 session_id=session_id,
                 run_id=run_id,
+                user_message=payload.message,
                 message=provider.reason or "LLM provider is not configured",
                 final_state="requires_provider",
                 provider=provider.provider or None,
@@ -73,6 +76,7 @@ class AgentRuntime:
             run = AgentRunRecord(
                 session_id=session_id,
                 run_id=run_id,
+                user_message=payload.message,
                 message=decision_error,
                 final_state="failed",
                 provider=provider.provider,
@@ -85,6 +89,7 @@ class AgentRuntime:
             run = AgentRunRecord(
                 session_id=session_id,
                 run_id=run_id,
+                user_message=payload.message,
                 message=decision.message or "No tool execution is needed.",
                 final_state="completed",
                 provider=provider.provider,
@@ -97,6 +102,7 @@ class AgentRuntime:
             run = AgentRunRecord(
                 session_id=session_id,
                 run_id=run_id,
+                user_message=payload.message,
                 message=decision.message or "I need more details to choose a tool.",
                 final_state="clarification_required",
                 provider=provider.provider,
@@ -108,6 +114,7 @@ class AgentRuntime:
         run = AgentRunRecord(
             session_id=session_id,
             run_id=run_id,
+            user_message=payload.message,
             message="I need more details to choose a tool.",
             final_state="clarification_required",
             provider=provider.provider,

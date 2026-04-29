@@ -30,6 +30,13 @@ class InMemoryAgentSessionStore:
             runs = self._runs_by_session.get(session_id)
             return list(runs) if runs is not None else None
 
+    def list_sessions(self) -> list[tuple[str, list[AgentRunRecord]]]:
+        with self._lock:
+            return [
+                (session_id, list(runs))
+                for session_id, runs in self._runs_by_session.items()
+            ]
+
     def clear(self) -> None:
         with self._lock:
             self._runs_by_session.clear()

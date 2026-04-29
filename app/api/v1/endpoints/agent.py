@@ -26,6 +26,7 @@ def _serialize_run(run: AgentRunRecord) -> AgentRunResponse:
     return AgentRunResponse(
         session_id=run.session_id,
         run_id=run.run_id,
+        user_message=run.user_message,
         message=run.message,
         final_state=run.final_state,
         provider=run.provider,
@@ -47,6 +48,30 @@ def chat(payload: AgentChatRequest) -> AgentChatResponse:
     run = agent_runtime.chat(payload)
     serialized = _serialize_run(run)
     return AgentChatResponse(**serialized.model_dump())
+
+
+@router.get("/sessions")
+def list_sessions() -> list[dict[str, str | int]]:
+    items: list[dict[str, str | int]] = []
+    for session_id, runs in reversed(agent_session_store.list_sessions()):
+        if not runs:
+            items.append(
+                {
+                    "id": session_id,
+                    "messageCount": 0,
+                    "preview": "New Chat",
+                }
+            )
+            continue
+        first_message = next((run.user_message for run in runs if run.user_message), "New Chat")
+        items.append(
+            {
+                "id": session_id,
+                "messageCount": len(runs),
+                "preview": first_message,
+            }
+        )
+    return items
 
 
 @router.get("/runs/{run_id}", response_model=AgentRunResponse)

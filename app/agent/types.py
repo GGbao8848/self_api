@@ -39,6 +39,7 @@ class ToolCallRecord:
 class AgentRunRecord:
     session_id: str
     run_id: str
+    user_message: str
     message: str
     final_state: AgentRunState
     provider: str | None = None

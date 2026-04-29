@@ -43,6 +43,7 @@ htmlcov/
 venv/
 env/
 ENV/
+node_modules/
 .env
 # .env.*
 .python-version
