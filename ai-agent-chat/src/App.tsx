@@ -109,6 +109,14 @@ export default function App() {
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const nextScrollBehaviorRef = useRef<ScrollBehavior>('smooth');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [input]);
 
   useEffect(() => {
     localStorage.setItem('agent_session_id', sessionId);
@@ -241,9 +249,8 @@ export default function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-stone-100 text-stone-900">
       <aside
-        className={`${
-          leftSidebarOpen ? 'translate-x-0 w-72' : '-translate-x-full w-0'
-        } flex-shrink-0 border-r border-stone-200 bg-[#f7f4ee] transition-all duration-300 ease-in-out flex flex-col`}
+        className={`${leftSidebarOpen ? 'translate-x-0 w-72' : '-translate-x-full w-0'
+          } flex-shrink-0 border-r border-stone-200 bg-[#f7f4ee] transition-all duration-300 ease-in-out flex flex-col`}
       >
         <div className="flex h-[69px] items-center justify-between border-b border-stone-200 bg-[#f2eee6] px-4">
           <div className="flex items-center gap-2 font-semibold">
@@ -276,11 +283,10 @@ export default function App() {
                 <button
                   key={sess.id}
                   onClick={() => setSessionId(sess.id)}
-                  className={`flex w-full flex-col gap-1 rounded-xl px-3 py-3 text-left text-sm transition-colors ${
-                    sess.id === sessionId
+                  className={`flex w-full flex-col gap-1 rounded-xl px-3 py-3 text-left text-sm transition-colors ${sess.id === sessionId
                       ? 'bg-teal-700 text-white shadow-sm'
                       : 'bg-white text-stone-700 hover:bg-stone-50'
-                  }`}
+                    }`}
                 >
                   <span className="block w-full truncate font-medium">{sess.preview}</span>
                   <span className={`text-xs ${sess.id === sessionId ? 'text-teal-100' : 'text-stone-400'}`}>
@@ -352,9 +358,8 @@ export default function App() {
                 className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
               >
                 <div
-                  className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${
-                    msg.role === 'user' ? 'bg-teal-700' : 'bg-stone-800'
-                  }`}
+                  className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${msg.role === 'user' ? 'bg-teal-700' : 'bg-stone-800'
+                    }`}
                 >
                   {msg.role === 'user' ? (
                     <User className="h-5 w-5 text-white" />
@@ -365,11 +370,10 @@ export default function App() {
 
                 <div className={`flex-1 space-y-3 ${msg.role === 'user' ? 'flex flex-col items-end' : ''}`}>
                   <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm ${
-                      msg.role === 'user'
+                    className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user'
                         ? 'rounded-tr-sm bg-teal-700 text-white'
                         : 'rounded-tl-sm border border-stone-200 bg-white text-stone-800'
-                    }`}
+                      }`}
                   >
                     {msg.text}
                   </div>
@@ -410,6 +414,7 @@ export default function App() {
           <form onSubmit={handleSubmit} className="mx-auto flex max-w-4xl items-end gap-3">
             <div className="relative flex-1">
               <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -428,7 +433,7 @@ export default function App() {
               <button
                 type="submit"
                 disabled={!input.trim() || loading}
-                className="absolute bottom-2 right-2 rounded-xl bg-teal-700 p-2 text-white transition-colors hover:bg-teal-800 disabled:opacity-50 disabled:hover:bg-teal-700"
+                className="absolute top-1/2 -translate-y-1/2 right-2 rounded-xl bg-teal-700 p-2 text-white transition-colors hover:bg-teal-800 disabled:opacity-50 disabled:hover:bg-teal-700"
               >
                 <Send className="h-4 w-4" />
               </button>
@@ -441,9 +446,8 @@ export default function App() {
       </main>
 
       <aside
-        className={`${
-          rightSidebarOpen ? 'translate-x-0 w-80' : 'translate-x-full w-0'
-        } flex-shrink-0 border-l border-stone-200 bg-[#fcfbf8] transition-all duration-300 ease-in-out flex flex-col`}
+        className={`${rightSidebarOpen ? 'translate-x-0 w-80' : 'translate-x-full w-0'
+          } flex-shrink-0 border-l border-stone-200 bg-[#fcfbf8] transition-all duration-300 ease-in-out flex flex-col`}
       >
         <div className="flex h-[69px] items-center justify-between border-b border-stone-200 bg-[#f7f4ee] px-4">
           <div className="flex items-center gap-2 font-semibold">

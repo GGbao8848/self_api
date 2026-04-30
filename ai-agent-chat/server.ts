@@ -87,7 +87,7 @@ async function startServer() {
   app.use(express.json());
 
   // API Routes
-  
+
   // 1. Tool List Sidebar: /api/v1/agent/tools
   app.get("/api/v1/agent/tools", (req, res) => {
     res.json(tools);
@@ -150,11 +150,11 @@ async function startServer() {
       if (response.functionCalls && response.functionCalls.length > 0) {
         // Prepare to execute tool calls
         const functionCalls = response.functionCalls;
-        
+
         // Add the model's function calls to the gemini history
         const responseContent = response.candidates?.[0]?.content;
         if (responseContent) {
-            geminiHistory.push(responseContent);
+          geminiHistory.push(responseContent);
         }
 
         const functionResponses: any[] = [];
@@ -194,9 +194,9 @@ async function startServer() {
 
       const replyContent = response.candidates?.[0]?.content;
       if (replyContent) {
-          geminiHistory.push(replyContent);
+        geminiHistory.push(replyContent);
       }
-      
+
       newAssistantMessage.text = response.text || "";
       history.push(newAssistantMessage);
 
