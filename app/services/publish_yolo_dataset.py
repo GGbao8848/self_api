@@ -104,6 +104,23 @@ def _infer_publish_context_from_remote_target(remote_target: str | None) -> dict
     }
 
 
+def _infer_publish_context_from_local_target(local_target: str | None) -> dict[str, str] | None:
+    if not local_target:
+        return None
+    text = local_target.strip().rstrip("/")
+    if not text:
+        return None
+    path = Path(text)
+    detector_name = path.name.strip()
+    if not detector_name:
+        return None
+    parent = path.parent.as_posix() or "."
+    return {
+        "project_root_dir": parent,
+        "detector_name": detector_name,
+    }
+
+
 def _infer_detector_name_from_last_yaml(last_yaml: str | None) -> str | None:
     ctx = _infer_publish_context_from_last_yaml(last_yaml)
     return ctx["detector_name"] if ctx else None
@@ -216,15 +233,17 @@ def _resolve_publish_private_key(request: PublishYoloDatasetRequest) -> str | No
 
 
 def _resolve_publish_project_root_dir(request: PublishYoloDatasetRequest) -> Path:
-    settings = get_settings()
-    configured = (request.project_root_dir or settings.publish_project_root_dir or "").strip()
+    configured = (request.project_root_dir or "").strip()
     if configured:
+        if request.publish_mode == "local":
+            inferred_target = _infer_publish_context_from_local_target(configured)
+            configured = str(inferred_target["project_root_dir"]) if inferred_target else configured
         return resolve_safe_path(
             configured,
             field_name="project_root_dir",
             must_exist=False,
         )
-    return (settings.resolved_storage_root / "publish_workspace").resolve()
+    return (get_settings().resolved_storage_root / "publish_workspace").resolve()
 
 
 def _dedupe_default_dataset_version(
@@ -376,6 +395,11 @@ def _publish_merged_dataset_tree(
 
 def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloDatasetResponse:
     input_dirs = _resolve_input_dirs(request)
+    inferred_local_target_ctx = (
+        _infer_publish_context_from_local_target(request.project_root_dir)
+        if request.publish_mode == "local"
+        else {}
+    ) or {}
     inferred_ctx = _infer_publish_context_from_last_yaml(request.last_yaml) or {}
     inferred_target_ctx = _infer_publish_context_from_remote_target(request.remote_target) or {}
     target_detector_name = str(inferred_target_ctx.get("detector_name") or "").strip()
@@ -384,9 +408,16 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
             f"remote_target detector_name mismatch: remote_target implies {target_detector_name!r}, "
             f"but detector_name={request.detector_name!r}"
         )
+    local_target_detector_name = str(inferred_local_target_ctx.get("detector_name") or "").strip()
+    if request.detector_name and local_target_detector_name and request.detector_name.strip() != local_target_detector_name:
+        raise ValueError(
+            f"project_root_dir detector_name mismatch: project_root_dir implies {local_target_detector_name!r}, "
+            f"but detector_name={request.detector_name!r}"
+        )
     detector_name = (
         request.detector_name
         or target_detector_name
+        or local_target_detector_name
         or _infer_detector_name_from_last_yaml(request.last_yaml)
         or ""
     ).strip()

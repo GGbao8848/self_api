@@ -38,7 +38,6 @@ class Settings(BaseSettings):
     redis_url: str | None = None
     s3_endpoint_url: str | None = None
     max_upload_size_mb: int = 512
-    publish_project_root_dir: str | None = None
     remote_sftp_host: str | None = None
     remote_sftp_username: str | None = None
     remote_sftp_private_key_path: str | None = None

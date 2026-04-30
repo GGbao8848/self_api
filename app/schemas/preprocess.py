@@ -1139,11 +1139,11 @@ class PublishYoloDatasetRequest(BaseModel):
     project_root_dir: str | None = Field(
         default=None,
         description=(
-            "Optional local project workspace root. Published datasets land under "
-            "<project_root_dir>/<detector_name>/datasets/<dataset_version> in local mode, "
-            "or use this path as the local staging root in remote mode. When omitted, "
-            "the service uses SELF_API_PUBLISH_PROJECT_ROOT_DIR or falls back to "
-            "<SELF_API_STORAGE_ROOT>/publish_workspace"
+            "Local publish target path. In local mode, the last path segment is treated as detector_name "
+            "and published data lands under <parent>/<detector_name>/datasets/<dataset_version>. "
+            "In remote mode, this field is only used as the local staging root. "
+            "For a brand-new model publish, provide an explicit target path or provide last_yaml "
+            "for iterative publish."
         ),
     )
     detector_name: str | None = Field(
@@ -1176,8 +1176,9 @@ class PublishYoloDatasetRequest(BaseModel):
     remote_project_root_dir: str | None = Field(
         default=None,
         description=(
-            "Required when publish_mode=remote_sftp. Remote workspace root; final dataset lands under "
-            "<remote_project_root_dir>/<detector_name>/datasets/<dataset_version>"
+            "Remote workspace root; final dataset lands under "
+            "<remote_project_root_dir>/<detector_name>/datasets/<dataset_version>. "
+            "For brand-new remote publish, prefer remote_target so the last segment explicitly names detector_name."
         ),
     )
     remote_username: str | None = Field(
@@ -1204,8 +1205,9 @@ class PublishYoloDatasetRequest(BaseModel):
     last_yaml: str | None = Field(
         default=None,
         description=(
-            "Optional previous data.yaml. Split paths from last_yaml are prepended before current "
-            "scan paths (deduplicated). If classes.txt is missing or empty, last_yaml must contain names"
+            "Previous data.yaml used for iterative publish. Split paths from last_yaml are prepended "
+            "before current scan paths (deduplicated). If classes.txt is missing or empty, last_yaml "
+            "must contain names"
         ),
     )
     sftp_username: str | None = Field(
@@ -1238,11 +1240,31 @@ class PublishYoloDatasetRequest(BaseModel):
             extras = local_paths[1:]
             self.input_dirs = extras or None
         self.local_paths = local_paths or None
+        self.project_root_dir = (self.project_root_dir or "").strip() or None
+        self.detector_name = (self.detector_name or "").strip() or None
         self.remote_target = (self.remote_target or "").strip() or None
+        self.remote_host = (self.remote_host or "").strip() or None
+        self.remote_project_root_dir = (self.remote_project_root_dir or "").strip() or None
+        self.remote_username = (self.remote_username or "").strip() or None
+        self.remote_private_key_path = (self.remote_private_key_path or "").strip() or None
+        self.last_yaml = (self.last_yaml or "").strip() or None
         classes = [item.strip() for item in (self.classes or []) if isinstance(item, str) and item.strip()]
         self.classes = classes or None
         if not self.input_dir and not extras:
             raise ValueError("input_dir or input_dirs must provide at least one dataset path")
+        if not self.last_yaml:
+            if self.publish_mode == "local":
+                if not self.project_root_dir:
+                    raise ValueError(
+                        "new local publish requires one explicit target path in project_root_dir, with the "
+                        "last path segment as detector_name, or provide last_yaml for iterative publish"
+                    )
+            else:
+                if not self.remote_target:
+                    raise ValueError(
+                        "new remote publish requires one explicit target path in remote_target, with the "
+                        "last path segment as detector_name, or provide last_yaml for iterative publish"
+                    )
         return self
 
 

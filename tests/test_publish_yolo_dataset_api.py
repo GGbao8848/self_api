@@ -34,7 +34,7 @@ def _wait_task_done(
 
 def test_publish_yolo_dataset_local(client: TestClient, case_dir: Path) -> None:
     ds = case_dir / "dataset"
-    project_root = case_dir / "workspace"
+    project_root = case_dir / "workspace" / "nzxj_louyou"
     _make_yolo_splits(ds, ("train", "val"))
 
     r = client.post(
@@ -42,21 +42,20 @@ def test_publish_yolo_dataset_local(client: TestClient, case_dir: Path) -> None:
         json={
             "input_dir": str(ds),
             "project_root_dir": str(project_root),
-            "detector_name": "nzxj_louyou",
             "dataset_version": "nzxj_louyou_20260419_1600",
         },
     )
     assert r.status_code == 200
     data = r.json()
 
-    published_dir = project_root / "nzxj_louyou" / "datasets" / "nzxj_louyou_20260419_1600"
+    published_dir = project_root / "datasets" / "nzxj_louyou_20260419_1600"
     output_yaml = published_dir / "nzxj_louyou_20260419_1600.yaml"
     assert data["publish_mode"] == "local"
     assert data["dataset_version"] == "nzxj_louyou_20260419_1600"
     assert Path(data["published_dataset_dir"]) == published_dir
     assert Path(data["output_yaml_path"]) == output_yaml
     assert data["recommended_train_project"] == str(
-        (project_root / "nzxj_louyou" / "runs" / "detect").resolve()
+        (project_root / "runs" / "detect").resolve()
     )
     assert data["recommended_train_name"] == "nzxj_louyou_20260419_1600"
     assert output_yaml.is_file()
@@ -103,11 +102,9 @@ def test_publish_yolo_dataset_remote_sftp(
         json={
             "input_dir": str(ds),
             "project_root_dir": str(project_root),
-            "detector_name": "nzxj_louyou",
             "dataset_version": "nzxj_louyou_20260419_1610",
             "publish_mode": "remote_sftp",
-            "remote_host": "10.0.0.8",
-            "remote_project_root_dir": "/remote/workspace",
+            "remote_target": "sftp://10.0.0.8/remote/workspace/nzxj_louyou",
             "remote_username": "sk",
             "remote_private_key_path": "/tmp/fake_key",
         },
@@ -140,7 +137,7 @@ def test_publish_yolo_dataset_local_merges_multiple_inputs_and_last_yaml(
 ) -> None:
     ds_a = case_dir / "dataset_a"
     ds_b = case_dir / "dataset_b"
-    project_root = case_dir / "workspace_multi"
+    project_root = case_dir / "workspace_multi" / "nzxj_louyou"
     _make_yolo_splits(ds_a, ("train",))
     _make_yolo_splits(ds_b, ("val",))
     last_yaml = case_dir / "nzxj_louyou_20260423_2033.yaml"
@@ -160,7 +157,6 @@ def test_publish_yolo_dataset_local_merges_multiple_inputs_and_last_yaml(
             "input_dir": str(ds_a),
             "input_dirs": [str(ds_b)],
             "project_root_dir": str(project_root),
-            "detector_name": "nzxj_louyou",
             "dataset_version": "nzxj_louyou_20260428_1200",
             "last_yaml": str(last_yaml),
         },
@@ -168,7 +164,7 @@ def test_publish_yolo_dataset_local_merges_multiple_inputs_and_last_yaml(
     assert r.status_code == 200
     data = r.json()
 
-    published_dir = project_root / "nzxj_louyou" / "datasets" / "nzxj_louyou_20260428_1200"
+    published_dir = project_root / "datasets" / "nzxj_louyou_20260428_1200"
     yaml_path = published_dir / "nzxj_louyou_20260428_1200.yaml"
     text = yaml_path.read_text(encoding="utf-8")
     assert data["publish_mode"] == "local"
@@ -186,7 +182,7 @@ def test_publish_yolo_dataset_local_auto_discovers_aug_sibling(
 ) -> None:
     ds = case_dir / "dataset_auto"
     ds_aug = case_dir / "dataset_auto_aug"
-    project_root = case_dir / "workspace_auto"
+    project_root = case_dir / "workspace_auto" / "nzxj_louyou"
     _make_yolo_splits(ds, ("train",))
     _make_yolo_splits(ds_aug, ("val",))
 
@@ -195,7 +191,6 @@ def test_publish_yolo_dataset_local_auto_discovers_aug_sibling(
         json={
             "input_dir": str(ds),
             "project_root_dir": str(project_root),
-            "detector_name": "nzxj_louyou",
             "dataset_version": "nzxj_louyou_20260428_1500",
         },
     )
@@ -203,11 +198,58 @@ def test_publish_yolo_dataset_local_auto_discovers_aug_sibling(
     data = r.json()
     assert len(data["source_dataset_roots"]) == 2
 
-    published_dir = project_root / "nzxj_louyou" / "datasets" / "nzxj_louyou_20260428_1500"
+    published_dir = project_root / "datasets" / "nzxj_louyou_20260428_1500"
     yaml_path = published_dir / "nzxj_louyou_20260428_1500.yaml"
     text = yaml_path.read_text(encoding="utf-8")
     assert str((published_dir / "dataset_auto" / "train" / "images").resolve().as_posix()) in text
     assert str((published_dir / "dataset_auto_aug" / "val" / "images").resolve().as_posix()) in text
+
+
+def test_publish_yolo_dataset_new_local_requires_explicit_target_path_or_last_yaml(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    ds = case_dir / "dataset_new_local_requires_path"
+    _make_yolo_splits(ds, ("train",))
+
+    response = client.post(
+        "/api/v1/preprocess/publish-yolo-dataset",
+        json={
+            "input_dir": str(ds),
+            "dataset_version": "nzxj_louyou_20260501_1000",
+        },
+    )
+
+    assert response.status_code == 422
+    detail = str(response.json()["detail"])
+    assert "new local publish requires explicit target path" in detail
+    assert "last_yaml" in detail
+
+
+def test_publish_yolo_dataset_new_remote_requires_explicit_target_path_or_last_yaml(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    ds = case_dir / "dataset_new_remote_requires_path"
+    project_root = case_dir / "workspace_new_remote_requires_path"
+    _make_yolo_splits(ds, ("train",))
+
+    response = client.post(
+        "/api/v1/preprocess/publish-yolo-dataset",
+        json={
+            "input_dir": str(ds),
+            "project_root_dir": str(project_root),
+            "publish_mode": "remote_sftp",
+            "dataset_version": "nzxj_louyou_20260501_1010",
+            "remote_username": "sk",
+            "remote_private_key_path": "/tmp/fake_key",
+        },
+    )
+
+    assert response.status_code == 422
+    detail = str(response.json()["detail"])
+    assert "new remote publish requires explicit target path" in detail
+    assert "last_yaml" in detail
 
 
 def test_publish_yolo_dataset_remote_sftp_uses_env_defaults_and_infers_detector(
@@ -489,20 +531,19 @@ def test_publish_yolo_dataset_use_index_as_class_names_when_direct_submit(
         "0 0.5 0.5 0.3 0.3\n1 0.4 0.4 0.2 0.2\n",
         encoding="utf-8",
     )
-    project_root = case_dir / "workspace_index_names"
+    project_root = case_dir / "workspace_index_names" / "zxj_louyou"
 
     response = client.post(
         "/api/v1/preprocess/publish-yolo-dataset",
         json={
             "input_dir": str(ds),
             "project_root_dir": str(project_root),
-            "detector_name": "zxj_louyou",
             "dataset_version": "zxj_louyou_20260430_1300",
             "use_index_as_class_names": True,
         },
     )
     assert response.status_code == 200
-    published_dir = project_root / "zxj_louyou" / "datasets" / "zxj_louyou_20260430_1300"
+    published_dir = project_root / "datasets" / "zxj_louyou_20260430_1300"
     assert (published_dir / "classes.txt").read_text(encoding="utf-8").splitlines() == ["0", "1"]
 
 
@@ -515,14 +556,13 @@ def test_publish_yolo_dataset_requires_class_mapping_or_direct_submit_flag(
     (ds / "train" / "labels").mkdir(parents=True)
     create_image(ds / "train" / "images" / "a.png", color=(10, 20, 30), size=(32, 32))
     (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.3 0.3\n", encoding="utf-8")
-    project_root = case_dir / "workspace_missing_classes"
+    project_root = case_dir / "workspace_missing_classes" / "zxj_louyou"
 
     response = client.post(
         "/api/v1/preprocess/publish-yolo-dataset",
         json={
             "input_dir": str(ds),
             "project_root_dir": str(project_root),
-            "detector_name": "zxj_louyou",
             "dataset_version": "zxj_louyou_20260430_1310",
         },
     )
