@@ -92,9 +92,10 @@ self_api/
 ```bash
 cp .env.example .env
 ```
+对必要项进行修改
 
 
-### 3.2 本地（不推荐此方式启动）
+### 3.2 本地
 
 ```bash
 python -m venv .venv
