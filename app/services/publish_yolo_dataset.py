@@ -34,6 +34,7 @@ from app.services.build_yolo_yaml import (
 from app.services.file_operations import run_zip_folder
 from app.services.remote_transfer import run_remote_transfer
 from app.services.remote_unzip import run_remote_unzip
+from app.services.task_manager import ensure_current_task_active
 from app.utils.images import normalize_extensions
 
 
@@ -45,7 +46,7 @@ def _remote_posix_uri(host: str, path: PurePosixPath, port: int) -> str:
 
 
 def _resolve_input_dirs(request: PublishYoloDatasetRequest) -> list[Path]:
-    raw_paths = [request.input_dir, *(request.input_dirs or [])]
+    raw_paths = [request.input_dir, *(request.input_dirs or []), *(request.local_paths or [])]
     deduped: list[Path] = []
     seen: set[Path] = set()
     for raw in raw_paths:
@@ -83,9 +84,50 @@ def _resolve_input_dirs(request: PublishYoloDatasetRequest) -> list[Path]:
     return deduped
 
 
+def _infer_publish_context_from_remote_target(remote_target: str | None) -> dict[str, str | int | None] | None:
+    if not remote_target:
+        return None
+    text = remote_target.strip().rstrip("/")
+    if not text:
+        return None
+    host, port, path = _parse_remote_target_like(text)
+    parts = path.parts
+    if len(parts) < 2:
+        return None
+    detector_name = parts[-1]
+    root_dir = PurePosixPath(*parts[:-1]).as_posix() or "/"
+    return {
+        "remote_host": host,
+        "remote_port": port,
+        "remote_project_root_dir": root_dir,
+        "detector_name": detector_name,
+    }
+
+
 def _infer_detector_name_from_last_yaml(last_yaml: str | None) -> str | None:
     ctx = _infer_publish_context_from_last_yaml(last_yaml)
     return ctx["detector_name"] if ctx else None
+
+
+def _last_yaml_inference_fix_message(last_yaml: str | None) -> str:
+    sample = (
+        "sftp://host/<remote_root>/<detector_name>/datasets/"
+        "<dataset_version>/<dataset_version>.yaml"
+    )
+    text = (last_yaml or "").strip() or "<empty>"
+    return (
+        "Could not infer detector_name from last_yaml. "
+        f"Current last_yaml: {text}. "
+        "Accepted format: "
+        f"{sample}. "
+        "How to fix: "
+        "1) if the old yaml already lives under <detector_name>/dataset or datasets/<version>/<version>.yaml, "
+        "pass that full path; "
+        "2) if you only have an old flat yaml like .../datasets/demo.yaml, pass detector_name explicitly "
+        "when using publish-yolo-dataset; "
+        "3) if this is a legacy remote layout you want to keep supporting, add a compatibility rule in "
+        "_infer_publish_context_from_last_yaml."
+    )
 
 
 def _parse_remote_target_like(value: str) -> tuple[str | None, int | None, PurePosixPath]:
@@ -150,11 +192,15 @@ def _unique_child_name(base_name: str, used: set[str]) -> str:
 def _resolve_publish_remote_defaults(request: PublishYoloDatasetRequest) -> tuple[str | None, str | None, str | None, int]:
     settings = get_settings()
     inferred = _infer_publish_context_from_last_yaml(request.last_yaml) or {}
+    inferred_target = _infer_publish_context_from_remote_target(request.remote_target) or {}
     return (
-        request.remote_host or settings.remote_sftp_host or inferred.get("remote_host"),
-        request.remote_project_root_dir or settings.remote_sftp_project_root_dir or inferred.get("remote_project_root_dir"),
+        request.remote_host or inferred_target.get("remote_host") or settings.remote_sftp_host or inferred.get("remote_host"),
+        request.remote_project_root_dir
+        or inferred_target.get("remote_project_root_dir")
+        or settings.remote_sftp_project_root_dir
+        or inferred.get("remote_project_root_dir"),
         request.remote_username or settings.remote_sftp_username,
-        request.remote_port or settings.remote_sftp_port or inferred.get("remote_port"),
+        request.remote_port or inferred_target.get("remote_port") or settings.remote_sftp_port or inferred.get("remote_port"),
     )
 
 
@@ -193,6 +239,8 @@ def _dedupe_default_dataset_version(
 def _collect_source_specs(
     input_dirs: list[Path],
     split_names: list[str],
+    *,
+    classes_file: str | None = None,
 ) -> tuple[list[dict], list[str], list[str], str]:
     exts = normalize_extensions(None)
     source_specs: list[dict] = []
@@ -208,7 +256,11 @@ def _collect_source_specs(
             exts,
         )
         classes_path = _resolve_classes_file_optional(
-            BuildYoloYamlRequest(input_dir=str(root_input), output_yaml_path=str(root_input / "placeholder.yaml")),
+            BuildYoloYamlRequest(
+                input_dir=str(root_input),
+                output_yaml_path=str(root_input / "placeholder.yaml"),
+                classes_file=classes_file,
+            ),
             effective_root=effective_root,
             root_input=root_input,
         )
@@ -235,6 +287,28 @@ def _collect_source_specs(
                 )
 
     return source_specs, source_roots, all_class_names, first_dataset_root
+
+
+def _collect_label_indices_from_source_specs(source_specs: list[dict]) -> list[int]:
+    indices: set[int] = set()
+    for spec in source_specs:
+        effective_root: Path = spec["effective_root"]
+        labels_dirs = sorted(path for path in effective_root.rglob("labels") if path.is_dir())
+        for labels_dir in labels_dirs:
+            for label_path in sorted(path for path in labels_dir.glob("*.txt") if path.is_file() and path.name != "classes.txt"):
+                ensure_current_task_active()
+                for line in label_path.read_text(encoding="utf-8").splitlines():
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    parts = stripped.split()
+                    if len(parts) < 5:
+                        continue
+                    try:
+                        indices.add(int(parts[0]))
+                    except ValueError:
+                        continue
+    return sorted(indices)
 
 
 def _publish_merged_dataset_tree(
@@ -297,9 +371,21 @@ def _publish_merged_dataset_tree(
 def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloDatasetResponse:
     input_dirs = _resolve_input_dirs(request)
     inferred_ctx = _infer_publish_context_from_last_yaml(request.last_yaml) or {}
-    detector_name = (request.detector_name or _infer_detector_name_from_last_yaml(request.last_yaml) or "").strip()
+    inferred_target_ctx = _infer_publish_context_from_remote_target(request.remote_target) or {}
+    target_detector_name = str(inferred_target_ctx.get("detector_name") or "").strip()
+    if request.detector_name and target_detector_name and request.detector_name.strip() != target_detector_name:
+        raise ValueError(
+            f"remote_target detector_name mismatch: remote_target implies {target_detector_name!r}, "
+            f"but detector_name={request.detector_name!r}"
+        )
+    detector_name = (
+        request.detector_name
+        or target_detector_name
+        or _infer_detector_name_from_last_yaml(request.last_yaml)
+        or ""
+    ).strip()
     if not detector_name:
-        raise ValueError("detector_name is required unless it can be inferred from last_yaml")
+        raise ValueError(_last_yaml_inference_fix_message(request.last_yaml))
     project_root_dir = _resolve_publish_project_root_dir(request)
     dataset_version = request.dataset_version or _default_dataset_version(detector_name)
     if not request.dataset_version:
@@ -309,7 +395,11 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
             dataset_version=dataset_version,
         )
     split_names = list(_DEFAULT_SPLITS)
-    source_specs, source_roots, class_names, first_dataset_root = _collect_source_specs(input_dirs, split_names)
+    source_specs, source_roots, class_names, first_dataset_root = _collect_source_specs(
+        input_dirs,
+        split_names,
+        classes_file=request.classes_file if hasattr(request, "classes_file") else None,
+    )
 
     last_yaml_text: str | None = None
     last_yaml_source: str | None = None
@@ -325,15 +415,24 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
             )
         )
 
+    if request.classes:
+        class_names = list(request.classes)
     if not class_names and last_yaml_text:
         data = yaml.safe_load(last_yaml_text)
         if not isinstance(data, dict):
             raise ValueError("last_yaml must be a YAML mapping when classes.txt is empty or missing")
         class_names = _class_names_from_yaml_data(data)
+    if not class_names and request.use_index_as_class_names:
+        inferred_label_indices = _collect_label_indices_from_source_specs(source_specs)
+        class_names = [str(index) for index in inferred_label_indices]
     if not class_names:
         raise ValueError(
-            "classes.txt not found or has no class names: add non-empty classes.txt, or provide "
-            "last_yaml with a names section"
+            "classes.txt not found or has no class names. How to fix: "
+            "1) provide classes like ['class0', 'class1']; "
+            "2) or ensure classes.txt exists with one class name per line; "
+            "3) or provide last_yaml with a names section; "
+            "4) or, if the user explicitly wants direct submission without names, set "
+            "use_index_as_class_names=true so labels 0/1 become names '0'/'1'."
         )
 
     remote_host, remote_project_root_dir, remote_username, remote_port = _resolve_publish_remote_defaults(request)
@@ -361,6 +460,10 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
         detector_name=detector_name,
         dataset_version=dataset_version,
         split_names=split_names,
+    )
+    (staging_dataset_dir / "classes.txt").write_text(
+        "".join(f"{name}\n" for name in class_names),
+        encoding="utf-8",
     )
 
     split_abs_paths: dict[str, list[str]] = {}
@@ -489,6 +592,12 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
 def run_publish_incremental_yolo_dataset(
     request: PublishIncrementalYoloDatasetRequest,
 ) -> PublishYoloDatasetResponse:
+    if not _infer_detector_name_from_last_yaml(request.last_yaml):
+        raise ValueError(
+            _last_yaml_inference_fix_message(request.last_yaml)
+            + " For the minimal publish-incremental-yolo-dataset API, detector_name is not exposed, "
+            "so a legacy flat yaml should be published via publish-yolo-dataset instead."
+        )
     local_paths = [path.strip() for path in request.local_paths if path.strip()]
     return run_publish_yolo_dataset(
         PublishYoloDatasetRequest(

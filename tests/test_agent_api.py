@@ -116,11 +116,13 @@ def test_agent_tools_list(client, isolated_runtime) -> None:
     assert "voc-bar-crop" in names
     assert "restore-voc-crops-batch" in names
     assert "publish-incremental-yolo-dataset" in names
+    assert "publish-yolo-dataset" in names
     hints = {item["name"]: item["argument_hint"] for item in data["items"]}
     descriptions = {item["name"]: item["description"] for item in data["items"]}
     assert hints["build-yolo-yaml"]
     assert "output_yaml_path" in hints["build-yolo-yaml"]
     assert hints["publish-incremental-yolo-dataset"] == "{last_yaml, local_paths}"
+    assert "remote_target" in hints["publish-yolo-dataset"]
     assert "archive_path" in hints["unzip-archive"]
     assert "edited_crops_images_dir" in hints["restore-voc-crops-batch"]
     assert descriptions["xml-to-yolo"] == "将 Pascal VOC XML 标注转换为 YOLO 标签。"
@@ -826,6 +828,71 @@ def test_agent_executes_structured_publish_incremental_yolo_dataset_tool(
     assert tool_call["arguments"]["local_paths"] == [str(dataset_dir)]
     assert tool_call["result"]["state"] == "succeeded"
     assert tool_call["result"]["result"]["published_dataset_dir"] == "/remote/datasets/demo_20260428"
+
+
+def test_agent_executes_structured_publish_yolo_dataset_tool(
+    client,
+    case_dir,
+    monkeypatch,
+    isolated_runtime,
+) -> None:
+    from app.schemas.preprocess import PublishYoloDatasetResponse
+
+    dataset_dir = case_dir / "dataset_publish_new"
+    dataset_extra_dir = case_dir / "dataset_publish_new_extra"
+    create_yolo_dataset(dataset_dir, sample_count=1)
+    create_yolo_dataset(dataset_extra_dir, sample_count=1)
+
+    def fake_run_publish_yolo_dataset(_payload):
+        return PublishYoloDatasetResponse(
+            publish_mode="remote_sftp",
+            output_yaml_path="/remote/workspace/demo/demo_20260430/demo_20260430.yaml",
+            dataset_root=str(dataset_dir),
+            source_dataset_roots=[str(dataset_dir), str(dataset_extra_dir)],
+            splits_included=["train"],
+            classes_count=2,
+            dataset_version="demo_20260430",
+            published_dataset_dir="/remote/workspace/demo/datasets/demo_20260430",
+            staging_published_dataset_dir=str(case_dir / "staging_publish"),
+            staging_output_yaml_path=str(case_dir / "staging_publish" / "demo_20260430.yaml"),
+            local_archive_path=str(case_dir / "staging_publish" / "demo_20260430.zip"),
+            remote_target_host="172.31.1.42",
+            remote_target_port=22,
+            remote_archive_path="/remote/workspace/demo/datasets/demo_20260430.zip",
+            recommended_train_project="/remote/workspace/demo/runs/detect",
+            recommended_train_name="demo_20260430",
+            last_yaml_merged=False,
+            last_yaml_source=None,
+        )
+
+    monkeypatch.setattr(
+        "app.agent.tools.registry._run_publish_yolo_dataset",
+        fake_run_publish_yolo_dataset,
+    )
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "publish new dataset",
+            "tool_name": "publish-yolo-dataset",
+            "tool_arguments": {
+                "local_paths": [str(dataset_dir), str(dataset_extra_dir)],
+                "remote_target": "sftp://172.31.1.42/remote/workspace/demo",
+                "classes": ["0", "1"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["final_state"] == "completed"
+    tool_call = data["tool_calls"][0]
+    assert tool_call["name"] == "publish-yolo-dataset"
+    assert tool_call["arguments"]["input_dir"] == str(dataset_dir)
+    assert tool_call["arguments"]["input_dirs"] == [str(dataset_extra_dir)]
+    assert tool_call["arguments"]["publish_mode"] == "remote_sftp"
+    assert tool_call["result"]["state"] == "succeeded"
+    assert tool_call["result"]["result"]["published_dataset_dir"] == "/remote/workspace/demo/datasets/demo_20260430"
 
 
 def test_agent_routes_chinese_zip_request(client, case_dir, monkeypatch, isolated_runtime) -> None:

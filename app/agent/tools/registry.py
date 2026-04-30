@@ -13,6 +13,7 @@ from app.schemas.preprocess import (
     CopyPathRequest,
     DiscoverLeafDirsRequest,
     MovePathRequest,
+    PublishYoloDatasetRequest,
     PublishIncrementalYoloDatasetRequest,
     ResetYoloLabelIndexRequest,
     RestoreVocCropsBatchRequest,
@@ -101,6 +102,21 @@ def _normalize_publish_incremental_yolo_dataset(arguments: dict) -> dict:
             )
         if local_paths:
             normalized["local_paths"] = local_paths
+    return normalized
+
+
+def _normalize_publish_yolo_dataset(arguments: dict) -> dict:
+    normalized = dict(arguments)
+    local_paths = normalized.get("local_paths")
+    if isinstance(local_paths, list) and local_paths:
+        cleaned = [value for value in local_paths if isinstance(value, str) and value.strip()]
+        if cleaned:
+            normalized.setdefault("input_dir", cleaned[0])
+            if len(cleaned) > 1:
+                normalized.setdefault("input_dirs", cleaned[1:])
+            normalized["local_paths"] = cleaned
+    if normalized.get("remote_target"):
+        normalized.setdefault("publish_mode", "remote_sftp")
     return normalized
 
 
@@ -254,6 +270,12 @@ def _run_publish_incremental_yolo_dataset(payload: BaseModel) -> BaseModel:
     return run_publish_incremental_yolo_dataset(payload)
 
 
+def _run_publish_yolo_dataset(payload: BaseModel) -> BaseModel:
+    from app.services.publish_yolo_dataset import run_publish_yolo_dataset
+
+    return run_publish_yolo_dataset(payload)
+
+
 def _run_reset_yolo_label_index(payload: BaseModel) -> BaseModel:
     from app.services.reset_yolo_labels_index import run_reset_yolo_labels_index
 
@@ -371,6 +393,16 @@ _TOOL_DEFINITIONS = [
         task_type="build_yolo_yaml",
         normalize_arguments=_normalize_build_yolo_yaml,
         argument_hint="{input_dir, output_yaml_path?, classes_file?, split_names?, images_subdir_name?, last_yaml?, sftp_username?, sftp_private_key_path?, sftp_port?, project_root_dir?, detector_name?, dataset_version?}",
+    ),
+    AgentToolDefinition(
+        name="publish-yolo-dataset",
+        description="发布一个新的 YOLO 数据集，可合并多个本地目录并发布到本地或远端。",
+        request_model=PublishYoloDatasetRequest,
+        runner=lambda payload: _run_publish_yolo_dataset(payload),
+        async_task=True,
+        task_type="publish_yolo_dataset",
+        normalize_arguments=_normalize_publish_yolo_dataset,
+        argument_hint="{local_paths, remote_target?, classes?, use_index_as_class_names?, project_root_dir?, detector_name?, dataset_version?, publish_mode?, last_yaml?}",
     ),
     AgentToolDefinition(
         name="zip-folder",

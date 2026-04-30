@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 
 from fastapi.testclient import TestClient
 
@@ -12,6 +13,23 @@ def _make_yolo_splits(root: Path, splits: tuple[str, ...]) -> None:
         im.mkdir(parents=True)
         create_image(im / "sample.png", color=(10, 20, 30), size=(32, 32))
     (root / "classes.txt").write_text("dog\ncat\n", encoding="utf-8")
+
+
+def _wait_task_done(
+    client: TestClient,
+    task_id: str,
+    *,
+    timeout_seconds: float = 8.0,
+) -> dict:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        response = client.get(f"/api/v1/preprocess/tasks/{task_id}")
+        assert response.status_code == 200
+        task_data = response.json()
+        if task_data["state"] in {"succeeded", "failed"}:
+            return task_data
+        time.sleep(0.05)
+    raise AssertionError(f"task did not complete in {timeout_seconds} seconds: {task_id}")
 
 
 def test_publish_yolo_dataset_local(client: TestClient, case_dir: Path) -> None:
@@ -330,6 +348,163 @@ def test_publish_yolo_dataset_remote_sftp_infers_fields_from_last_yaml_path(
     assert data["remote_target_port"] == 22
     assert transfer_calls[0]["target"] == "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/nzxj_louyou/dataset"
     assert unzip_calls[0]["output_dir"] == "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/nzxj_louyou/dataset"
+
+
+def test_publish_yolo_dataset_remote_target_and_local_paths_with_explicit_classes(
+    client: TestClient,
+    case_dir: Path,
+    monkeypatch,
+) -> None:
+    from app.services import publish_yolo_dataset as publish_service
+
+    ds_a = case_dir / "dataset_publish_a"
+    ds_b = case_dir / "dataset_publish_b"
+    project_root = case_dir / "workspace_publish_remote_target"
+    _make_yolo_splits(ds_a, ("train",))
+    _make_yolo_splits(ds_b, ("val",))
+
+    transfer_calls: list[dict] = []
+    unzip_calls: list[dict] = []
+
+    def fake_remote_transfer(request):
+        transfer_calls.append(request.model_dump())
+
+        class Resp:
+            target_path = "/remote/workspace/zxj_louyou/datasets/zxj_louyou_20260430_1200.zip"
+
+        return Resp()
+
+    def fake_remote_unzip(request):
+        unzip_calls.append(request.model_dump())
+
+        class Resp:
+            output_dir = "/remote/workspace/zxj_louyou/datasets"
+
+        return Resp()
+
+    monkeypatch.setattr(publish_service, "run_remote_transfer", fake_remote_transfer)
+    monkeypatch.setattr(publish_service, "run_remote_unzip", fake_remote_unzip)
+
+    response = client.post(
+        "/api/v1/preprocess/publish-yolo-dataset",
+        json={
+            "local_paths": [str(ds_a), str(ds_b)],
+            "project_root_dir": str(project_root),
+            "publish_mode": "remote_sftp",
+            "remote_target": "sftp://10.0.0.8/remote/workspace/zxj_louyou",
+            "dataset_version": "zxj_louyou_20260430_1200",
+            "classes": ["漏油", "正常"],
+            "remote_username": "sk",
+            "remote_private_key_path": "/tmp/fake_key",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["published_dataset_dir"] == "/remote/workspace/zxj_louyou/datasets/zxj_louyou_20260430_1200"
+    assert data["remote_target_host"] == "10.0.0.8"
+    assert transfer_calls[0]["target"] == "sftp://10.0.0.8/remote/workspace/zxj_louyou/datasets"
+    assert unzip_calls[0]["output_dir"] == "sftp://10.0.0.8/remote/workspace/zxj_louyou/datasets"
+
+    published_dir = project_root / "zxj_louyou" / "datasets" / "zxj_louyou_20260430_1200"
+    assert (published_dir / "classes.txt").read_text(encoding="utf-8").splitlines() == ["漏油", "正常"]
+
+
+def test_publish_yolo_dataset_use_index_as_class_names_when_direct_submit(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    ds = case_dir / "dataset_index_names"
+    (ds / "train" / "images").mkdir(parents=True)
+    (ds / "train" / "labels").mkdir(parents=True)
+    create_image(ds / "train" / "images" / "a.png", color=(10, 20, 30), size=(32, 32))
+    (ds / "train" / "labels" / "a.txt").write_text(
+        "0 0.5 0.5 0.3 0.3\n1 0.4 0.4 0.2 0.2\n",
+        encoding="utf-8",
+    )
+    project_root = case_dir / "workspace_index_names"
+
+    response = client.post(
+        "/api/v1/preprocess/publish-yolo-dataset",
+        json={
+            "input_dir": str(ds),
+            "project_root_dir": str(project_root),
+            "detector_name": "zxj_louyou",
+            "dataset_version": "zxj_louyou_20260430_1300",
+            "use_index_as_class_names": True,
+        },
+    )
+    assert response.status_code == 200
+    published_dir = project_root / "zxj_louyou" / "datasets" / "zxj_louyou_20260430_1300"
+    assert (published_dir / "classes.txt").read_text(encoding="utf-8").splitlines() == ["0", "1"]
+
+
+def test_publish_yolo_dataset_requires_class_mapping_or_direct_submit_flag(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    ds = case_dir / "dataset_missing_classes"
+    (ds / "train" / "images").mkdir(parents=True)
+    (ds / "train" / "labels").mkdir(parents=True)
+    create_image(ds / "train" / "images" / "a.png", color=(10, 20, 30), size=(32, 32))
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.3 0.3\n", encoding="utf-8")
+    project_root = case_dir / "workspace_missing_classes"
+
+    response = client.post(
+        "/api/v1/preprocess/publish-yolo-dataset",
+        json={
+            "input_dir": str(ds),
+            "project_root_dir": str(project_root),
+            "detector_name": "zxj_louyou",
+            "dataset_version": "zxj_louyou_20260430_1310",
+        },
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "classes.txt not found or has no class names" in detail
+    assert "use_index_as_class_names=true" in detail
+
+
+def test_publish_incremental_yolo_dataset_reports_fix_for_legacy_last_yaml(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    ds = case_dir / "dataset_incremental_legacy"
+    _make_yolo_splits(ds, ("train",))
+
+    response = client.post(
+        "/api/v1/preprocess/publish-incremental-yolo-dataset",
+        json={
+            "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260330.yaml",
+            "local_paths": [str(ds)],
+        },
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "Could not infer detector_name from last_yaml" in detail
+    assert "Accepted format" in detail
+    assert "publish-yolo-dataset" in detail
+
+
+def test_publish_incremental_yolo_dataset_async_reports_fix_for_legacy_last_yaml(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    ds = case_dir / "dataset_incremental_legacy_async"
+    _make_yolo_splits(ds, ("train",))
+
+    submit = client.post(
+        "/api/v1/preprocess/publish-incremental-yolo-dataset/async",
+        json={
+            "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260330.yaml",
+            "local_paths": [str(ds)],
+        },
+    )
+    assert submit.status_code == 202
+
+    task = _wait_task_done(client, submit.json()["task_id"])
+    assert task["state"] == "failed"
+    assert "Could not infer detector_name from last_yaml" in task["error"]
+    assert "publish-yolo-dataset" in task["error"]
 
 
 def test_publish_incremental_yolo_dataset_api_minimal_fields(

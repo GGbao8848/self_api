@@ -1117,6 +1117,7 @@ class BuildYoloYamlResponse(BaseModel):
 
 class PublishYoloDatasetRequest(BaseModel):
     input_dir: str = Field(
+        default="",
         description=(
             "Input dataset root to scan and publish. Supports the same split discovery rules as build-yolo-yaml"
         ),
@@ -1126,6 +1127,13 @@ class PublishYoloDatasetRequest(BaseModel):
         description=(
             "Optional additional dataset roots to merge into the same published dataset version. "
             "Each path is scanned like input_dir, then all discovered split image dirs are combined"
+        ),
+    )
+    local_paths: list[str] | None = Field(
+        default=None,
+        description=(
+            "Agent-friendly alias for one or more local dataset roots to publish together. "
+            "When provided, the first item is treated as input_dir and the rest as input_dirs."
         ),
     )
     project_root_dir: str | None = Field(
@@ -1143,6 +1151,14 @@ class PublishYoloDatasetRequest(BaseModel):
         description=(
             "Stable detector family name used for dataset version naming and placement. "
             "When omitted and last_yaml is set, it is inferred from the last_yaml parent folder name"
+        ),
+    )
+    remote_target: str | None = Field(
+        default=None,
+        description=(
+            "Agent-friendly remote target that already includes detector_name, for example "
+            "sftp://host/<remote_project_root>/<detector_name>. "
+            "The API splits it into remote_host, remote_project_root_dir, and detector_name."
         ),
     )
     dataset_version: str | None = Field(
@@ -1178,6 +1194,13 @@ class PublishYoloDatasetRequest(BaseModel):
         le=65535,
         description="SSH port for remote publish; defaults to .env value or 22",
     )
+    classes: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional ordered class-name list written into the published classes.txt and YAML names. "
+            "Use this when the user gives explicit index-to-name mapping."
+        ),
+    )
     last_yaml: str | None = Field(
         default=None,
         description=(
@@ -1197,11 +1220,28 @@ class PublishYoloDatasetRequest(BaseModel):
         default=None,
         description="Optional SSH port used only when last_yaml itself is remote",
     )
+    use_index_as_class_names: bool = Field(
+        default=False,
+        description=(
+            "When true and explicit class names are unavailable, scan YOLO labels and use numeric ids "
+            "as class names such as 0->'0', 1->'1'."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_inputs(self) -> "PublishYoloDatasetRequest":
+        self.input_dir = (self.input_dir or "").strip()
         extras = [p.strip() for p in (self.input_dirs or []) if p and p.strip()]
-        if not self.input_dir.strip() and not extras:
+        local_paths = [p.strip() for p in (self.local_paths or []) if p and p.strip()]
+        if local_paths and not self.input_dir and not extras:
+            self.input_dir = local_paths[0]
+            extras = local_paths[1:]
+            self.input_dirs = extras or None
+        self.local_paths = local_paths or None
+        self.remote_target = (self.remote_target or "").strip() or None
+        classes = [item.strip() for item in (self.classes or []) if isinstance(item, str) and item.strip()]
+        self.classes = classes or None
+        if not self.input_dir and not extras:
             raise ValueError("input_dir or input_dirs must provide at least one dataset path")
         return self
 

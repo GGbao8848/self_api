@@ -21,3 +21,5 @@ def test_rejects_paths_outside_allowed_roots(tmp_path, case_dir, isolated_runtim
         )
         assert response.status_code == 400
         assert "outside allowed data roots" in response.json()["detail"]
+        assert "How to fix:" in response.json()["detail"]
+        assert "SELF_API_FILE_ACCESS_ROOTS" in response.json()["detail"]
