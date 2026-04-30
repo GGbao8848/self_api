@@ -241,7 +241,6 @@ def test_publish_yolo_dataset_remote_sftp_uses_env_defaults_and_infers_detector(
         return Resp()
 
     monkeypatch.setenv("SELF_API_REMOTE_SFTP_HOST", "10.0.0.9")
-    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PROJECT_ROOT_DIR", "/remote/workspace")
     monkeypatch.setenv("SELF_API_REMOTE_SFTP_USERNAME", "sk")
     monkeypatch.setenv("SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH", "/tmp/fake_env_key")
     monkeypatch.setenv("SELF_API_REMOTE_SFTP_PORT", "2222")
@@ -348,6 +347,75 @@ def test_publish_yolo_dataset_remote_sftp_infers_fields_from_last_yaml_path(
     assert data["remote_target_port"] == 22
     assert transfer_calls[0]["target"] == "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/nzxj_louyou/dataset"
     assert unzip_calls[0]["output_dir"] == "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/nzxj_louyou/dataset"
+
+
+def test_publish_incremental_yolo_dataset_prefers_last_yaml_remote_root_over_env_default(
+    client: TestClient,
+    case_dir: Path,
+    monkeypatch,
+) -> None:
+    from app.services import publish_yolo_dataset as publish_service
+
+    ds = case_dir / "dataset_incremental_test_root"
+    _make_yolo_splits(ds, ("train",))
+
+    transfer_calls: list[dict] = []
+    unzip_calls: list[dict] = []
+
+    def fake_remote_transfer(request):
+        transfer_calls.append(request.model_dump())
+
+        class Resp:
+            target_path = "/mnt/usrhome/sk/ndata/TEDS(test)/nzxj_louyou/datasets/nzxj_louyou_20260430_1805.zip"
+
+        return Resp()
+
+    def fake_remote_unzip(request):
+        unzip_calls.append(request.model_dump())
+
+        class Resp:
+            output_dir = "/mnt/usrhome/sk/ndata/TEDS(test)/nzxj_louyou/datasets"
+
+        return Resp()
+
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_HOST", "10.0.0.9")
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_USERNAME", "sk")
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH", "/tmp/fake_env_key")
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PORT", "2222")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        publish_service,
+        "_load_last_yaml_text",
+        lambda request: (
+            "train: /mnt/usrhome/sk/ndata/TEDS(test)/nzxj_louyou/datasets/nzxj_louyou_20260428_1525/train/images\n"
+            "nc: 2\n"
+            "names:\n"
+            "  0: dog\n"
+            "  1: cat\n",
+            "sftp",
+        ),
+    )
+    monkeypatch.setattr(publish_service, "run_remote_transfer", fake_remote_transfer)
+    monkeypatch.setattr(publish_service, "run_remote_unzip", fake_remote_unzip)
+
+    r = client.post(
+        "/api/v1/preprocess/publish-incremental-yolo-dataset",
+        json={
+            "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS(test)/nzxj_louyou/datasets/nzxj_louyou_20260428_1525/nzxj_louyou_20260428_1525.yaml",
+            "local_paths": [str(ds)],
+        },
+    )
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["remote_target_host"] == "172.31.1.42"
+    assert data["remote_target_port"] == 2222
+    assert data["published_dataset_dir"].startswith(
+        "/mnt/usrhome/sk/ndata/TEDS(test)/nzxj_louyou/datasets/nzxj_louyou_"
+    )
+    assert "/TEDS(test)/" in data["output_yaml_path"]
+    assert transfer_calls[0]["target"] == "sftp://172.31.1.42:2222/mnt/usrhome/sk/ndata/TEDS(test)/nzxj_louyou/datasets"
+    assert unzip_calls[0]["output_dir"] == "sftp://172.31.1.42:2222/mnt/usrhome/sk/ndata/TEDS(test)/nzxj_louyou/datasets"
 
 
 def test_publish_yolo_dataset_remote_target_and_local_paths_with_explicit_classes(

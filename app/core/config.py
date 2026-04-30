@@ -40,7 +40,6 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 512
     publish_project_root_dir: str | None = None
     remote_sftp_host: str | None = None
-    remote_sftp_project_root_dir: str | None = None
     remote_sftp_username: str | None = None
     remote_sftp_private_key_path: str | None = None
     remote_sftp_port: int = 22

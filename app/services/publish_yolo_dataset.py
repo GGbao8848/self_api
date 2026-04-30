@@ -194,13 +194,19 @@ def _resolve_publish_remote_defaults(request: PublishYoloDatasetRequest) -> tupl
     inferred = _infer_publish_context_from_last_yaml(request.last_yaml) or {}
     inferred_target = _infer_publish_context_from_remote_target(request.remote_target) or {}
     return (
-        request.remote_host or inferred_target.get("remote_host") or settings.remote_sftp_host or inferred.get("remote_host"),
+        request.remote_host
+        or inferred_target.get("remote_host")
+        or inferred.get("remote_host")
+        or settings.remote_sftp_host,
         request.remote_project_root_dir
         or inferred_target.get("remote_project_root_dir")
-        or settings.remote_sftp_project_root_dir
-        or inferred.get("remote_project_root_dir"),
+        or inferred.get("remote_project_root_dir")
+        or None,
         request.remote_username or settings.remote_sftp_username,
-        request.remote_port or inferred_target.get("remote_port") or settings.remote_sftp_port or inferred.get("remote_port"),
+        request.remote_port
+        or inferred_target.get("remote_port")
+        or inferred.get("remote_port")
+        or settings.remote_sftp_port,
     )
 
 
@@ -505,7 +511,7 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
 
     remote_project_root = PurePosixPath(remote_project_root_dir or "/")
     dataset_bucket = "datasets"
-    if not (request.remote_project_root_dir or get_settings().remote_sftp_project_root_dir):
+    if not request.remote_project_root_dir:
         dataset_bucket = str(inferred_ctx.get("dataset_bucket") or dataset_bucket)
     remote_dataset_dir = remote_project_root / detector_name / dataset_bucket / dataset_version
     remote_train_project = (remote_project_root / detector_name / "runs" / "detect").as_posix()

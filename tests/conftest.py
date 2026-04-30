@@ -99,7 +99,6 @@ def default_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SELF_API_SESSION_COOKIE_SECURE", "false")
     monkeypatch.setenv("SELF_API_PUBLISH_PROJECT_ROOT_DIR", "")
     monkeypatch.setenv("SELF_API_REMOTE_SFTP_HOST", "")
-    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PROJECT_ROOT_DIR", "")
     monkeypatch.setenv("SELF_API_REMOTE_SFTP_USERNAME", "")
     monkeypatch.setenv("SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH", "")
     monkeypatch.setenv("SELF_API_REMOTE_SFTP_PORT", "22")
