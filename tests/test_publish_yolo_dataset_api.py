@@ -464,37 +464,6 @@ def test_publish_yolo_dataset_requires_class_mapping_or_direct_submit_flag(
     assert "use_index_as_class_names=true" in detail
 
 
-def test_check_latest_dataset_version_uses_remote_scan(
-    client: TestClient,
-    monkeypatch,
-) -> None:
-    from app.services import publish_yolo_dataset as publish_service
-
-    monkeypatch.setenv("SELF_API_REMOTE_SFTP_USERNAME", "sk")
-    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH", "/tmp/fake_env_key")
-    monkeypatch.setattr(
-        publish_service,
-        "find_latest_remote_yaml",
-        lambda *args, **kwargs: "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1600/zxj_louyou_20260430_1600.yaml",
-    )
-    get_settings.cache_clear()
-
-    response = client.post(
-        "/api/v1/agent/chat",
-        json={
-            "message": "最新版本",
-            "tool_name": "check-latest-dataset-version",
-            "tool_arguments": {"remote_target": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou"},
-        },
-    )
-    assert response.status_code == 200
-    data = response.json()
-    tool_call = data["tool_calls"][0]
-    assert tool_call["result"]["latest_yaml"].endswith("zxj_louyou_20260430_1600.yaml")
-    assert tool_call["result"]["dataset_version"] == "zxj_louyou_20260430_1600"
-    assert tool_call["result"]["detector_name"] == "zxj_louyou"
-
-
 def test_publish_incremental_yolo_dataset_reports_fix_for_legacy_last_yaml(
     client: TestClient,
     case_dir: Path,

@@ -11,8 +11,6 @@ from app.core.config import get_settings
 from app.core.path_safety import resolve_safe_path
 from app.schemas.preprocess import (
     BuildYoloYamlRequest,
-    CheckLatestDatasetVersionRequest,
-    CheckLatestDatasetVersionResponse,
     PublishIncrementalYoloDatasetRequest,
     PublishYoloDatasetRequest,
     PublishYoloDatasetResponse,
@@ -34,7 +32,7 @@ from app.services.build_yolo_yaml import (
     _split_paths_from_yaml_text,
 )
 from app.services.file_operations import run_zip_folder
-from app.services.remote_transfer import find_latest_remote_yaml, run_remote_transfer
+from app.services.remote_transfer import run_remote_transfer
 from app.services.remote_unzip import run_remote_unzip
 from app.services.task_manager import ensure_current_task_active
 from app.utils.images import normalize_extensions
@@ -608,41 +606,4 @@ def run_publish_incremental_yolo_dataset(
             publish_mode="remote_sftp",
             last_yaml=request.last_yaml,
         )
-    )
-
-
-def run_check_latest_dataset_version(
-    request: CheckLatestDatasetVersionRequest,
-) -> CheckLatestDatasetVersionResponse:
-    remote_target = (request.remote_target or "").strip().rstrip("/")
-    if not remote_target:
-        raise ValueError("remote_target is required")
-    settings = get_settings()
-    if not settings.remote_sftp_username:
-        raise ValueError("SELF_API_REMOTE_SFTP_USERNAME is required to inspect remote dataset versions")
-    if not settings.remote_sftp_private_key_path:
-        raise ValueError("SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH is required to inspect remote dataset versions")
-
-    latest_yaml = find_latest_remote_yaml(
-        remote_target,
-        username=settings.remote_sftp_username,
-        private_key_path=settings.remote_sftp_private_key_path,
-        port=settings.remote_sftp_port,
-    )
-    if not latest_yaml:
-        raise ValueError(
-            f"no dataset yaml found under remote target: {remote_target}. "
-            "Expected dataset/<version>/<version>.yaml or datasets/<version>/<version>.yaml"
-        )
-    inferred = _infer_publish_context_from_last_yaml(latest_yaml)
-    if not inferred:
-        raise ValueError(f"latest yaml found but publish context could not be inferred: {latest_yaml}")
-    return CheckLatestDatasetVersionResponse(
-        remote_target=remote_target,
-        detector_name=str(inferred.get("detector_name") or ""),
-        dataset_bucket=str(inferred.get("dataset_bucket") or ""),
-        dataset_version=str(inferred.get("previous_dataset_version") or ""),
-        latest_yaml=latest_yaml,
-        remote_target_host=str(inferred.get("remote_host") or ""),
-        remote_target_port=int(inferred.get("remote_port") or settings.remote_sftp_port or 22),
     )

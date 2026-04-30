@@ -9,7 +9,6 @@ from app.schemas.preprocess import (
     AnnotateVisualizeRequest,
     AggregateNestedDatasetRequest,
     BuildYoloYamlRequest,
-    CheckLatestDatasetVersionRequest,
     CleanNestedDatasetRequest,
     CopyPathRequest,
     DiscoverLeafDirsRequest,
@@ -118,14 +117,6 @@ def _normalize_publish_yolo_dataset(arguments: dict) -> dict:
             normalized["local_paths"] = cleaned
     if normalized.get("remote_target"):
         normalized.setdefault("publish_mode", "remote_sftp")
-    return normalized
-
-
-def _normalize_check_latest_dataset_version(arguments: dict) -> dict:
-    normalized = dict(arguments)
-    remote_target = normalized.get("remote_target")
-    if isinstance(remote_target, str) and remote_target.strip():
-        normalized["remote_target"] = remote_target.strip().rstrip("/")
     return normalized
 
 
@@ -285,12 +276,6 @@ def _run_publish_yolo_dataset(payload: BaseModel) -> BaseModel:
     return run_publish_yolo_dataset(payload)
 
 
-def _run_check_latest_dataset_version(payload: BaseModel) -> BaseModel:
-    from app.services.publish_yolo_dataset import run_check_latest_dataset_version
-
-    return run_check_latest_dataset_version(payload)
-
-
 def _run_reset_yolo_label_index(payload: BaseModel) -> BaseModel:
     from app.services.reset_yolo_labels_index import run_reset_yolo_labels_index
 
@@ -418,14 +403,6 @@ _TOOL_DEFINITIONS = [
         task_type="publish_yolo_dataset",
         normalize_arguments=_normalize_publish_yolo_dataset,
         argument_hint="{local_paths, remote_target?, classes?, use_index_as_class_names?, project_root_dir?, detector_name?, dataset_version?, publish_mode?, last_yaml?}",
-    ),
-    AgentToolDefinition(
-        name="check-latest-dataset-version",
-        description="查看远端 detector 当前最新的数据集版本和 yaml。",
-        request_model=CheckLatestDatasetVersionRequest,
-        runner=lambda payload: _run_check_latest_dataset_version(payload),
-        normalize_arguments=_normalize_check_latest_dataset_version,
-        argument_hint="{remote_target?}",
     ),
     AgentToolDefinition(
         name="zip-folder",

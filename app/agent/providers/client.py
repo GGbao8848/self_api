@@ -16,7 +16,6 @@ def request_tool_decision(
     provider: ProviderSelection,
     message: str,
     tools: list[ToolSpec],
-    conversation_context: str | None = None,
 ) -> LLMToolDecision:
     if provider.provider == "ollama":
         return _request_ollama_decision(
@@ -24,7 +23,6 @@ def request_tool_decision(
             provider=provider,
             message=message,
             tools=tools,
-            conversation_context=conversation_context,
         )
     if provider.provider in {"openai", "openrouter"}:
         return _request_openai_compatible_decision(
@@ -32,7 +30,6 @@ def request_tool_decision(
             provider=provider,
             message=message,
             tools=tools,
-            conversation_context=conversation_context,
         )
     raise ProviderCallError(f"unsupported provider runtime: {provider.provider}")
 
@@ -43,17 +40,15 @@ def _request_ollama_decision(
     provider: ProviderSelection,
     message: str,
     tools: list[ToolSpec],
-    conversation_context: str | None = None,
 ) -> LLMToolDecision:
-    messages = [{"role": "system", "content": _build_system_prompt(tools)}]
-    if conversation_context:
-        messages.append({"role": "system", "content": conversation_context})
-    messages.append({"role": "user", "content": message})
     payload = {
         "model": provider.model,
         "stream": False,
         "format": "json",
-        "messages": messages,
+        "messages": [
+            {"role": "system", "content": _build_system_prompt(tools)},
+            {"role": "user", "content": message},
+        ],
         "options": {"temperature": 0},
     }
     url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
@@ -74,7 +69,6 @@ def _request_openai_compatible_decision(
     provider: ProviderSelection,
     message: str,
     tools: list[ToolSpec],
-    conversation_context: str | None = None,
 ) -> LLMToolDecision:
     if provider.provider == "openai":
         base_url = (settings.openai_base_url or "https://api.openai.com/v1").rstrip("/")
@@ -83,13 +77,12 @@ def _request_openai_compatible_decision(
         base_url = settings.openrouter_base_url.rstrip("/")
         api_key = settings.openrouter_api_key or ""
 
-    messages = [{"role": "system", "content": _build_system_prompt(tools)}]
-    if conversation_context:
-        messages.append({"role": "system", "content": conversation_context})
-    messages.append({"role": "user", "content": message})
     payload = {
         "model": provider.model,
-        "messages": messages,
+        "messages": [
+            {"role": "system", "content": _build_system_prompt(tools)},
+            {"role": "user", "content": message},
+        ],
         "response_format": {"type": "json_object"},
         "temperature": 0,
     }
@@ -184,7 +177,6 @@ def _build_system_prompt(tools: list[ToolSpec]) -> str:
         "1. Use action=execute only when one listed tool clearly matches.\n"
         "2. If a required path or parameter is missing, use action=clarify and ask for it.\n"
         "3. If the user is chatting or asking capabilities, use action=respond.\n"
-        "3.1. The message field should prefer concise Chinese replies unless the user clearly asked for another language.\n"
         "4. Never invent tool names beyond this list.\n"
         "5. For split requests like 8:2, use mode=train_val and normalized ratios.\n"
         "6. Use exact argument keys expected by the tool.\n"
@@ -195,16 +187,15 @@ def _build_system_prompt(tools: list[ToolSpec]) -> str:
         "11. For annotate-visualize, include output_dir as <input_dir>_visualized unless user gives one.\n"
         "12. For clean-nested-dataset-flat, include output_dir as <input_dir>_cleaned_flat and default flatten=true, include_backgrounds=false, pairing_mode=images_xmls_subfolders, recursive=true, copy_files=true, overwrite=true unless user gives overrides.\n"
         "13. For publish-yolo-dataset, prefer {local_paths, remote_target, classes, use_index_as_class_names}. local_paths must be an array when the user gives one or more dataset folders. If remote_target is present, it should include detector_name at the end, like sftp://host/root/detector_name. If the user explicitly says to submit directly without class names, set use_index_as_class_names=true.\n"
-        "14. For check-latest-dataset-version, use {remote_target}. Use this when the user asks for the latest dataset version, newest version, or recent remote dataset yaml.\n"
-        "15. For publish-incremental-yolo-dataset, use {last_yaml, local_paths}; if the user gives one local dataset path, local_paths should contain exactly one item.\n"
-        "16. For build-yolo-yaml, include output_yaml_path as <input_dir>/data.yaml unless project_root_dir and detector_name are both provided.\n"
-        "17. For aggregate-nested-dataset, include output_dir as <input_dir>_dataset unless user gives one.\n"
-        "18. For zip-folder, if output_zip_path is omitted, use <input_dir>.zip.\n"
-        "19. For unzip-archive, use archive_path and include output_dir only when the user gives one or a custom extraction location is needed.\n"
-        "20. For move-path and copy-path, use source_path and target_dir exactly; do not rewrite them as input_dir.\n"
-        "21. For reset-yolo-label-index, use input_dir pointing to labels/, a dataset root, or a parent directory containing nested labels directories.\n"
-        "22. For voc-bar-crop, include output_dir as <input_dir>_voc-bar-crop unless user gives one.\n"
-        "23. For restore-voc-crops-batch, required keys are original_images_dir, original_xmls_dir, edited_crops_images_dir, edited_crops_xmls_dir, and optionally output_dir.\n"
+        "14. For publish-incremental-yolo-dataset, use {last_yaml, local_paths}; if the user gives one local dataset path, local_paths should contain exactly one item.\n"
+        "15. For build-yolo-yaml, include output_yaml_path as <input_dir>/data.yaml unless project_root_dir and detector_name are both provided.\n"
+        "16. For aggregate-nested-dataset, include output_dir as <input_dir>_dataset unless user gives one.\n"
+        "17. For zip-folder, if output_zip_path is omitted, use <input_dir>.zip.\n"
+        "18. For unzip-archive, use archive_path and include output_dir only when the user gives one or a custom extraction location is needed.\n"
+        "19. For move-path and copy-path, use source_path and target_dir exactly; do not rewrite them as input_dir.\n"
+        "20. For reset-yolo-label-index, use input_dir pointing to labels/, a dataset root, or a parent directory containing nested labels directories.\n"
+        "21. For voc-bar-crop, include output_dir as <input_dir>_voc-bar-crop unless user gives one.\n"
+        "22. For restore-voc-crops-batch, required keys are original_images_dir, original_xmls_dir, edited_crops_images_dir, edited_crops_xmls_dir, and optionally output_dir.\n"
         "Available tools:\n"
         f"{tools_text}\n"
         "Argument hints:\n"
