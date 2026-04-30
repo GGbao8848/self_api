@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 _PATH_RE = re.compile(r"(/[^\s，。；;,]+)")
 _LAST_YAML_RE = re.compile(r"((?:sftp|ssh)://[^\s，。；;,]+|/[^\s，。；;,]+\.ya?ml)")
+_REMOTE_TARGET_RE = re.compile(r"((?:sftp|ssh)://[^\s，。；;,]+|[^@\s，。；;,]+@[^\s:，。；;,]+:[^\s，。；;,]+)")
 
 
 def route_message_to_tool(message: str) -> tuple[str, dict] | None:
@@ -34,6 +35,13 @@ def _extract_first_path(text: str) -> str | None:
 
 def _extract_last_yaml_like_path(text: str) -> str | None:
     match = _LAST_YAML_RE.search(text)
+    if match is None:
+        return None
+    return match.group(1).rstrip("'\"`)]}")
+
+
+def _extract_remote_target_like_path(text: str) -> str | None:
+    match = _REMOTE_TARGET_RE.search(text)
     if match is None:
         return None
     return match.group(1).rstrip("'\"`)]}")
@@ -94,6 +102,14 @@ def _build_publish_incremental(input_dir: str | None, text: str) -> dict:
     return arguments
 
 
+def _build_check_latest_dataset_version(_input_dir: str | None, text: str) -> dict:
+    arguments: dict = {}
+    remote_target = _extract_remote_target_like_path(text)
+    if remote_target:
+        arguments["remote_target"] = remote_target
+    return arguments
+
+
 def _has_any(text: str, patterns: tuple[str, ...]) -> bool:
     return any(pattern in text for pattern in patterns)
 
@@ -140,6 +156,12 @@ def _matches_publish_incremental(text: str, lower: str) -> bool:
     )
 
 
+def _matches_check_latest_dataset_version(text: str, lower: str) -> bool:
+    return "check-latest-dataset-version" in lower or _has_any(
+        text, ("最近的数据集版本", "最新版本", "最新数据集版本", "最近版本")
+    )
+
+
 def _matches_scan_indices(text: str, lower: str) -> bool:
     return "scan-yolo-label-indices" in lower or (
         _has_any(text, ("查看标签索引", "统计标签索引", "检查标签索引")) and "索引" in text
@@ -161,6 +183,7 @@ _FALLBACK_ROUTES: list[tuple[str, Callable[[str, str], bool], Callable[[str | No
     ("split-yolo-dataset", _matches_split_yolo_dataset, _build_with_output_suffix("_split")),
     ("annotate-visualize", _matches_annotate_visualize, _build_with_output_suffix("_visualized")),
     ("publish-incremental-yolo-dataset", _matches_publish_incremental, _build_publish_incremental),
+    ("check-latest-dataset-version", _matches_check_latest_dataset_version, _build_check_latest_dataset_version),
     ("scan-yolo-label-indices", _matches_scan_indices, _build_input_only),
     ("rewrite-yolo-label-indices", _matches_rewrite_indices, _build_input_only),
 ]

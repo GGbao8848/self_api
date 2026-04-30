@@ -1,6 +1,7 @@
 """跨机器 SFTP 传输服务：基于 paramiko 将本地文件/目录上传到远程 SFTP 服务器。"""
 
 import re
+import stat
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -269,5 +270,104 @@ def read_sftp_file_text(
         except OSError as e:
             raise ValueError(f"remote file not readable: {remote_path}: {e}") from e
         return raw.decode("utf-8")
+    finally:
+        client.close()
+
+
+def find_latest_remote_yaml(
+    target: str,
+    *,
+    username: str | None = None,
+    private_key_path: str | None = None,
+    password: str | None = None,
+    port: int | None = None,
+) -> str | None:
+    """Inspect <target>/dataset and <target>/datasets and return the newest yaml as an sftp URI."""
+    host, default_port, remote_path = _parse_target(target)
+    uname = username or _extract_username_from_target(target)
+    if not uname:
+        raise ValueError("username is required: set username or use user@host:path in target")
+
+    if password and private_key_path:
+        raise ValueError("use either password or private_key_path, not both")
+    if not password and not private_key_path:
+        raise ValueError("either password or private_key_path is required")
+
+    pkey = None
+    if private_key_path:
+        key_path = Path(private_key_path).expanduser().resolve()
+        if not key_path.exists():
+            raise ValueError(f"private_key_path does not exist: {key_path}")
+        try:
+            pkey = paramiko.Ed25519Key.from_private_key_file(str(key_path))
+        except paramiko.ssh_exception.SSHException:
+            try:
+                pkey = paramiko.RSAKey.from_private_key_file(str(key_path))
+            except paramiko.ssh_exception.SSHException as e:
+                raise ValueError(f"failed to load private key: {e}") from e
+
+    resolved_port = port or default_port or 22
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            hostname=host,
+            port=resolved_port,
+            username=uname,
+            password=password,
+            pkey=pkey,
+            timeout=30,
+        )
+    except paramiko.AuthenticationException as e:
+        raise ValueError(f"SSH authentication failed: {e}") from e
+    except paramiko.SSHException as e:
+        raise ValueError(f"SSH connection failed: {e}") from e
+
+    try:
+        sftp = client.open_sftp()
+        newest_path: str | None = None
+        newest_mtime = -1
+
+        def _consider(path_text: str, mtime: int | float | None) -> None:
+            nonlocal newest_path, newest_mtime
+            if not path_text.endswith((".yaml", ".yml")):
+                return
+            score = int(mtime or 0)
+            if score >= newest_mtime:
+                newest_mtime = score
+                newest_path = path_text
+
+        def _safe_listdir_attr(path_text: str):
+            try:
+                return sftp.listdir_attr(path_text)
+            except (FileNotFoundError, OSError):
+                return []
+
+        for bucket in ("dataset", "datasets"):
+            bucket_path = f"{remote_path.rstrip('/')}/{bucket}"
+            for entry in _safe_listdir_attr(bucket_path):
+                entry_name = entry.filename
+                child_path = f"{bucket_path}/{entry_name}"
+                mode = getattr(entry, "st_mode", 0)
+                if stat.S_ISDIR(mode):
+                    preferred_yaml = f"{child_path}/{entry_name}.yaml"
+                    try:
+                        preferred_stat = sftp.stat(preferred_yaml)
+                    except (FileNotFoundError, OSError):
+                        preferred_stat = None
+                    if preferred_stat is not None:
+                        _consider(preferred_yaml, getattr(preferred_stat, "st_mtime", None))
+                        continue
+                    for nested in _safe_listdir_attr(child_path):
+                        nested_path = f"{child_path}/{nested.filename}"
+                        _consider(nested_path, getattr(nested, "st_mtime", None))
+                else:
+                    _consider(child_path, getattr(entry, "st_mtime", None))
+
+        if newest_path is None:
+            return None
+        if resolved_port == 22:
+            return f"sftp://{host}{newest_path}"
+        return f"sftp://{host}:{resolved_port}{newest_path}"
     finally:
         client.close()

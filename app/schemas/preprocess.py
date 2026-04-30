@@ -1345,6 +1345,27 @@ class PublishYoloDatasetResponse(BaseModel):
     )
 
 
+class CheckLatestDatasetVersionRequest(BaseModel):
+    remote_target: str = Field(
+        default="",
+        description=(
+            "Remote detector target such as sftp://host/<remote_project_root>/<detector_name>. "
+            "When omitted in agent mode, it may be filled from the current session context."
+        ),
+    )
+
+
+class CheckLatestDatasetVersionResponse(BaseModel):
+    status: str = "ok"
+    remote_target: str
+    detector_name: str
+    dataset_bucket: str
+    dataset_version: str
+    latest_yaml: str
+    remote_target_host: str
+    remote_target_port: int
+
+
 class YoloTrainRequest(BaseModel):
     yaml_path: str = Field(
         ...,

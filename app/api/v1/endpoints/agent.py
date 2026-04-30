@@ -10,6 +10,7 @@ from app.schemas.agent import (
     AgentChatResponse,
     AgentRunResponse,
     AgentSessionResponse,
+    AgentSessionSummaryResponse,
     AgentToolCallResponse,
     AgentToolsResponse,
     AgentToolSpecResponse,
@@ -43,11 +44,18 @@ def _serialize_run(run: AgentRunRecord) -> AgentRunResponse:
     )
 
 
+def _get_session_summary(session_id: str) -> AgentSessionSummaryResponse:
+    return agent_runtime.get_session_summary(session_id)
+
+
 @router.post("/chat", response_model=AgentChatResponse)
 def chat(payload: AgentChatRequest) -> AgentChatResponse:
     run = agent_runtime.chat(payload)
     serialized = _serialize_run(run)
-    return AgentChatResponse(**serialized.model_dump())
+    return AgentChatResponse(
+        **serialized.model_dump(),
+        summary=_get_session_summary(run.session_id),
+    )
 
 
 @router.get("/sessions")
@@ -88,6 +96,7 @@ def get_session(session_id: str) -> AgentSessionResponse:
     return AgentSessionResponse(
         session_id=session_id,
         runs=[_serialize_run(run) for run in runs],
+        summary=_get_session_summary(session_id),
     )
 
 

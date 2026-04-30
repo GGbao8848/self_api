@@ -1,7 +1,8 @@
 import zipfile
 
+from app.agent.runtime import agent_runtime
 from app.agent.sessions import agent_session_store
-from app.agent.types import LLMToolDecision
+from app.agent.types import AgentRunRecord, LLMToolDecision, ToolCallRecord
 from app.core.config import get_settings
 from tests.data_helpers import create_image, create_text_file, create_voc_xml, create_yolo_dataset
 
@@ -91,6 +92,683 @@ def test_agent_chat_accepts_configured_ollama(client, monkeypatch, isolated_runt
     assert data["model"] == "gemma4:e4b"
 
 
+def test_agent_passes_session_publish_context_to_provider(client, monkeypatch, isolated_runtime) -> None:
+    agent_session_store.clear()
+    session_id = "session_publish_ctx"
+    agent_session_store.save_run(
+        AgentRunRecord(
+            session_id=session_id,
+            run_id="run_publish_ctx_1",
+            user_message="发布一版",
+            message="done",
+            final_state="completed",
+            provider="ollama",
+            model="gemma4:e4b",
+            tool_calls=[
+                ToolCallRecord(
+                    name="publish-incremental-yolo-dataset",
+                    arguments={
+                        "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1000/zxj_louyou_20260430_1000.yaml",
+                        "local_paths": ["/media/qzq/16T/datasets/demo"],
+                    },
+                    result={
+                        "publish_mode": "remote_sftp",
+                        "output_yaml_path": "/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1100/zxj_louyou_20260430_1100.yaml",
+                        "remote_target_host": "172.31.1.42",
+                        "remote_target_port": 22,
+                    },
+                )
+            ],
+        )
+    )
+    monkeypatch.setenv("SELF_API_LLM_DEFAULT_PROVIDER", "ollama")
+    monkeypatch.setenv("SELF_API_OLLAMA_MODEL", "gemma4:e4b")
+
+    captured: dict = {}
+
+    def fake_request_tool_decision(**kwargs):
+        captured["conversation_context"] = kwargs.get("conversation_context")
+        return LLMToolDecision(action="respond", message="ok")
+
+    monkeypatch.setattr("app.agent.runtime.request_tool_decision", fake_request_tool_decision)
+    get_settings.cache_clear()
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={"session_id": session_id, "message": "增量发布这个数据集 /media/qzq/16T/datasets/new_one"},
+    )
+
+    assert response.status_code == 200
+    assert "last_successful_yaml" in captured["conversation_context"]
+    assert "zxj_louyou" in captured["conversation_context"]
+
+
+def test_agent_autofills_last_yaml_from_session_for_incremental_publish(monkeypatch, isolated_runtime) -> None:
+    agent_session_store.clear()
+    session_id = "session_publish_autofill"
+    agent_session_store.save_run(
+        AgentRunRecord(
+            session_id=session_id,
+            run_id="run_publish_autofill_1",
+            user_message="上一次增量发布",
+            message="done",
+            final_state="completed",
+            provider="ollama",
+            model="gemma4:e4b",
+            tool_calls=[
+                ToolCallRecord(
+                    name="publish-incremental-yolo-dataset",
+                    arguments={
+                        "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1000/zxj_louyou_20260430_1000.yaml",
+                        "local_paths": ["/media/qzq/16T/datasets/old"],
+                    },
+                    result={
+                        "publish_mode": "remote_sftp",
+                        "output_yaml_path": "/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1100/zxj_louyou_20260430_1100.yaml",
+                        "remote_target_host": "172.31.1.42",
+                        "remote_target_port": 22,
+                    },
+                )
+            ],
+        )
+    )
+
+    captured: dict = {}
+
+    def fake_execute_tool(tool_name, tool_arguments):
+        captured["tool_name"] = tool_name
+        captured["tool_arguments"] = tool_arguments
+
+        class FakeToolCall:
+            name = tool_name
+            arguments = tool_arguments
+            result = {"ok": True}
+            error = None
+
+        return FakeToolCall()
+
+    monkeypatch.setattr("app.agent.runtime.execute_tool", fake_execute_tool)
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_USERNAME", "sk")
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH", "/tmp/fake_env_key")
+    monkeypatch.setattr(
+        "app.services.remote_transfer.find_latest_remote_yaml",
+        lambda *args, **kwargs: "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1200/zxj_louyou_20260430_1200.yaml",
+    )
+    get_settings.cache_clear()
+
+    run = agent_runtime.chat(
+        payload=type(
+            "Payload",
+            (),
+            {
+                "message": "增量发布",
+                "session_id": session_id,
+                "provider": None,
+                "model": None,
+                "stream": False,
+                "tool_name": "publish-incremental-yolo-dataset",
+                "tool_arguments": {"local_paths": ["/media/qzq/16T/datasets/new_one"]},
+            },
+        )()
+    )
+
+    assert run.final_state == "completed"
+    assert captured["tool_name"] == "publish-incremental-yolo-dataset"
+    assert captured["tool_arguments"]["local_paths"] == ["/media/qzq/16T/datasets/new_one"]
+    assert captured["tool_arguments"]["last_yaml"].endswith("zxj_louyou_20260430_1200.yaml")
+
+
+def test_agent_incremental_publish_falls_back_to_session_last_yaml_when_live_lookup_fails(monkeypatch, isolated_runtime) -> None:
+    agent_session_store.clear()
+    session_id = "session_publish_fallback"
+    agent_session_store.save_run(
+        AgentRunRecord(
+            session_id=session_id,
+            run_id="run_publish_fallback_1",
+            user_message="上一次增量发布",
+            message="done",
+            final_state="completed",
+            provider="ollama",
+            model="gemma4:e4b",
+            tool_calls=[
+                ToolCallRecord(
+                    name="publish-incremental-yolo-dataset",
+                    arguments={
+                        "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1000/zxj_louyou_20260430_1000.yaml",
+                        "local_paths": ["/media/qzq/16T/datasets/old"],
+                    },
+                    result={
+                        "publish_mode": "remote_sftp",
+                        "output_yaml_path": "/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1100/zxj_louyou_20260430_1100.yaml",
+                        "remote_target_host": "172.31.1.42",
+                        "remote_target_port": 22,
+                    },
+                )
+            ],
+        )
+    )
+    captured: dict = {}
+
+    def fake_execute_tool(tool_name, tool_arguments):
+        captured["tool_arguments"] = tool_arguments
+
+        class FakeToolCall:
+            name = tool_name
+            arguments = tool_arguments
+            result = {"ok": True}
+            error = None
+
+        return FakeToolCall()
+
+    monkeypatch.setattr("app.agent.runtime.execute_tool", fake_execute_tool)
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_USERNAME", "sk")
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH", "/tmp/fake_env_key")
+
+    def fail_lookup(*args, **kwargs):
+        raise ValueError("lookup failed")
+
+    monkeypatch.setattr("app.services.remote_transfer.find_latest_remote_yaml", fail_lookup)
+    get_settings.cache_clear()
+
+    run = agent_runtime.chat(
+        payload=type(
+            "Payload",
+            (),
+            {
+                "message": "增量发布",
+                "session_id": session_id,
+                "provider": None,
+                "model": None,
+                "stream": False,
+                "tool_name": "publish-incremental-yolo-dataset",
+                "tool_arguments": {"local_paths": ["/media/qzq/16T/datasets/new_one"]},
+            },
+        )()
+    )
+
+    assert run.final_state == "completed"
+    assert captured["tool_arguments"]["last_yaml"].endswith("zxj_louyou_20260430_1100.yaml")
+
+
+def test_agent_incremental_publish_can_use_latest_version_tool_session_result(monkeypatch, isolated_runtime) -> None:
+    agent_session_store.clear()
+    session_id = "session_latest_tool_sync"
+    agent_session_store.save_run(
+        AgentRunRecord(
+            session_id=session_id,
+            run_id="run_latest_tool_sync_1",
+            user_message="最新版本",
+            message="done",
+            final_state="completed",
+            provider="ollama",
+            model="gemma4:e4b",
+            tool_calls=[
+                ToolCallRecord(
+                    name="check-latest-dataset-version",
+                    arguments={"remote_target": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou"},
+                    result={
+                        "status": "ok",
+                        "remote_target": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou",
+                        "detector_name": "zxj_louyou",
+                        "dataset_bucket": "datasets",
+                        "dataset_version": "zxj_louyou_20260430_1300",
+                        "latest_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1300/zxj_louyou_20260430_1300.yaml",
+                        "remote_target_host": "172.31.1.42",
+                        "remote_target_port": 22,
+                    },
+                    error=None,
+                )
+            ],
+        )
+    )
+    captured: dict = {}
+
+    def fake_execute_tool(tool_name, tool_arguments):
+        captured["tool_arguments"] = tool_arguments
+
+        class FakeToolCall:
+            name = tool_name
+            arguments = tool_arguments
+            result = {"ok": True}
+            error = None
+
+        return FakeToolCall()
+
+    monkeypatch.setattr("app.agent.runtime.execute_tool", fake_execute_tool)
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_USERNAME", "sk")
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH", "/tmp/fake_env_key")
+    monkeypatch.setattr(
+        "app.services.remote_transfer.find_latest_remote_yaml",
+        lambda *args, **kwargs: "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1400/zxj_louyou_20260430_1400.yaml",
+    )
+    get_settings.cache_clear()
+
+    run = agent_runtime.chat(
+        payload=type(
+            "Payload",
+            (),
+            {
+                "message": "增量发布",
+                "session_id": session_id,
+                "provider": None,
+                "model": None,
+                "stream": False,
+                "tool_name": "publish-incremental-yolo-dataset",
+                "tool_arguments": {"local_paths": ["/media/qzq/16T/datasets/new_one"]},
+            },
+        )()
+    )
+
+    assert run.final_state == "completed"
+    assert captured["tool_arguments"]["last_yaml"].endswith("zxj_louyou_20260430_1400.yaml")
+
+
+def test_agent_check_latest_autofills_remote_target_from_async_publish_session_result(
+    monkeypatch,
+    isolated_runtime,
+) -> None:
+    agent_session_store.clear()
+    session_id = "session_check_latest_autofill"
+    agent_session_store.save_run(
+        AgentRunRecord(
+            session_id=session_id,
+            run_id="run_check_latest_autofill_1",
+            user_message="老模型迭代",
+            message="Task 866b23ab566c4172862f67da0ce1b7c7 finished with state=succeeded.",
+            final_state="completed",
+            provider="ollama",
+            model="gemma4:e4b",
+            tool_calls=[
+                ToolCallRecord(
+                    name="publish-incremental-yolo-dataset",
+                    arguments={
+                        "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260330/zxj_louyou_20260330.yaml",
+                        "local_paths": ["/home/qzq/下载/demo"],
+                    },
+                    result={
+                        "task_id": "866b23ab566c4172862f67da0ce1b7c7",
+                        "task_type": "publish_incremental_yolo_dataset",
+                        "state": "succeeded",
+                        "result": {
+                            "status": "ok",
+                            "publish_mode": "remote_sftp",
+                            "output_yaml_path": "/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260429_1943/zxj_louyou_20260429_1943.yaml",
+                            "dataset_version": "zxj_louyou_20260429_1943",
+                            "remote_target_host": "172.31.1.42",
+                            "remote_target_port": 22,
+                        },
+                        "error": None,
+                    },
+                    error=None,
+                )
+            ],
+        )
+    )
+    captured: dict = {}
+
+    def fake_execute_tool(tool_name, tool_arguments):
+        captured["tool_name"] = tool_name
+        captured["tool_arguments"] = tool_arguments
+
+        class FakeToolCall:
+            name = tool_name
+            arguments = tool_arguments
+            result = {"ok": True}
+            error = None
+
+        return FakeToolCall()
+
+    monkeypatch.setattr("app.agent.runtime.execute_tool", fake_execute_tool)
+
+    run = agent_runtime.chat(
+        payload=type(
+            "Payload",
+            (),
+            {
+                "message": "最新版本",
+                "session_id": session_id,
+                "provider": None,
+                "model": None,
+                "stream": False,
+                "tool_name": "check-latest-dataset-version",
+                "tool_arguments": {},
+            },
+        )()
+    )
+
+    assert run.final_state == "completed"
+    assert captured["tool_name"] == "check-latest-dataset-version"
+    assert captured["tool_arguments"]["remote_target"] == "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou"
+
+
+def test_agent_check_latest_overrides_null_remote_target_from_session_context(
+    monkeypatch,
+    isolated_runtime,
+) -> None:
+    agent_session_store.clear()
+    session_id = "session_check_latest_null_remote_target"
+    agent_session_store.save_run(
+        AgentRunRecord(
+            session_id=session_id,
+            run_id="run_check_latest_null_remote_target_1",
+            user_message="老模型迭代",
+            message="Task done",
+            final_state="completed",
+            provider="ollama",
+            model="gemma4:e4b",
+            tool_calls=[
+                ToolCallRecord(
+                    name="publish-incremental-yolo-dataset",
+                    arguments={
+                        "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260330/zxj_louyou_20260330.yaml",
+                        "local_paths": ["/home/qzq/下载/demo"],
+                    },
+                    result={
+                        "task_id": "task_null_remote_target",
+                        "task_type": "publish_incremental_yolo_dataset",
+                        "state": "succeeded",
+                        "result": {
+                            "status": "ok",
+                            "publish_mode": "remote_sftp",
+                            "output_yaml_path": "/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260429_1943/zxj_louyou_20260429_1943.yaml",
+                            "remote_target_host": "172.31.1.42",
+                            "remote_target_port": 22,
+                        },
+                        "error": None,
+                    },
+                    error=None,
+                )
+            ],
+        )
+    )
+    captured: dict = {}
+
+    def fake_execute_tool(tool_name, tool_arguments):
+        captured["tool_arguments"] = tool_arguments
+
+        class FakeToolCall:
+            name = tool_name
+            arguments = tool_arguments
+            result = {"ok": True}
+            error = None
+
+        return FakeToolCall()
+
+    monkeypatch.setattr("app.agent.runtime.execute_tool", fake_execute_tool)
+
+    for bad_value in (None, "null", ""):
+        run = agent_runtime.chat(
+            payload=type(
+                "Payload",
+                (),
+                {
+                    "message": "查看最新版本",
+                    "session_id": session_id,
+                    "provider": None,
+                    "model": None,
+                    "stream": False,
+                    "tool_name": "check-latest-dataset-version",
+                    "tool_arguments": {"remote_target": bad_value},
+                },
+            )()
+        )
+
+        assert run.final_state == "completed"
+        assert captured["tool_arguments"]["remote_target"] == "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou"
+
+
+def test_agent_session_response_includes_summary(client, isolated_runtime) -> None:
+    agent_session_store.clear()
+    session_id = "session_summary_view"
+    agent_session_store.save_run(
+        AgentRunRecord(
+            session_id=session_id,
+            run_id="run_summary_view_1",
+            user_message="发布一版",
+            message="done",
+            final_state="completed",
+            provider="ollama",
+            model="gemma4:e4b",
+            tool_calls=[
+                ToolCallRecord(
+                    name="publish-incremental-yolo-dataset",
+                    arguments={
+                        "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1000/zxj_louyou_20260430_1000.yaml",
+                        "local_paths": ["/media/qzq/16T/datasets/demo"],
+                    },
+                    result={
+                        "publish_mode": "remote_sftp",
+                        "output_yaml_path": "/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1100/zxj_louyou_20260430_1100.yaml",
+                        "remote_target_host": "172.31.1.42",
+                        "remote_target_port": 22,
+                    },
+                )
+            ],
+        )
+    )
+
+    response = client.get(f"/api/v1/agent/sessions/{session_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["has_context"] is True
+    assert data["summary"]["detector_name"] == "zxj_louyou"
+    assert data["summary"]["dataset_version"] == "zxj_louyou_20260430_1100"
+    assert data["summary"]["latest_yaml"].endswith("zxj_louyou_20260430_1100.yaml")
+
+
+def test_agent_chat_returns_session_summary_for_summary_query(client, monkeypatch, isolated_runtime) -> None:
+    agent_session_store.clear()
+    session_id = "session_summary_chat"
+    agent_session_store.save_run(
+        AgentRunRecord(
+            session_id=session_id,
+            run_id="run_summary_chat_1",
+            user_message="看看最新版本",
+            message="done",
+            final_state="completed",
+            provider="ollama",
+            model="gemma4:e4b",
+            tool_calls=[
+                ToolCallRecord(
+                    name="check-latest-dataset-version",
+                    arguments={"remote_target": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou"},
+                    result={
+                        "status": "ok",
+                        "remote_target": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou",
+                        "detector_name": "zxj_louyou",
+                        "dataset_bucket": "datasets",
+                        "dataset_version": "zxj_louyou_20260430_1300",
+                        "latest_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1300/zxj_louyou_20260430_1300.yaml",
+                        "remote_target_host": "172.31.1.42",
+                        "remote_target_port": 22,
+                    },
+                    error=None,
+                )
+            ],
+        )
+    )
+
+    def fail_if_called(**kwargs):
+        raise AssertionError("LLM routing should not be called for session summary queries")
+
+    monkeypatch.setattr("app.agent.runtime.request_tool_decision", fail_if_called)
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_USERNAME", "sk")
+    monkeypatch.setenv("SELF_API_REMOTE_SFTP_PRIVATE_KEY_PATH", "/tmp/fake_env_key")
+    monkeypatch.setattr(
+        "app.services.remote_transfer.find_latest_remote_yaml",
+        lambda *args, **kwargs: "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1400/zxj_louyou_20260430_1400.yaml",
+    )
+    get_settings.cache_clear()
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={"session_id": session_id, "message": "当前维护的是哪个模型"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["final_state"] == "completed"
+    assert "当前会话维护摘要" in data["message"]
+    assert "模型: zxj_louyou" in data["message"]
+    assert "最新版本: zxj_louyou_20260430_1400" in data["message"]
+    assert "最新 yaml: sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1400/zxj_louyou_20260430_1400.yaml" in data["message"]
+    assert data["summary"]["dataset_version"] == "zxj_louyou_20260430_1400"
+
+
+def test_agent_check_latest_message_says_agent_submission_is_latest(client, monkeypatch, isolated_runtime) -> None:
+    agent_session_store.clear()
+    session_id = "session_check_latest_message_same"
+    agent_session_store.save_run(
+        AgentRunRecord(
+            session_id=session_id,
+            run_id="run_check_latest_message_same_1",
+            user_message="发布一版",
+            message="done",
+            final_state="completed",
+            provider="ollama",
+            model="gemma4:e4b",
+            tool_calls=[
+                ToolCallRecord(
+                    name="publish-incremental-yolo-dataset",
+                    arguments={
+                        "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260330/zxj_louyou_20260330.yaml",
+                        "local_paths": ["/home/qzq/下载/demo"],
+                    },
+                    result={
+                        "task_id": "task_same_latest",
+                        "task_type": "publish_incremental_yolo_dataset",
+                        "state": "succeeded",
+                        "result": {
+                            "status": "ok",
+                            "publish_mode": "remote_sftp",
+                            "output_yaml_path": "/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260429_1943/zxj_louyou_20260429_1943.yaml",
+                            "remote_target_host": "172.31.1.42",
+                            "remote_target_port": 22,
+                        },
+                        "error": None,
+                    },
+                    error=None,
+                )
+            ],
+        )
+    )
+
+    def fake_run_check_latest_dataset_version(_payload):
+        from app.schemas.preprocess import CheckLatestDatasetVersionResponse
+
+        return CheckLatestDatasetVersionResponse(
+            remote_target="sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou",
+            detector_name="zxj_louyou",
+            dataset_bucket="datasets",
+            dataset_version="zxj_louyou_20260429_1943",
+            latest_yaml="sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260429_1943/zxj_louyou_20260429_1943.yaml",
+            remote_target_host="172.31.1.42",
+            remote_target_port=22,
+        )
+
+    monkeypatch.setattr(
+        "app.agent.tools.registry._run_check_latest_dataset_version",
+        fake_run_check_latest_dataset_version,
+    )
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "session_id": session_id,
+            "message": "查看最新版本",
+            "tool_name": "check-latest-dataset-version",
+            "tool_arguments": {},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["message"] == (
+        "智能体最近一次提交的就是当前最新版本，路径为: "
+        "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/"
+        "zxj_louyou_20260429_1943/zxj_louyou_20260429_1943.yaml"
+    )
+
+
+def test_agent_check_latest_message_says_newer_external_submission_exists(client, monkeypatch, isolated_runtime) -> None:
+    agent_session_store.clear()
+    session_id = "session_check_latest_message_newer"
+    agent_session_store.save_run(
+        AgentRunRecord(
+            session_id=session_id,
+            run_id="run_check_latest_message_newer_1",
+            user_message="发布一版",
+            message="done",
+            final_state="completed",
+            provider="ollama",
+            model="gemma4:e4b",
+            tool_calls=[
+                ToolCallRecord(
+                    name="publish-incremental-yolo-dataset",
+                    arguments={
+                        "last_yaml": "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260330/zxj_louyou_20260330.yaml",
+                        "local_paths": ["/home/qzq/下载/demo"],
+                    },
+                    result={
+                        "task_id": "task_newer_external",
+                        "task_type": "publish_incremental_yolo_dataset",
+                        "state": "succeeded",
+                        "result": {
+                            "status": "ok",
+                            "publish_mode": "remote_sftp",
+                            "output_yaml_path": "/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260429_1943/zxj_louyou_20260429_1943.yaml",
+                            "remote_target_host": "172.31.1.42",
+                            "remote_target_port": 22,
+                        },
+                        "error": None,
+                    },
+                    error=None,
+                )
+            ],
+        )
+    )
+
+    def fake_run_check_latest_dataset_version(_payload):
+        from app.schemas.preprocess import CheckLatestDatasetVersionResponse
+
+        return CheckLatestDatasetVersionResponse(
+            remote_target="sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou",
+            detector_name="zxj_louyou",
+            dataset_bucket="datasets",
+            dataset_version="zxj_louyou_20260430_1010",
+            latest_yaml="sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/zxj_louyou_20260430_1010/zxj_louyou_20260430_1010.yaml",
+            remote_target_host="172.31.1.42",
+            remote_target_port=22,
+        )
+
+    monkeypatch.setattr(
+        "app.agent.tools.registry._run_check_latest_dataset_version",
+        fake_run_check_latest_dataset_version,
+    )
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "session_id": session_id,
+            "message": "查看最新版本",
+            "tool_name": "check-latest-dataset-version",
+            "tool_arguments": {},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["message"] == (
+        "存在后续人工/外部提交的更新版本，路径为: "
+        "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/"
+        "zxj_louyou_20260430_1010/zxj_louyou_20260430_1010.yaml。"
+        "智能体最近一次提交路径为: "
+        "sftp://172.31.1.42/mnt/usrhome/sk/ndata/TEDS_n8n/zxj_louyou/datasets/"
+        "zxj_louyou_20260429_1943/zxj_louyou_20260429_1943.yaml"
+    )
+
+
 def test_agent_tools_list(client, isolated_runtime) -> None:
     response = client.get("/api/v1/agent/tools")
 
@@ -117,12 +795,14 @@ def test_agent_tools_list(client, isolated_runtime) -> None:
     assert "restore-voc-crops-batch" in names
     assert "publish-incremental-yolo-dataset" in names
     assert "publish-yolo-dataset" in names
+    assert "check-latest-dataset-version" in names
     hints = {item["name"]: item["argument_hint"] for item in data["items"]}
     descriptions = {item["name"]: item["description"] for item in data["items"]}
     assert hints["build-yolo-yaml"]
     assert "output_yaml_path" in hints["build-yolo-yaml"]
     assert hints["publish-incremental-yolo-dataset"] == "{last_yaml, local_paths}"
     assert "remote_target" in hints["publish-yolo-dataset"]
+    assert hints["check-latest-dataset-version"] == "{remote_target?}"
     assert "archive_path" in hints["unzip-archive"]
     assert "edited_crops_images_dir" in hints["restore-voc-crops-batch"]
     assert descriptions["xml-to-yolo"] == "将 Pascal VOC XML 标注转换为 YOLO 标签。"
@@ -213,6 +893,25 @@ def test_agent_routes_chinese_rewrite_request(client, case_dir, monkeypatch, iso
         "1 0.1 0.2 0.3 0.4",
         "1 0.2 0.3 0.4 0.5",
     ]
+
+
+def test_agent_routes_latest_dataset_version_request(client, monkeypatch, isolated_runtime) -> None:
+    from app.agent import runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "request_tool_decision", lambda **_: LLMToolDecision(
+        action="execute",
+        tool_name="check-latest-dataset-version",
+        tool_arguments={"remote_target": "sftp://172.31.1.42/remote/workspace/demo"},
+    ))
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={"message": "看看最新版本 sftp://172.31.1.42/remote/workspace/demo"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tool_calls"][0]["name"] == "check-latest-dataset-version"
 
 
 def test_agent_tool_missing_input_dir_returns_failed_state(client, isolated_runtime) -> None:
@@ -893,6 +1592,46 @@ def test_agent_executes_structured_publish_yolo_dataset_tool(
     assert tool_call["arguments"]["publish_mode"] == "remote_sftp"
     assert tool_call["result"]["state"] == "succeeded"
     assert tool_call["result"]["result"]["published_dataset_dir"] == "/remote/workspace/demo/datasets/demo_20260430"
+
+
+def test_agent_executes_structured_check_latest_dataset_version_tool(
+    client,
+    monkeypatch,
+    isolated_runtime,
+) -> None:
+    from app.schemas.preprocess import CheckLatestDatasetVersionResponse
+
+    def fake_run_check_latest_dataset_version(_payload):
+        return CheckLatestDatasetVersionResponse(
+            remote_target="sftp://172.31.1.42/remote/workspace/demo",
+            detector_name="demo",
+            dataset_bucket="datasets",
+            dataset_version="demo_20260430_1500",
+            latest_yaml="sftp://172.31.1.42/remote/workspace/demo/datasets/demo_20260430_1500/demo_20260430_1500.yaml",
+            remote_target_host="172.31.1.42",
+            remote_target_port=22,
+        )
+
+    monkeypatch.setattr(
+        "app.agent.tools.registry._run_check_latest_dataset_version",
+        fake_run_check_latest_dataset_version,
+    )
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": "最新版本",
+            "tool_name": "check-latest-dataset-version",
+            "tool_arguments": {"remote_target": "sftp://172.31.1.42/remote/workspace/demo"},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["final_state"] == "completed"
+    tool_call = data["tool_calls"][0]
+    assert tool_call["name"] == "check-latest-dataset-version"
+    assert tool_call["result"]["dataset_version"] == "demo_20260430_1500"
 
 
 def test_agent_routes_chinese_zip_request(client, case_dir, monkeypatch, isolated_runtime) -> None:

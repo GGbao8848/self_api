@@ -35,6 +35,16 @@ class AgentToolCallResponse(BaseModel):
     error: str | None = None
 
 
+class AgentSessionSummaryResponse(BaseModel):
+    has_context: bool = False
+    detector_name: str | None = None
+    dataset_version: str | None = None
+    latest_yaml: str | None = None
+    remote_target: str | None = None
+    classes: list[str] = Field(default_factory=list)
+    use_index_as_class_names: bool = False
+
+
 class AgentChatResponse(BaseModel):
     session_id: str
     run_id: str
@@ -44,6 +54,7 @@ class AgentChatResponse(BaseModel):
     provider: str | None = None
     model: str | None = None
     tool_calls: list[AgentToolCallResponse] = Field(default_factory=list)
+    summary: AgentSessionSummaryResponse | None = None
 
 
 class AgentRunResponse(BaseModel):
@@ -60,6 +71,7 @@ class AgentRunResponse(BaseModel):
 class AgentSessionResponse(BaseModel):
     session_id: str
     runs: list[AgentRunResponse] = Field(default_factory=list)
+    summary: AgentSessionSummaryResponse | None = None
 
 
 class AgentToolsResponse(BaseModel):
