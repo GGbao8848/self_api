@@ -1,5 +1,7 @@
 # self_api - 图像/数据集预处理 Agent API
 
+![Self API Agent UI](./docs/images/agent-ui.png)
+
 用于图像与图像数据集预处理的 Agent API 服务。当前正在从外部编排模式收敛为内建智能体模式：`services/*` 继续作为工具执行层，`/api/v1/agent/*` 提供聊天、会话和工具注册入口，`/api/v1/preprocess/*` 保留为兼容的直接工具 API。
 
 当前提供 12 个核心工具能力：
