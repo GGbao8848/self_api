@@ -183,6 +183,119 @@ def test_agent_routes_chinese_scan_request(client, case_dir, monkeypatch, isolat
     assert data["tool_calls"][0]["result"]["indices"] == [{"index": 3, "count": 1}]
 
 
+def test_agent_reuses_prior_tool_path_for_follow_up_request(
+    client,
+    case_dir,
+    monkeypatch,
+    isolated_runtime,
+) -> None:
+    from app.agent import runtime as runtime_module
+
+    dataset_dir = case_dir / "voc_followup_dataset"
+    create_image(dataset_dir / "images" / "img_1.jpg", color=(255, 10, 10), size=(100, 100))
+    create_voc_xml(
+        dataset_dir / "xmls" / "img_1.xml",
+        filename="img_1.jpg",
+        size=(100, 100),
+        objects=[("cat", (10, 20, 60, 80))],
+    )
+
+    def fake_request_tool_decision(**kwargs):
+        message = kwargs["message"]
+        if "转yolo" in message:
+            return LLMToolDecision(
+                action="execute",
+                tool_name="xml-to-yolo",
+                tool_arguments={"input_dir": str(dataset_dir)},
+            )
+        assert "Recent session resources:" in (kwargs.get("conversation_context") or "")
+        return LLMToolDecision(
+            action="execute",
+            tool_name="scan-yolo-label-indices",
+            tool_arguments={},
+        )
+
+    monkeypatch.setattr(runtime_module, "request_tool_decision", fake_request_tool_decision)
+
+    first_response = client.post(
+        "/api/v1/agent/chat",
+        json={"message": f"{dataset_dir} 转yolo"},
+    )
+
+    assert first_response.status_code == 200
+    first_data = first_response.json()
+    assert first_data["final_state"] == "completed"
+
+    second_response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "session_id": first_data["session_id"],
+            "message": "看看索引",
+        },
+    )
+
+    assert second_response.status_code == 200
+    second_data = second_response.json()
+    assert second_data["final_state"] == "completed"
+    assert second_data["tool_calls"][0]["name"] == "scan-yolo-label-indices"
+    assert second_data["tool_calls"][0]["arguments"]["input_dir"] == str(dataset_dir / "labels")
+    assert second_data["tool_calls"][0]["result"]["indices"] == [{"index": 0, "count": 1}]
+
+
+def test_agent_reuses_dataset_root_for_split_after_scan_follow_up(
+    client,
+    case_dir,
+    monkeypatch,
+    isolated_runtime,
+) -> None:
+    from app.agent import runtime as runtime_module
+
+    dataset_dir = case_dir / "split_followup_dataset"
+    create_yolo_dataset(dataset_dir, sample_count=4)
+
+    def fake_request_tool_decision(**kwargs):
+        message = kwargs["message"]
+        if "看看索引" in message:
+            return LLMToolDecision(
+                action="execute",
+                tool_name="scan-yolo-label-indices",
+                tool_arguments={"input_dir": str(dataset_dir / "labels")},
+            )
+        assert "dataset_root" in (kwargs.get("conversation_context") or "")
+        return LLMToolDecision(
+            action="execute",
+            tool_name="split-yolo-dataset",
+            tool_arguments={"mode": "train_only"},
+        )
+
+    monkeypatch.setattr(runtime_module, "request_tool_decision", fake_request_tool_decision)
+
+    first_response = client.post(
+        "/api/v1/agent/chat",
+        json={"message": "看看索引"},
+    )
+
+    assert first_response.status_code == 200
+    first_data = first_response.json()
+    assert first_data["final_state"] == "completed"
+    assert first_data["tool_calls"][0]["arguments"]["input_dir"] == str(dataset_dir / "labels")
+
+    second_response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "session_id": first_data["session_id"],
+            "message": "划分数据集 train only",
+        },
+    )
+
+    assert second_response.status_code == 200
+    second_data = second_response.json()
+    assert second_data["final_state"] == "completed"
+    assert second_data["tool_calls"][0]["name"] == "split-yolo-dataset"
+    assert second_data["tool_calls"][0]["arguments"]["input_dir"] == str(dataset_dir)
+    assert second_data["tool_calls"][0]["result"]["state"] == "succeeded"
+
+
 def test_agent_routes_chinese_rewrite_request(client, case_dir, monkeypatch, isolated_runtime) -> None:
     from app.agent import runtime as runtime_module
 

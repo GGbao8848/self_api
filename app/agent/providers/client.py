@@ -16,6 +16,7 @@ def request_tool_decision(
     provider: ProviderSelection,
     message: str,
     tools: list[ToolSpec],
+    conversation_context: str | None = None,
 ) -> LLMToolDecision:
     if provider.provider == "ollama":
         return _request_ollama_decision(
@@ -23,6 +24,7 @@ def request_tool_decision(
             provider=provider,
             message=message,
             tools=tools,
+            conversation_context=conversation_context,
         )
     if provider.provider in {"openai", "openrouter"}:
         return _request_openai_compatible_decision(
@@ -30,6 +32,7 @@ def request_tool_decision(
             provider=provider,
             message=message,
             tools=tools,
+            conversation_context=conversation_context,
         )
     raise ProviderCallError(f"unsupported provider runtime: {provider.provider}")
 
@@ -40,15 +43,17 @@ def _request_ollama_decision(
     provider: ProviderSelection,
     message: str,
     tools: list[ToolSpec],
+    conversation_context: str | None = None,
 ) -> LLMToolDecision:
+    messages = [{"role": "system", "content": _build_system_prompt(tools)}]
+    if conversation_context:
+        messages.append({"role": "system", "content": conversation_context})
+    messages.append({"role": "user", "content": message})
     payload = {
         "model": provider.model,
         "stream": False,
         "format": "json",
-        "messages": [
-            {"role": "system", "content": _build_system_prompt(tools)},
-            {"role": "user", "content": message},
-        ],
+        "messages": messages,
         "options": {"temperature": 0},
     }
     url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
@@ -69,6 +74,7 @@ def _request_openai_compatible_decision(
     provider: ProviderSelection,
     message: str,
     tools: list[ToolSpec],
+    conversation_context: str | None = None,
 ) -> LLMToolDecision:
     if provider.provider == "openai":
         base_url = (settings.openai_base_url or "https://api.openai.com/v1").rstrip("/")
@@ -77,12 +83,13 @@ def _request_openai_compatible_decision(
         base_url = settings.openrouter_base_url.rstrip("/")
         api_key = settings.openrouter_api_key or ""
 
+    messages = [{"role": "system", "content": _build_system_prompt(tools)}]
+    if conversation_context:
+        messages.append({"role": "system", "content": conversation_context})
+    messages.append({"role": "user", "content": message})
     payload = {
         "model": provider.model,
-        "messages": [
-            {"role": "system", "content": _build_system_prompt(tools)},
-            {"role": "user", "content": message},
-        ],
+        "messages": messages,
         "response_format": {"type": "json_object"},
         "temperature": 0,
     }
@@ -196,6 +203,7 @@ def _build_system_prompt(tools: list[ToolSpec]) -> str:
         "20. For reset-yolo-label-index, use input_dir pointing to labels/, a dataset root, or a parent directory containing nested labels directories.\n"
         "21. For voc-bar-crop, include output_dir as <input_dir>_voc-bar-crop unless user gives one.\n"
         "22. For restore-voc-crops-batch, required keys are original_images_dir, original_xmls_dir, edited_crops_images_dir, edited_crops_xmls_dir, and optionally output_dir.\n"
+        "23. If the current user message omits a path, but recent session context provides reusable paths, prefer the most recent output_dir or labels_dir; otherwise reuse the most recent input_dir.\n"
         "Available tools:\n"
         f"{tools_text}\n"
         "Argument hints:\n"
