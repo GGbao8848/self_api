@@ -188,6 +188,7 @@ make run
 
 - `POST /api/v1/agent/chat`：创建一次 Agent run
 - `GET /api/v1/agent/runs/{run_id}`：查询单次 run
+- `POST /api/v1/agent/runs/{run_id}/cancel`：取消后台 Agent run
 - `GET /api/v1/agent/sessions/{session_id}`：查询会话 run 列表
 - `GET /api/v1/agent/tools`：查看已注册工具
 
@@ -198,6 +199,24 @@ make run
 - `xml-to-yolo` / `split-yolo-dataset` 已支持通过 Agent 提交异步任务并轮询到终态
 - 其余异步预处理工具和模型真实调用会在后续迁移步骤接入
 - `n8n` 训练 webhook 与静态训练页面已从运行路径移除
+
+### 4.1 长任务 Agent 落地改造清单
+
+本仓库当前已落地的长任务 Agent 基础设施：
+
+1. 任务状态持久化：`/api/v1/tasks/*` 不再依赖进程内内存，任务状态、回调历史、artifact、进度、事件均落到 SQLite。
+2. Agent run 持久化增强：run 记录新增 `accepted/running/waiting_task/cancelled` 状态，并保存步骤级 `steps` 执行轨迹。
+3. 后台长任务模式：`POST /api/v1/agent/chat` 支持 `async_run=true`，请求返回后由后台线程继续规划与执行。
+4. 多步执行循环：长任务模式下可在一次 run 内执行“决策 -> 工具 -> 观察 -> 下一步决策”的循环，而不是只执行单工具后立即退出。
+5. 异步工具纳管：Agent 在长任务模式下提交异步 preprocess task 后，会跟踪 task_id 并把等待过程写入 run steps。
+6. 取消链路：取消 Agent run 时，会联动取消当前等待中的底层 task。
+7. 重启保护：服务异常重启后，未完成的 task / agent run 会被标记为中断失败，避免永远卡在 running。
+
+仍建议后续继续补强的部分：
+
+1. 将后台线程切换为独立 worker / queue（Celery、RQ、Arq 等）。
+2. 为 step 级事件增加 SSE / WebSocket 推送。
+3. 引入人工确认节点、失败重试策略、可恢复 checkpoint。
 
 ## 5. 开发命令
 

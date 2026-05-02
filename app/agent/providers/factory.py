@@ -47,7 +47,7 @@ def select_provider(
         )
 
     if selected_provider == "ollama":
-        selected_model = selected_model or settings.ollama_model
+        selected_model = (model or settings.ollama_model or settings.llm_default_model or "").strip() or None
         if not selected_model:
             return ProviderSelection(
                 provider=selected_provider,

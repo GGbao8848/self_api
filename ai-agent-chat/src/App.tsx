@@ -10,6 +10,7 @@ import {
   PanelLeft,
   PanelRight,
   Plus,
+  RotateCcw,
   Send,
   Settings,
   User,
@@ -18,10 +19,15 @@ import {
 } from 'lucide-react';
 
 type AgentRunState =
+  | 'accepted'
+  | 'running'
+  | 'waiting_task'
+  | 'interrupted'
   | 'completed'
   | 'requires_provider'
   | 'clarification_required'
-  | 'failed';
+  | 'failed'
+  | 'cancelled';
 
 interface ToolDef {
   name: string;
@@ -37,15 +43,40 @@ interface ToolCall {
   error: string | null;
 }
 
+interface AgentStep {
+  step_id: string;
+  step_index: number;
+  kind: string;
+  status: string;
+  title: string;
+  message?: string | null;
+  details?: Record<string, unknown>;
+  tool_name?: string | null;
+  task_id?: string | null;
+  task_type?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  tool_call?: ToolCall | null;
+}
+
 interface AgentRun {
   session_id: string;
   run_id: string;
   user_message?: string | null;
   message: string;
   final_state: AgentRunState;
+  parent_run_id?: string | null;
+  root_run_id?: string | null;
+  trigger_kind?: string;
+  plan_summary?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  finished_at?: string | null;
+  cancellation_requested?: boolean;
   provider?: string | null;
   model?: string | null;
   tool_calls: ToolCall[];
+  steps: AgentStep[];
 }
 
 interface AgentToolsResponse {
@@ -67,14 +98,62 @@ interface SessionItem {
 interface Message {
   role: 'user' | 'model';
   text: string;
+  runId?: string;
+  parentRunId?: string | null;
+  rootRunId?: string | null;
+  triggerKind?: string;
+  planSummary?: string | null;
   toolCalls?: ToolCall[];
+  steps?: AgentStep[];
   state?: AgentRunState;
+  canRetry?: boolean;
+  canResume?: boolean;
+}
+
+interface AgentRunEventPayload {
+  event: 'snapshot' | 'end';
+  run: AgentRun;
 }
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 function apiUrl(path: string): string {
   return `${apiBase}${path}`;
+}
+
+function isTerminalState(state?: AgentRunState): boolean {
+  return Boolean(
+    state &&
+    ['interrupted', 'completed', 'requires_provider', 'clarification_required', 'failed', 'cancelled'].includes(state),
+  );
+}
+
+function isInterruptedState(state?: AgentRunState): boolean {
+  return state === 'interrupted';
+}
+
+function canRetryState(state?: AgentRunState): boolean {
+  return Boolean(
+    state &&
+    ['completed', 'clarification_required', 'failed', 'cancelled'].includes(state),
+  );
+}
+
+function buildModelMessage(run: AgentRun): Message {
+  return {
+    role: 'model',
+    runId: run.run_id,
+    parentRunId: run.parent_run_id,
+    rootRunId: run.root_run_id,
+    triggerKind: run.trigger_kind,
+    planSummary: run.plan_summary,
+    text: run.message,
+    toolCalls: run.tool_calls,
+    steps: run.steps,
+    state: run.final_state,
+    canRetry: canRetryState(run.final_state),
+    canResume: isInterruptedState(run.final_state),
+  };
 }
 
 function buildHistoryFromRuns(runs: AgentRun[]): Message[] {
@@ -86,12 +165,7 @@ function buildHistoryFromRuns(runs: AgentRun[]): Message[] {
         text: run.user_message,
       });
     }
-    messages.push({
-      role: 'model',
-      text: run.message,
-      toolCalls: run.tool_calls,
-      state: run.final_state,
-    });
+    messages.push(buildModelMessage(run));
   }
   return messages;
 }
@@ -110,6 +184,7 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const nextScrollBehaviorRef = useRef<ScrollBehavior>('smooth');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const activeStreamRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -121,12 +196,16 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('agent_session_id', sessionId);
     nextScrollBehaviorRef.current = 'auto';
+    closeActiveStream();
     void fetchHistory(sessionId);
   }, [sessionId]);
 
   useEffect(() => {
     void fetchTools();
     void fetchSessions();
+    return () => {
+      closeActiveStream();
+    };
   }, []);
 
   useEffect(() => {
@@ -139,6 +218,57 @@ export default function App() {
     });
     nextScrollBehaviorRef.current = 'smooth';
   }, [history, loading]);
+
+  const closeActiveStream = () => {
+    if (activeStreamRef.current) {
+      activeStreamRef.current.close();
+      activeStreamRef.current = null;
+    }
+  };
+
+  const latestModelRun = (): Message | undefined => {
+    return [...history].reverse().find((item) => item.role === 'model' && item.runId);
+  };
+
+  const upsertRunMessage = (run: AgentRun) => {
+    setHistory((prev) => {
+      const next = [...prev];
+      const existingIndex = next.findIndex((item) => item.role === 'model' && item.runId === run.run_id);
+      const modelMessage = buildModelMessage(run);
+      if (existingIndex >= 0) {
+        next[existingIndex] = modelMessage;
+      } else {
+        next.push(modelMessage);
+      }
+      return next;
+    });
+  };
+
+  const attachRunStream = (runId: string) => {
+    closeActiveStream();
+    const eventSource = new EventSource(apiUrl(`/api/v1/agent/runs/${runId}/events`), {
+      withCredentials: true,
+    });
+    activeStreamRef.current = eventSource;
+
+    const handlePayload = (raw: MessageEvent<string>) => {
+      const payload: AgentRunEventPayload = JSON.parse(raw.data);
+      upsertRunMessage(payload.run);
+      if (payload.event === 'end' || isTerminalState(payload.run.final_state)) {
+        closeActiveStream();
+        setLoading(false);
+        void fetchSessions();
+      }
+    };
+
+    eventSource.addEventListener('snapshot', handlePayload as EventListener);
+    eventSource.addEventListener('end', handlePayload as EventListener);
+    eventSource.onerror = () => {
+      closeActiveStream();
+      setLoading(false);
+      void fetchHistory(sessionId);
+    };
+  };
 
   const fetchSessions = async () => {
     try {
@@ -186,26 +316,35 @@ export default function App() {
       const data: AgentSessionResponse = await res.json();
       nextScrollBehaviorRef.current = 'auto';
       setHistory(buildHistoryFromRuns(data.runs || []));
+      const latestRun = [...(data.runs || [])].reverse().find((run) => !isTerminalState(run.final_state));
+      if (latestRun) {
+        attachRunStream(latestRun.run_id);
+        setLoading(true);
+      } else {
+        setLoading(false);
+      }
     } catch (error) {
       console.error('Failed to fetch history:', error);
     }
   };
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
-
-    const userText = input.trim();
+  const submitMessage = async (userText: string) => {
     setHistory((prev) => [...prev, { role: 'user', text: userText }]);
-    setInput('');
     setLoading(true);
 
     try {
-      const res = await fetch(apiUrl('/api/v1/agent/chat'), {
+      const priorRun = latestModelRun();
+      const requestUrl = priorRun?.runId
+        ? apiUrl(`/api/v1/agent/runs/${priorRun.runId}/continue`)
+        : apiUrl('/api/v1/agent/chat');
+      const requestBody = priorRun?.runId
+        ? { message: userText, async_run: true }
+        : { session_id: sessionId, message: userText, async_run: true };
+      const res = await fetch(requestUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ session_id: sessionId, message: userText }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!res.ok) {
@@ -214,15 +353,12 @@ export default function App() {
       }
 
       const data: AgentRun = await res.json();
-      setHistory((prev) => [
-        ...prev,
-        {
-          role: 'model',
-          text: data.message,
-          toolCalls: data.tool_calls,
-          state: data.final_state,
-        },
-      ]);
+      upsertRunMessage(data);
+      if (isTerminalState(data.final_state)) {
+        setLoading(false);
+      } else {
+        attachRunStream(data.run_id);
+      }
       void fetchSessions();
     } catch (error) {
       console.error('Chat error:', error);
@@ -232,18 +368,114 @@ export default function App() {
           role: 'model',
           text: 'An error occurred while processing your request.',
           state: 'failed',
+          canRetry: false,
         },
       ]);
-    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || loading) return;
+
+    const userText = input.trim();
+    setInput('');
+    await submitMessage(userText);
+  };
+
+  const handleRetryRun = async (runId: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/v1/agent/runs/${runId}/retry`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ async_run: true }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `HTTP ${res.status}`);
+      }
+      const data: AgentRun = await res.json();
+      upsertRunMessage(data);
+      if (isTerminalState(data.final_state)) {
+        setLoading(false);
+      } else {
+        attachRunStream(data.run_id);
+      }
+      void fetchSessions();
+    } catch (error) {
+      console.error('Retry error:', error);
+      setLoading(false);
+    }
+  };
+
+  const handleContinueFromRun = async (runId: string) => {
+    const userText = input.trim();
+    if (!userText || loading) return;
+    setInput('');
+    setHistory((prev) => [...prev, { role: 'user', text: userText }]);
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/v1/agent/runs/${runId}/continue`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ message: userText, async_run: true }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `HTTP ${res.status}`);
+      }
+      const data: AgentRun = await res.json();
+      upsertRunMessage(data);
+      if (isTerminalState(data.final_state)) {
+        setLoading(false);
+      } else {
+        attachRunStream(data.run_id);
+      }
+      void fetchSessions();
+    } catch (error) {
+      console.error('Continue error:', error);
+      setLoading(false);
+    }
+  };
+
+  const handleResumeRun = async (runId: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/v1/agent/runs/${runId}/resume`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `HTTP ${res.status}`);
+      }
+      const data: AgentRun = await res.json();
+      upsertRunMessage(data);
+      if (isTerminalState(data.final_state) || isInterruptedState(data.final_state)) {
+        setLoading(false);
+      } else {
+        attachRunStream(data.run_id);
+      }
+      void fetchSessions();
+    } catch (error) {
+      console.error('Resume error:', error);
       setLoading(false);
     }
   };
 
   const resetSession = () => {
     const nextSessionId = uuidv4();
+    closeActiveStream();
     setSessionId(nextSessionId);
     localStorage.setItem('agent_session_id', nextSessionId);
     setHistory([]);
+    setLoading(false);
   };
 
   return (
@@ -324,7 +556,7 @@ export default function App() {
 
           <div className="flex items-center gap-3 text-sm">
             <div className="hidden items-center gap-2 rounded-full border border-stone-200 bg-stone-100 px-3 py-1 sm:flex">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              <span className={`h-2 w-2 rounded-full ${loading ? 'bg-amber-500' : 'bg-emerald-500'}`} />
               <span className="font-mono text-xs text-stone-600">{sessionId.slice(0, 8)}...</span>
             </div>
             {!rightSidebarOpen && (
@@ -344,17 +576,17 @@ export default function App() {
             {history.length === 0 && (
               <div className="mt-20 rounded-3xl border border-stone-200 bg-white p-10 text-center shadow-sm">
                 <Bot className="mx-auto mb-4 h-16 w-16 text-teal-200" />
-                <h2 className="mb-2 text-xl font-medium text-stone-800">Start a tool-driven run</h2>
+                <h2 className="mb-2 text-xl font-medium text-stone-800">Start a long-running agent run</h2>
                 <p className="mx-auto max-w-md text-sm text-stone-500">
-                  Ask the agent to scan labels, build YAML files, publish datasets, or execute any
-                  currently exposed preprocessing tool.
+                  The agent now runs in background mode by default, streams step updates, and can be retried
+                  when a long task stalls or fails.
                 </p>
               </div>
             )}
 
             {history.map((msg, idx) => (
               <div
-                key={idx}
+                key={`${msg.role}-${msg.runId || idx}`}
                 className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
               >
                 <div
@@ -379,8 +611,64 @@ export default function App() {
                   </div>
 
                   {msg.state && msg.role === 'model' && (
-                    <div className="max-w-[85%] text-xs font-medium uppercase tracking-wider text-stone-500">
-                      State: {msg.state}
+                    <div className="flex max-w-[85%] items-center gap-2 text-xs font-medium uppercase tracking-wider text-stone-500">
+                      <span>State: {msg.state}</span>
+                      {msg.runId && (
+                        <span className="rounded-full bg-stone-200 px-2 py-0.5 font-mono normal-case text-stone-700">
+                          {msg.runId.slice(0, 8)}
+                        </span>
+                      )}
+                      {msg.triggerKind && (
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-700">
+                          {msg.triggerKind}
+                        </span>
+                      )}
+                      {msg.canRetry && msg.runId && (
+                        <button
+                          type="button"
+                          onClick={() => void handleRetryRun(msg.runId!)}
+                          className="inline-flex items-center gap-1 rounded-full border border-stone-300 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-stone-700 hover:bg-stone-50"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          Retry
+                        </button>
+                      )}
+                      {msg.canResume && msg.runId && (
+                        <button
+                          type="button"
+                          onClick={() => void handleResumeRun(msg.runId!)}
+                          className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-amber-700 hover:bg-amber-100"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          Resume
+                        </button>
+                      )}
+                      {msg.runId && isTerminalState(msg.state) && (
+                        <button
+                          type="button"
+                          onClick={() => void handleContinueFromRun(msg.runId!)}
+                          className="inline-flex items-center gap-1 rounded-full border border-teal-300 bg-teal-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-teal-700 hover:bg-teal-100"
+                        >
+                          <Send className="h-3 w-3" />
+                          Continue
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {(msg.planSummary || msg.parentRunId || msg.rootRunId) && msg.role === 'model' && (
+                    <div className="w-full max-w-[85%] rounded-2xl border border-stone-200 bg-[#faf7ef] px-4 py-3 text-xs text-stone-700 shadow-sm">
+                      {msg.planSummary && <div className="mb-2"><span className="font-semibold">Plan:</span> {msg.planSummary}</div>}
+                      <div className="flex flex-wrap gap-3 font-mono text-[11px] text-stone-500">
+                        {msg.parentRunId && <span>parent={msg.parentRunId.slice(0, 8)}</span>}
+                        {msg.rootRunId && <span>root={msg.rootRunId.slice(0, 8)}</span>}
+                      </div>
+                    </div>
+                  )}
+
+                  {msg.steps && msg.steps.length > 0 && (
+                    <div className="w-full max-w-[85%]">
+                      <StepTimeline steps={msg.steps} />
                     </div>
                   )}
 
@@ -402,7 +690,7 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2 text-sm text-stone-500">
                   <Loader2 className="h-4 w-4 animate-spin text-teal-600" />
-                  Thinking and executing...
+                  Planning, executing, and streaming step updates...
                 </div>
               </div>
             )}
@@ -425,7 +713,7 @@ export default function App() {
                     }
                   }
                 }}
-                placeholder="Message the agent. Example: scan label indices for /data/project_a"
+                placeholder="Message the agent. Example: 先清洗嵌套目录，再转 yolo，然后检查标签索引"
                 className="max-h-32 min-h-[52px] w-full resize-none rounded-2xl border border-stone-300 bg-stone-50 py-3 pl-4 pr-12 outline-none transition-shadow focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
                 rows={1}
                 disabled={loading}
@@ -433,14 +721,14 @@ export default function App() {
               <button
                 type="submit"
                 disabled={!input.trim() || loading}
-                className="absolute top-1/2 -translate-y-1/2 right-2 rounded-xl bg-teal-700 p-2 text-white transition-colors hover:bg-teal-800 disabled:opacity-50 disabled:hover:bg-teal-700"
+                className="absolute top-1/2 right-2 -translate-y-1/2 rounded-xl bg-teal-700 p-2 text-white transition-colors hover:bg-teal-800 disabled:opacity-50 disabled:hover:bg-teal-700"
               >
                 <Send className="h-4 w-4" />
               </button>
             </div>
           </form>
           <div className="mt-2 text-center text-xs text-stone-400">
-            Responses reflect current exposed tools and provider configuration.
+            Default mode is long-running background execution with live step updates.
           </div>
         </div>
       </main>
@@ -463,6 +751,17 @@ export default function App() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
+          <div className="mb-4 rounded-2xl border border-stone-200 bg-white p-4 text-sm text-stone-700 shadow-sm">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-500">
+              Experience Upgrades
+            </div>
+            <ul className="space-y-2 text-[13px] leading-relaxed">
+              <li>Background long-task execution</li>
+              <li>Live step timeline</li>
+              <li>Retry from prior run context</li>
+              <li>Resume after service restart</li>
+            </ul>
+          </div>
           <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-stone-500">
             Available Tools ({tools.length})
           </h3>
@@ -529,6 +828,61 @@ function ToolSpecCard({ tool }: { tool: ToolDef }) {
   );
 }
 
+function StepTimeline({ steps }: { steps: AgentStep[] }) {
+  const [expanded, setExpanded] = useState(true);
+  const latest = steps[steps.length - 1];
+  return (
+    <div className="overflow-hidden rounded-2xl border border-stone-200 bg-[#fffdf8] shadow-sm">
+      <button
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+        className="flex w-full items-center justify-between gap-3 border-b border-stone-200 px-3 py-3 text-left"
+      >
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-stone-500">Plan And Progress</div>
+          <div className="mt-1 text-sm text-stone-800">
+            {steps.length} steps
+            {latest?.message ? `, latest: ${latest.message}` : ''}
+          </div>
+        </div>
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 flex-shrink-0 text-stone-400" />
+        ) : (
+          <ChevronRight className="h-4 w-4 flex-shrink-0 text-stone-400" />
+        )}
+      </button>
+      {expanded && (
+        <div className="space-y-2 p-3">
+          {steps.map((step) => (
+            <div key={step.step_id} className="rounded-xl border border-stone-200 bg-white p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-stone-900">
+                  {step.step_index}. {step.title}
+                </div>
+                <span className="rounded-full bg-stone-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                  {step.kind}/{step.status}
+                </span>
+              </div>
+              {(step.message || step.tool_name || step.task_id) && (
+                <div className="mt-2 space-y-1 text-xs text-stone-600">
+                  {step.message && <div>{step.message}</div>}
+                  {step.tool_name && <div>tool: {step.tool_name}</div>}
+                  {step.task_id && <div>task_id: {step.task_id}</div>}
+                </div>
+              )}
+              {step.details && Object.keys(step.details).length > 0 && (
+                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl bg-stone-50 p-2 text-[11px] text-stone-600">
+                  {JSON.stringify(step.details, null, 2)}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolCallCard({ call }: { call: ToolCall; key?: React.Key }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -564,7 +918,7 @@ function ToolCallCard({ call }: { call: ToolCall; key?: React.Key }) {
             <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
               Arguments
             </span>
-            <pre className="rounded bg-stone-50 p-2 text-xs text-stone-800 whitespace-pre-wrap">
+            <pre className="whitespace-pre-wrap rounded bg-stone-50 p-2 text-xs text-stone-800">
               {JSON.stringify(call.arguments, null, 2)}
             </pre>
           </div>
@@ -573,11 +927,11 @@ function ToolCallCard({ call }: { call: ToolCall; key?: React.Key }) {
               Result
             </span>
             {call.error ? (
-              <pre className="rounded bg-red-50 p-2 text-xs text-red-600 whitespace-pre-wrap">
+              <pre className="whitespace-pre-wrap rounded bg-red-50 p-2 text-xs text-red-600">
                 {call.error}
               </pre>
             ) : (
-              <pre className="rounded bg-emerald-50 p-2 text-xs text-emerald-700 whitespace-pre-wrap">
+              <pre className="whitespace-pre-wrap rounded bg-emerald-50 p-2 text-xs text-emerald-700">
                 {JSON.stringify(call.result, null, 2)}
               </pre>
             )}

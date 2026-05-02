@@ -13,6 +13,7 @@ import starlette.testclient
 from app.core.config import get_settings
 from app.main import app
 from app.services import task_manager
+from app.agent.sessions import agent_session_store
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -135,13 +136,13 @@ def isolated_runtime(monkeypatch: pytest.MonkeyPatch) -> Path:
 
     monkeypatch.setenv("SELF_API_STORAGE_ROOT", "./tmp_datasets/test_storage")
     get_settings.cache_clear()
-    task_manager._TASKS.clear()
-    task_manager._CALLBACK_URL_LOCKS.clear()
+    task_manager.reset_runtime_state(clear_persistent_store=True)
+    agent_session_store.clear()
 
     yield storage_dir
 
-    task_manager._TASKS.clear()
-    task_manager._CALLBACK_URL_LOCKS.clear()
+    task_manager.reset_runtime_state(clear_persistent_store=True)
+    agent_session_store.clear()
     get_settings.cache_clear()
     if storage_dir.exists():
         shutil.rmtree(storage_dir)

@@ -29,7 +29,7 @@ def submit_and_wait_for_task(
                 "state": "failed",
                 "error": f"task not found: {task_id}",
             }
-        if task["state"] in {"succeeded", "failed", "cancelled"}:
+        if task["state"] in {"succeeded", "failed", "cancelled", "interrupted"}:
             return _compact_task_result(task)
         time.sleep(poll_interval_seconds)
 

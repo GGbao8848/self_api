@@ -95,10 +95,17 @@ class AsyncTaskCallbackEvent(BaseModel):
     error: str | None = None
 
 
+class AsyncTaskEvent(BaseModel):
+    event_type: str
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
 class AsyncTaskStatusResponse(BaseModel):
     task_id: str
     task_type: str
-    state: Literal["pending", "running", "succeeded", "failed", "cancelled"]
+    state: Literal["pending", "running", "interrupted", "succeeded", "failed", "cancelled"]
     created_at: str
     updated_at: str
     finished_at: str | None = None
@@ -112,6 +119,10 @@ class AsyncTaskStatusResponse(BaseModel):
     callback_error: str | None = None
     callback_events: list[AsyncTaskCallbackEvent] = Field(default_factory=list)
     artifacts: list[ArtifactSummary] = Field(default_factory=list)
+    progress_current: int | None = None
+    progress_total: int | None = None
+    progress_message: str | None = None
+    events: list[AsyncTaskEvent] = Field(default_factory=list)
 
 
 class AnnotateVisualizeRequest(BaseModel):
