@@ -81,6 +81,9 @@ def test_agent_async_run_executes_multiple_steps(client, case_dir, monkeypatch, 
     assert completed["root_run_id"] == accepted["run_id"]
     assert completed["trigger_kind"] == "new"
     assert completed["plan_summary"]
+    assert completed["checkpoint"]["engine"] == "langgraph"
+    assert completed["checkpoint"]["graph_state"]["run_mode"] == "long_run"
+    assert completed["checkpoint"]["graph_state"]["phase"] == "graph_respond"
     assert [item["name"] for item in completed["tool_calls"]] == [
         "xml-to-yolo",
         "scan-yolo-label-indices",
@@ -469,7 +472,7 @@ def test_agent_long_run_falls_back_to_augment_when_model_repeats_after_crop(
     accepted = client.post(
         "/api/v1/agent/chat",
         json={
-            "message": f"{dataset_dir} xml转yolo,yolo全转为0，之后划分数据集train_only ,之后滑窗裁剪，对滑窗裁剪的数据进行数据增强",
+            "message": f"{dataset_dir} 先把 xml 标注转成 yolo 标签，再做 train_only 划分，然后滑窗裁剪，最后增强裁剪后的数据",
             "async_run": True,
         },
     ).json()

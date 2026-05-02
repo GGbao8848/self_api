@@ -23,6 +23,9 @@ def test_agent_chat_requires_provider(client, monkeypatch, isolated_runtime) -> 
     assert data["session_id"]
     assert data["run_id"]
     assert data["tool_calls"] == []
+    assert data["checkpoint"]["engine"] == "langgraph"
+    assert data["checkpoint"]["graph_state"]["run_mode"] == "inline"
+    assert data["checkpoint"]["graph_state"]["phase"] == "graph_provider_missing"
 
     run_response = client.get(f"/api/v1/agent/runs/{data['run_id']}")
     assert run_response.status_code == 200
@@ -89,6 +92,9 @@ def test_agent_chat_accepts_configured_ollama(client, monkeypatch, isolated_runt
     assert data["final_state"] == "completed"
     assert data["provider"] == "ollama"
     assert data["model"] == "gemma4:e4b"
+    assert data["checkpoint"]["engine"] == "langgraph"
+    assert data["checkpoint"]["graph_state"]["run_mode"] == "inline"
+    assert data["checkpoint"]["graph_state"]["phase"] == "graph_respond"
 
 
 def test_agent_tools_list(client, isolated_runtime) -> None:

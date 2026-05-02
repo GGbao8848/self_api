@@ -4,12 +4,13 @@ from threading import Thread
 
 from pydantic import ValidationError
 
+from app.agent.langgraph_agent import LangGraphAgentExecutor
 from app.agent.providers import ProviderCallError, request_tool_decision, select_provider
+from app.agent.langgraph_pipeline import matches_langgraph_pipeline_request, run_pipeline
 from app.agent.sessions import SQLiteAgentSessionStore, agent_session_store
 from app.agent.tools.catalog import get_executable_tool_specs
-from app.agent.tools.executor import AgentToolError, execute_tool
 from app.agent.tools.registry import get_tool_definition
-from app.agent.types import AgentRunRecord, AgentStepRecord, LLMToolDecision, ToolCallRecord
+from app.agent.types import AgentRunRecord, AgentStepRecord, LLMToolDecision, ProviderSelection, ToolCallRecord
 from app.core.config import get_settings
 from app.schemas.agent import AgentChatRequest
 from app.services.task_manager import cancel_task, get_task, submit_task
@@ -35,6 +36,15 @@ def _now_iso() -> str:
 class AgentRuntime:
     def __init__(self, store: SQLiteAgentSessionStore | None = None) -> None:
         self._store = store or agent_session_store
+
+    def _settings(self):
+        return get_settings()
+
+    def _save_run(self, run: AgentRunRecord) -> None:
+        self._store.save_run(run)
+
+    def _now(self) -> str:
+        return _now_iso()
 
     def chat(self, payload: AgentChatRequest) -> AgentRunRecord:
         if payload.async_run:
@@ -158,7 +168,7 @@ class AgentRuntime:
         worker.start()
 
     def _run_inline(self, payload: AgentChatRequest) -> AgentRunRecord:
-        settings = get_settings()
+        settings = self._settings()
         session_id = payload.session_id or self._store.create_session_id()
         run_id = self._store.create_run_id()
         prior_runs = self._store.list_session_runs(session_id)
@@ -169,162 +179,56 @@ class AgentRuntime:
             provider=payload.provider,
             model=payload.model,
         )
-        decision, decision_error = self._decide_action(
-            payload=payload,
-            provider=provider,
-            settings=settings,
-            prior_runs=prior_runs,
-            current_run=None,
-        )
-        if decision is not None and decision.action == "execute" and decision.tool_name:
-            tool_name = decision.tool_name
-            tool_arguments = self._hydrate_tool_arguments(
-                tool_name,
-                dict(decision.tool_arguments),
-                prior_runs,
+        now = _now_iso()
+        if not payload.tool_name and matches_langgraph_pipeline_request(payload.message):
+            provider = ProviderSelection(
+                provider="langgraph",
+                model="deterministic-preprocess-pipeline",
+                configured=True,
             )
-            try:
-                tool_call = execute_tool(tool_name, tool_arguments)
-            except AgentToolError as exc:
-                run = AgentRunRecord(
-                    session_id=session_id,
-                    run_id=run_id,
-                    user_message=payload.message,
-                    message=str(exc),
-                    final_state="failed",
-                    parent_run_id=parent_run.run_id if parent_run is not None else payload.parent_run_id,
-                    root_run_id=root_run_id,
-                    trigger_kind=payload.trigger_kind,
-                    plan_summary=self._build_initial_plan_summary(payload, prior_runs),
-                    created_at=_now_iso(),
-                    updated_at=_now_iso(),
-                    finished_at=_now_iso(),
-                    provider=provider.provider or None,
-                    model=provider.model,
-                    tool_calls=[],
-                )
-                self._store.save_run(run)
-                return run
-
-            state = "failed" if tool_call.error else "completed"
-            message = tool_call.error or self._summarize_tool_result(tool_call.result)
-            run = AgentRunRecord(
-                session_id=session_id,
-                run_id=run_id,
-                user_message=payload.message,
-                message=message,
-                final_state=state,
-                parent_run_id=parent_run.run_id if parent_run is not None else payload.parent_run_id,
-                root_run_id=root_run_id,
-                trigger_kind=payload.trigger_kind,
-                plan_summary=self._build_initial_plan_summary(payload, prior_runs),
-                created_at=_now_iso(),
-                updated_at=_now_iso(),
-                finished_at=_now_iso(),
-                provider=provider.provider or None,
-                model=provider.model,
-                tool_calls=[tool_call],
-            )
-            self._store.save_run(run)
-            return run
-
-        if not provider.configured:
-            run = AgentRunRecord(
-                session_id=session_id,
-                run_id=run_id,
-                user_message=payload.message,
-                message=provider.reason or "LLM provider is not configured",
-                final_state="requires_provider",
-                parent_run_id=parent_run.run_id if parent_run is not None else payload.parent_run_id,
-                root_run_id=root_run_id,
-                trigger_kind=payload.trigger_kind,
-                plan_summary=self._build_initial_plan_summary(payload, prior_runs),
-                created_at=_now_iso(),
-                updated_at=_now_iso(),
-                finished_at=_now_iso(),
-                provider=provider.provider or None,
-                model=provider.model,
-            )
-            self._store.save_run(run)
-            return run
-
-        if decision_error is not None:
-            run = AgentRunRecord(
-                session_id=session_id,
-                run_id=run_id,
-                user_message=payload.message,
-                message=decision_error,
-                final_state="failed",
-                parent_run_id=parent_run.run_id if parent_run is not None else payload.parent_run_id,
-                root_run_id=root_run_id,
-                trigger_kind=payload.trigger_kind,
-                plan_summary=self._build_initial_plan_summary(payload, prior_runs),
-                created_at=_now_iso(),
-                updated_at=_now_iso(),
-                finished_at=_now_iso(),
-                provider=provider.provider,
-                model=provider.model,
-            )
-            self._store.save_run(run)
-            return run
-
-        if decision is not None and decision.action == "respond":
-            run = AgentRunRecord(
-                session_id=session_id,
-                run_id=run_id,
-                user_message=payload.message,
-                message=decision.message or "No tool execution is needed.",
-                final_state="completed",
-                parent_run_id=parent_run.run_id if parent_run is not None else payload.parent_run_id,
-                root_run_id=root_run_id,
-                trigger_kind=payload.trigger_kind,
-                plan_summary=decision.plan_summary or self._build_initial_plan_summary(payload, prior_runs),
-                created_at=_now_iso(),
-                updated_at=_now_iso(),
-                finished_at=_now_iso(),
-                provider=provider.provider,
-                model=provider.model,
-            )
-            self._store.save_run(run)
-            return run
-
-        if decision is not None and decision.action == "clarify":
-            run = AgentRunRecord(
-                session_id=session_id,
-                run_id=run_id,
-                user_message=payload.message,
-                message=decision.message or "I need more details to choose a tool.",
-                final_state="clarification_required",
-                parent_run_id=parent_run.run_id if parent_run is not None else payload.parent_run_id,
-                root_run_id=root_run_id,
-                trigger_kind=payload.trigger_kind,
-                plan_summary=decision.plan_summary or self._build_initial_plan_summary(payload, prior_runs),
-                created_at=_now_iso(),
-                updated_at=_now_iso(),
-                finished_at=_now_iso(),
-                provider=provider.provider,
-                model=provider.model,
-            )
-            self._store.save_run(run)
-            return run
-
         run = AgentRunRecord(
             session_id=session_id,
             run_id=run_id,
             user_message=payload.message,
-            message="I need more details to choose a tool.",
-            final_state="clarification_required",
+            message="Agent is planning the task.",
+            final_state="running",
             parent_run_id=parent_run.run_id if parent_run is not None else payload.parent_run_id,
             root_run_id=root_run_id,
             trigger_kind=payload.trigger_kind,
             plan_summary=self._build_initial_plan_summary(payload, prior_runs),
-            created_at=_now_iso(),
-            updated_at=_now_iso(),
-            finished_at=_now_iso(),
-            provider=provider.provider,
+            created_at=now,
+            updated_at=now,
+            provider=provider.provider or None,
             model=provider.model,
+            request_payload=payload.model_dump(),
+            checkpoint={
+                "mode": "inline",
+                "phase": "planning",
+                "max_steps": payload.max_steps or settings.agent_max_steps,
+                "executed_signatures": [],
+            },
         )
         self._store.save_run(run)
+        try:
+            self._record_plan_step(run, payload, prior_runs, resume=False)
+            LangGraphAgentExecutor(
+                self,
+                run=run,
+                payload=payload,
+                prior_runs=prior_runs,
+                provider=provider,
+                resume=False,
+            ).execute()
+            if run.final_state not in {"completed", "failed", "cancelled", "clarification_required", "requires_provider"}:
+                self._finalize_run(
+                    run,
+                    state="failed",
+                    message="langgraph inline execution finished without a terminal run state",
+                )
+        except AgentRunCancelledError:
+            self._finalize_run(run, state="cancelled", message=f"agent run cancelled: {run.run_id}")
+        except Exception as exc:  # noqa: BLE001
+            self._finalize_run(run, state="failed", message=str(exc))
         return run
 
     def _submit_long_run(self, payload: AgentChatRequest) -> AgentRunRecord:
@@ -338,6 +242,12 @@ class AgentRuntime:
             provider=payload.provider,
             model=payload.model,
         )
+        if not payload.tool_name and matches_langgraph_pipeline_request(payload.message):
+            provider = ProviderSelection(
+                provider="langgraph",
+                model="deterministic-preprocess-pipeline",
+                configured=True,
+            )
         now = _now_iso()
         root_run_id = parent_run.root_run_id or parent_run.run_id if parent_run is not None else run_id
         run = AgentRunRecord(
@@ -371,7 +281,7 @@ class AgentRuntime:
         run = self._store.get_run(run_id)
         if run is None:
             return
-        settings = get_settings()
+        settings = self._settings()
         prior_runs = self._store.list_session_runs(run.session_id)
         prior_runs = [item for item in prior_runs if item.run_id != run_id]
         provider = select_provider(
@@ -395,119 +305,20 @@ class AgentRuntime:
 
         try:
             self._record_plan_step(run, payload, prior_runs, resume=resume)
-            if payload.tool_name:
-                if resume and self._resume_interrupted_tool_step(run):
-                    if run.final_state not in {"failed", "cancelled"}:
-                        last_call = run.tool_calls[-1] if run.tool_calls else None
-                        self._finalize_run(
-                            run,
-                            state="completed",
-                            message=self._summarize_tool_result(last_call.result if last_call else None),
-                        )
-                    return
-                self._execute_explicit_tool_step(run, payload, prior_runs, resume=resume)
-                return
-            if not provider.configured:
+            LangGraphAgentExecutor(
+                self,
+                run=run,
+                payload=payload,
+                prior_runs=prior_runs,
+                provider=provider,
+                resume=resume,
+            ).execute()
+            if run.final_state not in {"completed", "failed", "cancelled", "clarification_required", "requires_provider"}:
                 self._finalize_run(
                     run,
-                    state="requires_provider",
-                    message=provider.reason or "LLM provider is not configured",
+                    state="failed",
+                    message="langgraph execution finished without a terminal run state",
                 )
-                return
-
-            max_steps = payload.max_steps or settings.agent_max_steps
-            executed_signatures = self._restore_executed_signatures(run.checkpoint)
-            if resume and self._resume_interrupted_tool_step(
-                run,
-                max_steps=max_steps,
-                executed_signatures=executed_signatures,
-            ):
-                if run.final_state in {"failed", "cancelled"}:
-                    return
-            for _ in range(max_steps):
-                self._ensure_run_active(run.run_id)
-                run.checkpoint = {
-                    **run.checkpoint,
-                    "phase": "decision",
-                    "max_steps": max_steps,
-                    "executed_signatures": self._dump_executed_signatures(executed_signatures),
-                }
-                self._store.save_run(run)
-                decision = self._record_decision_step(run, payload, provider, settings, prior_runs)
-                if decision is None:
-                    return
-                if decision.action == "respond":
-                    self._finalize_run(
-                        run,
-                        state="completed",
-                        message=decision.message or "Task completed.",
-                    )
-                    return
-                if decision.action == "clarify":
-                    self._finalize_run(
-                        run,
-                        state="clarification_required",
-                        message=decision.message or "I need more details to continue.",
-                    )
-                    return
-                if decision.action != "execute" or not decision.tool_name:
-                    self._finalize_run(
-                        run,
-                        state="failed",
-                        message="model returned an unsupported action for long-running execution",
-                    )
-                    return
-
-                tool_arguments = self._hydrate_tool_arguments(
-                    decision.tool_name,
-                    dict(decision.tool_arguments),
-                    prior_runs + [run],
-                )
-                definition = get_tool_definition(decision.tool_name)
-                if definition is None:
-                    self._finalize_run(run, state="failed", message=f"tool is not executable yet: {decision.tool_name}")
-                    return
-                tool_arguments = self._normalize_tool_arguments(definition, tool_arguments)
-                signature = (
-                    decision.tool_name,
-                    tuple(sorted((str(key), str(value)) for key, value in tool_arguments.items())),
-                )
-                if signature in executed_signatures:
-                    fallback = self._infer_followup_decision_from_history(
-                        payload.message,
-                        run.tool_calls,
-                        executed_signatures,
-                    )
-                    if fallback is None:
-                        self._finalize_run(
-                            run,
-                            state="failed",
-                            message=f"repeated tool decision detected: {decision.tool_name}",
-                        )
-                        return
-                    decision = fallback
-                    tool_arguments = fallback.tool_arguments
-                    signature = (
-                        fallback.tool_name,
-                        tuple(sorted((str(key), str(value)) for key, value in tool_arguments.items())),
-                    )
-                executed_signatures.add(signature)
-                self._execute_tool_step(
-                    run,
-                    decision.tool_name,
-                    tool_arguments,
-                    max_steps=max_steps,
-                    executed_signatures=executed_signatures,
-                    resume=resume,
-                )
-                if run.final_state in {"failed", "cancelled"}:
-                    return
-
-            self._finalize_run(
-                run,
-                state="failed",
-                message=f"agent exceeded max_steps={max_steps} before reaching a final answer",
-            )
         except AgentRunCancelledError:
             self._finalize_run(
                 run,
@@ -1030,6 +841,57 @@ class AgentRuntime:
         }
         self._store.save_run(run)
 
+    def _execute_langgraph_pipeline(self, run: AgentRunRecord, payload: AgentChatRequest) -> None:
+        run.provider = "langgraph"
+        run.model = "deterministic-preprocess-pipeline"
+        run.checkpoint = {
+            **run.checkpoint,
+            "engine": "langgraph",
+            "phase": "graph_running",
+        }
+        self._store.save_run(run)
+        pipeline_state = run_pipeline(payload.message)
+        tool_calls = pipeline_state.get("tool_calls", [])
+        for tool_call in tool_calls:
+            step = self._start_step(run, kind="tool", title=f"Execute {tool_call.name}", tool_name=tool_call.name)
+            step.tool_call = tool_call
+            step.status = "failed" if tool_call.error else "completed"
+            step.message = tool_call.error or self._summarize_tool_result(tool_call.result)
+            step.details = {
+                "request": dict(tool_call.arguments),
+                "langgraph": True,
+            }
+            step.finished_at = _now_iso()
+            run.tool_calls.append(tool_call)
+            run.message = step.message or run.message
+            run.updated_at = _now_iso()
+            self._store.save_run(run)
+            if tool_call.error:
+                self._finalize_run(run, state="failed", message=tool_call.error)
+                return
+        final_output_dir = pipeline_state.get("current_output_dir") or pipeline_state.get("current_dataset_dir")
+        run.plan_summary = self._build_langgraph_plan_summary(payload.message)
+        self._finalize_run(
+            run,
+            state="completed",
+            message=f"LangGraph pipeline completed; output={final_output_dir}" if final_output_dir else "LangGraph pipeline completed.",
+        )
+
+    def _build_langgraph_plan_summary(self, message: str) -> str:
+        lowered = message.lower()
+        steps: list[str] = []
+        if "xml转yolo" in lowered or "xml to yolo" in lowered or "xml-to-yolo" in lowered:
+            steps.append("xml-to-yolo")
+        if "全转为0" in lowered or "转为0" in lowered or "reset" in lowered:
+            steps.append("reset-yolo-label-index")
+        if "train_only" in lowered:
+            steps.append("split-yolo-dataset(train_only)")
+        if "滑窗" in lowered or "裁剪" in lowered or "crop" in lowered:
+            steps.append("yolo-sliding-window-crop")
+        if "增强" in lowered or "augment" in lowered:
+            steps.append("yolo-augment")
+        return "LangGraph pipeline: " + " -> ".join(steps) if steps else "LangGraph pipeline"
+
     def _finalize_run(self, run: AgentRunRecord, *, state: str, message: str) -> None:
         run.final_state = state
         run.message = message
@@ -1229,6 +1091,55 @@ class AgentRuntime:
         if definition.normalize_arguments is not None:
             normalized = definition.normalize_arguments(normalized)
         return normalized
+
+    def _prepare_tool_execution_from_decision(
+        self,
+        user_message: str,
+        decision: LLMToolDecision,
+        tool_calls: list[ToolCallRecord],
+        executed_signatures: set[tuple[str, tuple[tuple[str, str], ...]]],
+        prior_runs: list[AgentRunRecord],
+    ) -> tuple[str, dict, tuple[str, tuple[tuple[str, str], ...]]] | None:
+        tool_name = decision.tool_name
+        if not tool_name:
+            return None
+        tool_arguments = self._hydrate_tool_arguments(
+            tool_name,
+            dict(decision.tool_arguments),
+            prior_runs,
+        )
+        definition = get_tool_definition(tool_name)
+        if definition is None:
+            return None
+        normalized_arguments = self._normalize_tool_arguments(definition, tool_arguments)
+        signature = (
+            tool_name,
+            tuple(sorted((str(key), str(value)) for key, value in normalized_arguments.items())),
+        )
+        if signature not in executed_signatures:
+            return tool_name, normalized_arguments, signature
+
+        fallback = self._infer_followup_decision_from_history(
+            user_message,
+            tool_calls,
+            executed_signatures,
+        )
+        if fallback is None or not fallback.tool_name:
+            return None
+        fallback_definition = get_tool_definition(fallback.tool_name)
+        if fallback_definition is None:
+            return None
+        fallback_arguments = self._normalize_tool_arguments(
+            fallback_definition,
+            dict(fallback.tool_arguments),
+        )
+        fallback_signature = (
+            fallback.tool_name,
+            tuple(sorted((str(key), str(value)) for key, value in fallback_arguments.items())),
+        )
+        if fallback_signature in executed_signatures:
+            return None
+        return fallback.tool_name, fallback_arguments, fallback_signature
 
     def _infer_followup_decision_from_history(
         self,
