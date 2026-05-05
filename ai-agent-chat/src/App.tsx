@@ -773,13 +773,6 @@ export default function App() {
                     </div>
                   )}
 
-                  {msg.toolCalls && msg.toolCalls.length > 0 && (
-                    <div className="mt-2 w-full max-w-[85%] space-y-2">
-                      {msg.toolCalls.map((call, cidx) => (
-                        <ToolCallCard key={cidx} call={call} />
-                      ))}
-                    </div>
-                  )}
                 </div>
               </div>
             ))}
@@ -1053,65 +1046,6 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
               </pre>
             </div>
           )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ToolCallCard({ call }: { call: ToolCall; key?: React.Key }) {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div className="max-w-full overflow-hidden rounded-xl border border-stone-200 bg-white font-mono text-sm shadow-sm">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center justify-between bg-stone-50 p-3 text-left transition-colors hover:bg-stone-100"
-      >
-        <div className="flex items-center gap-2">
-          {call.error ? (
-            <XCircle className="h-4 w-4 text-red-500" />
-          ) : (
-            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-          )}
-          <span className="font-semibold text-stone-700">call: {call.name}</span>
-          {!expanded && (
-            <span className="ml-2 max-w-[180px] truncate text-xs text-stone-500 sm:max-w-xs">
-              {JSON.stringify(call.arguments)}
-            </span>
-          )}
-        </div>
-        {expanded ? (
-          <ChevronDown className="h-4 w-4 text-stone-400" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-stone-400" />
-        )}
-      </button>
-
-      {expanded && (
-        <div className="space-y-3 border-t border-stone-100 bg-white p-3">
-          <div>
-            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
-              Arguments
-            </span>
-            <pre className="whitespace-pre-wrap rounded bg-stone-50 p-2 text-xs text-stone-800">
-              {JSON.stringify(call.arguments, null, 2)}
-            </pre>
-          </div>
-          <div>
-            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
-              Result
-            </span>
-            {call.error ? (
-              <pre className="whitespace-pre-wrap rounded bg-red-50 p-2 text-xs text-red-600">
-                {call.error}
-              </pre>
-            ) : (
-              <pre className="whitespace-pre-wrap rounded bg-emerald-50 p-2 text-xs text-emerald-700">
-                {JSON.stringify(call.result, null, 2)}
-              </pre>
-            )}
-          </div>
         </div>
       )}
     </div>
