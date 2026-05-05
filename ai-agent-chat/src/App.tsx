@@ -935,78 +935,124 @@ function ToolSpecCard({ tool }: { tool: ToolDef }) {
 }
 
 function StepTimeline({ steps }: { steps: AgentStep[] }) {
-  const [expanded, setExpanded] = useState(true);
-  const latest = steps[steps.length - 1];
+  if (!steps || steps.length === 0) return null;
   return (
-    <div className="overflow-hidden rounded-2xl border border-stone-200 bg-[#fffdf8] shadow-sm">
+    <div className="mt-2 w-full space-y-2">
+      <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-stone-500">
+        Agent Action Sequence
+      </div>
+      {steps.map((step) => (
+        <StepCard key={step.step_id} step={step} />
+      ))}
+    </div>
+  );
+}
+
+function formatStatusText(status: string) {
+  if (status === 'running') return 'Running...';
+  if (status === 'completed') return 'Success';
+  if (status === 'failed') return 'Failed';
+  return formatStepStatus(status);
+}
+
+function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
+  const [expanded, setExpanded] = useState(false);
+
+  let headerLabel = step.title || `Step ${step.step_index}`;
+  if (step.kind === 'tool_call' || step.tool_name) {
+    headerLabel = `call: ${step.tool_name || step.tool_call?.name || step.title}`;
+  } else if (step.kind === 'plan' || step.title.toLowerCase().includes('plan')) {
+    headerLabel = `plan: ${step.title}`;
+  } else {
+    headerLabel = `step ${step.step_index}: ${step.title}`;
+  }
+
+  return (
+    <div
+      className={`max-w-full overflow-hidden rounded-xl border border-stone-200 bg-white font-mono text-sm shadow-sm ${
+        step.status === 'failed' ? 'border-red-200' : ''
+      }`}
+    >
       <button
-        type="button"
-        onClick={() => setExpanded((current) => !current)}
-        className="flex w-full items-center justify-between gap-3 border-b border-stone-200 px-3 py-3 text-left"
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between bg-stone-50 p-3 text-left transition-colors hover:bg-stone-100"
       >
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-stone-500">Progress</div>
-          <div className="mt-1 text-sm text-stone-800">
-            {steps.length} steps
-            {latest?.message ? `, now: ${latest.message}` : ''}
-          </div>
+        <div className="flex items-center gap-2">
+          {step.status === 'failed' ? (
+            <XCircle className="h-4 w-4 text-red-500" />
+          ) : step.status === 'completed' ? (
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          ) : (
+            <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+          )}
+          <span className="font-semibold text-stone-700">{headerLabel}</span>
+          {!expanded && (
+            <span className="ml-2 max-w-[150px] truncate text-xs text-stone-500 sm:max-w-xs">
+              {formatStatusText(step.status)}
+            </span>
+          )}
         </div>
         {expanded ? (
-          <ChevronDown className="h-4 w-4 flex-shrink-0 text-stone-400" />
+          <ChevronDown className="h-4 w-4 text-stone-400" />
         ) : (
-          <ChevronRight className="h-4 w-4 flex-shrink-0 text-stone-400" />
+          <ChevronRight className="h-4 w-4 text-stone-400" />
         )}
       </button>
+
       {expanded && (
-        <div className="space-y-2 p-3">
-          {steps.map((step) => (
-            <div key={step.step_id} className="rounded-xl border border-stone-200 bg-white p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-stone-100 text-[11px] font-semibold text-stone-600">
-                      {step.step_index}
-                    </div>
-                    <div className="text-sm font-semibold text-stone-900">
-                      {step.title}
-                    </div>
-                  </div>
-                  {step.message && (
-                    <div className="mt-2 pl-8 text-sm text-stone-700">
-                      {step.message}
-                    </div>
-                  )}
-                  {summarizeStepMeta(step).length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2 pl-8">
-                      {summarizeStepMeta(step).map((item) => (
-                        <span
-                          key={item}
-                          className="rounded-full bg-stone-100 px-2 py-1 text-[11px] text-stone-600"
-                        >
-                          {item}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {buildTechnicalDetails(step) && (
-                    <details className="mt-2 pl-8">
-                      <summary className="cursor-pointer text-xs text-stone-500 hover:text-stone-700">
-                        Technical details
-                      </summary>
-                      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl bg-stone-50 p-2 text-[11px] text-stone-600">
-                        {buildTechnicalDetails(step)}
-                      </pre>
-                    </details>
-                  )}
-                </div>
-                <span
-                  className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${stepStatusTone(step.status)}`}
-                >
-                  {formatStepStatus(step.status)}
-                </span>
-              </div>
+        <div className="space-y-3 border-t border-stone-100 bg-white p-3 flex flex-col items-start text-left w-full">
+          {step.message && (
+            <div className="w-full">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
+                Message
+              </span>
+              <div className="text-xs text-stone-800 bg-stone-50 p-2 rounded whitespace-pre-wrap">{step.message}</div>
             </div>
-          ))}
+          )}
+
+          {step.tool_call?.arguments && (
+            <div className="w-full">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
+                Arguments
+              </span>
+              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-stone-50 p-2 text-xs text-stone-800">
+                {JSON.stringify(step.tool_call.arguments, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {step.tool_call?.result && (
+            <div className="w-full">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
+                Result
+              </span>
+              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-emerald-50 p-2 text-xs text-emerald-700">
+                {JSON.stringify(step.tool_call.result, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {step.tool_call?.error && (
+            <div className="w-full">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
+                Error
+              </span>
+              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-red-50 p-2 text-xs text-red-600">
+                {step.tool_call.error}
+              </pre>
+            </div>
+          )}
+
+          {!step.tool_call && step.details && Object.keys(step.details).length > 0 && (
+            <div className="w-full">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
+                Details
+              </span>
+              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-stone-50 p-2 text-xs text-stone-800">
+                {JSON.stringify(step.details, null, 2)}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>
