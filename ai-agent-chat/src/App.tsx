@@ -955,7 +955,7 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
   if (step.kind === 'tool_call' || step.tool_name) {
     headerLabel = `call: ${step.tool_name || step.tool_call?.name || step.title}`;
   } else if (step.kind === 'plan' || step.title.toLowerCase().includes('plan')) {
-    headerLabel = `plan: ${step.title}`;
+    headerLabel = `plan: ${step.message || step.title}`;
   } else {
     headerLabel = `step ${step.step_index}: ${step.title}`;
   }
@@ -970,7 +970,7 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center justify-between bg-stone-50 p-3 text-left transition-colors hover:bg-stone-100"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {step.status === 'failed' ? (
             <XCircle className="h-4 w-4 text-red-500" />
           ) : step.status === 'completed' ? (
@@ -978,7 +978,7 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
           ) : (
             <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
           )}
-          <span className="font-semibold text-stone-700">{headerLabel}</span>
+          <span className="truncate font-semibold text-stone-700">{headerLabel}</span>
           {!expanded && (
             <span className="ml-2 max-w-[150px] truncate text-xs text-stone-500 sm:max-w-xs">
               {formatStatusText(step.status)}
