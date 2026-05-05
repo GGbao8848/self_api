@@ -523,7 +523,7 @@ class AgentRuntime:
         task_id = self._submit_async_task_for_definition(definition, payload)
         step.task_id = task_id
         step.task_type = definition.task_type or tool_name.replace("-", "_")
-        step.message = f"submitted background task {task_id}"
+        step.message = self._format_async_submission_message(tool_name)
         step.details = {
             **step.details,
             "task_state": "pending",
@@ -596,7 +596,11 @@ class AgentRuntime:
             if task["state"] in {"pending", "running"}:
                 run.final_state = "waiting_task"
                 progress_text = self._format_task_progress(task)
-                run.message = progress_text or f"waiting for {tool_name}: task_id={task_id}, state={task['state']}"
+                run.message = self._format_task_wait_message(
+                    tool_name,
+                    task,
+                    progress_text=progress_text,
+                )
                 step.message = run.message
                 step.details = {
                     **step.details,
@@ -616,7 +620,7 @@ class AgentRuntime:
                 step.task_id = replacement_task_id
                 step.task_type = definition.task_type or tool_name.replace("-", "_")
                 step.status = "running"
-                step.message = f"resubmitted background task {replacement_task_id} after restart"
+                step.message = self._format_async_resubmission_message(tool_name)
                 step.finished_at = None
                 step.details = {
                     **step.details,
@@ -930,6 +934,30 @@ class AgentRuntime:
         if current is not None and total is not None:
             return f"task progress: {current}/{total}"
         return None
+
+    def _format_async_submission_message(self, tool_name: str) -> str:
+        return f"Preparing to run {tool_name}."
+
+    def _format_async_resubmission_message(self, tool_name: str) -> str:
+        return f"Service restarted. Resubmitted {tool_name} and waiting for it to start."
+
+    def _format_task_wait_message(
+        self,
+        tool_name: str,
+        task: dict,
+        *,
+        progress_text: str | None,
+    ) -> str:
+        state = str(task.get("state") or "").lower()
+        if progress_text:
+            if state == "pending":
+                return f"{tool_name} is queued. {progress_text}"
+            return f"Running {tool_name}. {progress_text}"
+        if state == "pending":
+            return f"{tool_name} is queued and waiting for a worker."
+        if state == "running":
+            return f"Running {tool_name}."
+        return f"Waiting on {tool_name}."
 
     def _build_task_wait_details(self, task: dict) -> dict:
         events = task.get("events") if isinstance(task.get("events"), list) else []

@@ -24,6 +24,13 @@ _AUGMENTATION_SPECS: list[tuple[str, str]] = [
     ("gaussian_blur", "gaussian_blur"),
 ]
 
+_DEFAULT_ADJUSTMENT_FACTORS: dict[str, float] = {
+    "brightness_up": 1.3,
+    "brightness_down": 0.7,
+    "contrast_up": 1.3,
+    "contrast_down": 0.7,
+}
+
 
 def _discover_dataset_units(input_dir: Path) -> list[tuple[Path, Path, Path]]:
     """Find dataset units as (relative_root, images_dir, labels_dir)."""
@@ -101,19 +108,37 @@ def _apply_label_transform(
     return transformed
 
 
-def _apply_image_transform(image: Image.Image, augmentation_name: str) -> Image.Image:
+def _resolve_adjustment_factor(augmentation_name: str, value: bool | float) -> float:
+    if isinstance(value, bool):
+        return _DEFAULT_ADJUSTMENT_FACTORS[augmentation_name]
+    return value
+
+
+def _apply_image_transform(
+    image: Image.Image,
+    augmentation_name: str,
+    augmentation_value: bool | float,
+) -> Image.Image:
     if augmentation_name == "hflip":
         return image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     if augmentation_name == "vflip":
         return image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
     if augmentation_name == "brightness_up":
-        return ImageEnhance.Brightness(image).enhance(1.3)
+        return ImageEnhance.Brightness(image).enhance(
+            _resolve_adjustment_factor("brightness_up", augmentation_value)
+        )
     if augmentation_name == "brightness_down":
-        return ImageEnhance.Brightness(image).enhance(0.7)
+        return ImageEnhance.Brightness(image).enhance(
+            _resolve_adjustment_factor("brightness_down", augmentation_value)
+        )
     if augmentation_name == "contrast_up":
-        return ImageEnhance.Contrast(image).enhance(1.3)
+        return ImageEnhance.Contrast(image).enhance(
+            _resolve_adjustment_factor("contrast_up", augmentation_value)
+        )
     if augmentation_name == "contrast_down":
-        return ImageEnhance.Contrast(image).enhance(0.7)
+        return ImageEnhance.Contrast(image).enhance(
+            _resolve_adjustment_factor("contrast_down", augmentation_value)
+        )
     if augmentation_name == "gaussian_blur":
         return image.filter(ImageFilter.GaussianBlur(radius=2.0))
     raise ValueError(f"unsupported augmentation: {augmentation_name}")
@@ -142,7 +167,9 @@ def run_yolo_augment(request: YoloAugmentRequest) -> YoloAugmentResponse:
         )
 
     selected_augmentations = [
-        suffix for field_name, suffix in _AUGMENTATION_SPECS if getattr(request, field_name)
+        (suffix, getattr(request, field_name))
+        for field_name, suffix in _AUGMENTATION_SPECS
+        if getattr(request, field_name)
     ]
     if not selected_augmentations:
         raise ValueError("at least one augmentation option must be enabled")
@@ -185,8 +212,12 @@ def run_yolo_augment(request: YoloAugmentRequest) -> YoloAugmentResponse:
                 labels = _load_yolo_labels(label_path)
                 with Image.open(image_path) as img:
                     source_image = img.convert("RGB")
-                    for augmentation_name in selected_augmentations:
-                        augmented_image = _apply_image_transform(source_image, augmentation_name)
+                    for augmentation_name, augmentation_value in selected_augmentations:
+                        augmented_image = _apply_image_transform(
+                            source_image,
+                            augmentation_name,
+                            augmentation_value,
+                        )
                         augmented_labels = _apply_label_transform(labels, augmentation_name)
 
                         target_rel = rel_path.with_name(

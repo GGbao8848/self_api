@@ -1462,11 +1462,42 @@ class YoloAugmentRequest(BaseModel):
     overwrite: bool = Field(default=True, description="目标文件已存在时是否覆盖")
     horizontal_flip: bool = Field(default=True, description="是否生成水平翻转增强")
     vertical_flip: bool = Field(default=True, description="是否生成垂直翻转增强")
-    brightness_up: bool = Field(default=True, description="是否生成提高亮度增强")
-    brightness_down: bool = Field(default=True, description="是否生成降低亮度增强")
-    contrast_up: bool = Field(default=True, description="是否生成提高对比度增强")
-    contrast_down: bool = Field(default=True, description="是否生成降低对比度增强")
+    brightness_up: bool | float = Field(
+        default=True,
+        description="提高亮度增强；true 使用默认倍率，false 关闭，也可直接传 >1 的倍率",
+    )
+    brightness_down: bool | float = Field(
+        default=True,
+        description="降低亮度增强；true 使用默认倍率，false 关闭，也可直接传 0~1 的倍率",
+    )
+    contrast_up: bool | float = Field(
+        default=True,
+        description="提高对比度增强；true 使用默认倍率，false 关闭，也可直接传 >1 的倍率",
+    )
+    contrast_down: bool | float = Field(
+        default=True,
+        description="降低对比度增强；true 使用默认倍率，false 关闭，也可直接传 0~1 的倍率",
+    )
     gaussian_blur: bool = Field(default=True, description="是否生成高斯模糊增强")
+
+    @model_validator(mode="after")
+    def _validate_adjustment_factors(self) -> "YoloAugmentRequest":
+        self._validate_toggle_or_factor("brightness_up", self.brightness_up, allow_gt_one=True)
+        self._validate_toggle_or_factor("brightness_down", self.brightness_down, allow_gt_one=False)
+        self._validate_toggle_or_factor("contrast_up", self.contrast_up, allow_gt_one=True)
+        self._validate_toggle_or_factor("contrast_down", self.contrast_down, allow_gt_one=False)
+        return self
+
+    @staticmethod
+    def _validate_toggle_or_factor(name: str, value: bool | float, *, allow_gt_one: bool) -> None:
+        if isinstance(value, bool):
+            return
+        if allow_gt_one:
+            if value <= 1.0:
+                raise ValueError(f"{name} must be false, true, or a factor > 1.0")
+            return
+        if not (0.0 < value < 1.0):
+            raise ValueError(f"{name} must be false, true, or a factor between 0.0 and 1.0")
 
 
 class YoloAugmentFileDetail(BaseModel):

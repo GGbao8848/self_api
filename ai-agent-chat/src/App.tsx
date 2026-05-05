@@ -170,6 +170,106 @@ function buildHistoryFromRuns(runs: AgentRun[]): Message[] {
   return messages;
 }
 
+function getLatestStep(steps?: AgentStep[]): AgentStep | undefined {
+  if (!steps || steps.length === 0) {
+    return undefined;
+  }
+  return steps[steps.length - 1];
+}
+
+function getLoadingStatus(history: Message[]): { title: string; detail?: string } {
+  const activeRun = [...history].reverse().find((item) => item.role === 'model' && item.runId && !isTerminalState(item.state));
+  if (!activeRun) {
+    return {
+      title: 'Working on your request',
+      detail: 'Starting the agent run and waiting for the first update.',
+    };
+  }
+
+  const latestStep = getLatestStep(activeRun.steps);
+  if (latestStep?.message) {
+    return {
+      title: latestStep.title || 'Working on your request',
+      detail: latestStep.message,
+    };
+  }
+  if (latestStep?.title) {
+    return {
+      title: latestStep.title,
+      detail: latestStep.tool_name ? `Using ${latestStep.tool_name}.` : undefined,
+    };
+  }
+  if (activeRun.text) {
+    return {
+      title: 'Working on your request',
+      detail: activeRun.text,
+    };
+  }
+
+  return {
+    title: 'Working on your request',
+    detail: activeRun.state === 'waiting_task' ? 'Waiting for the current tool to finish.' : 'Planning the next step.',
+  };
+}
+
+function formatStepStatus(status: string): string {
+  switch (status) {
+    case 'completed':
+      return 'Done';
+    case 'running':
+      return 'In progress';
+    case 'failed':
+      return 'Failed';
+    case 'cancelled':
+      return 'Cancelled';
+    default:
+      return status;
+  }
+}
+
+function stepStatusTone(status: string): string {
+  switch (status) {
+    case 'completed':
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    case 'running':
+      return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'failed':
+      return 'bg-red-50 text-red-700 border-red-200';
+    case 'cancelled':
+      return 'bg-stone-100 text-stone-600 border-stone-200';
+    default:
+      return 'bg-stone-100 text-stone-600 border-stone-200';
+  }
+}
+
+function summarizeStepMeta(step: AgentStep): string[] {
+  const items: string[] = [];
+  if (step.tool_name) {
+    items.push(step.tool_name);
+  }
+  if (step.kind === 'plan') {
+    items.push('planning');
+  }
+  if (step.task_id) {
+    items.push(`task ${step.task_id.slice(0, 8)}`);
+  }
+  return items;
+}
+
+function buildTechnicalDetails(step: AgentStep): string | null {
+  const parts: string[] = [];
+  if (step.tool_name) {
+    parts.push(`Tool: ${step.tool_name}`);
+  }
+  if (step.task_id) {
+    parts.push(`Task ID: ${step.task_id}`);
+  }
+  if (step.details && Object.keys(step.details).length > 0) {
+    parts.push(JSON.stringify(step.details, null, 2));
+  }
+  return parts.length > 0 ? parts.join('\n\n') : null;
+}
+
 export default function App() {
   const [sessionId, setSessionId] = useState<string>(() => {
     return localStorage.getItem('agent_session_id') || uuidv4();
@@ -185,6 +285,7 @@ export default function App() {
   const nextScrollBehaviorRef = useRef<ScrollBehavior>('smooth');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeStreamRef = useRef<EventSource | null>(null);
+  const loadingStatus = getLoadingStatus(history);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -688,9 +789,14 @@ export default function App() {
                 <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-stone-800">
                   <Bot className="h-5 w-5 animate-pulse text-white" />
                 </div>
-                <div className="flex items-center gap-2 text-sm text-stone-500">
-                  <Loader2 className="h-4 w-4 animate-spin text-teal-600" />
-                  Planning, executing, and streaming step updates...
+                <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
+                  <div className="flex items-center gap-2 text-sm font-medium text-stone-800">
+                    <Loader2 className="h-4 w-4 animate-spin text-teal-600" />
+                    <span>{loadingStatus.title}</span>
+                  </div>
+                  {loadingStatus.detail && (
+                    <div className="mt-1 text-sm text-stone-500">{loadingStatus.detail}</div>
+                  )}
                 </div>
               </div>
             )}
@@ -839,10 +945,10 @@ function StepTimeline({ steps }: { steps: AgentStep[] }) {
         className="flex w-full items-center justify-between gap-3 border-b border-stone-200 px-3 py-3 text-left"
       >
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-stone-500">Plan And Progress</div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-stone-500">Progress</div>
           <div className="mt-1 text-sm text-stone-800">
             {steps.length} steps
-            {latest?.message ? `, latest: ${latest.message}` : ''}
+            {latest?.message ? `, now: ${latest.message}` : ''}
           </div>
         </div>
         {expanded ? (
@@ -855,26 +961,50 @@ function StepTimeline({ steps }: { steps: AgentStep[] }) {
         <div className="space-y-2 p-3">
           {steps.map((step) => (
             <div key={step.step_id} className="rounded-xl border border-stone-200 bg-white p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-semibold text-stone-900">
-                  {step.step_index}. {step.title}
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-stone-100 text-[11px] font-semibold text-stone-600">
+                      {step.step_index}
+                    </div>
+                    <div className="text-sm font-semibold text-stone-900">
+                      {step.title}
+                    </div>
+                  </div>
+                  {step.message && (
+                    <div className="mt-2 pl-8 text-sm text-stone-700">
+                      {step.message}
+                    </div>
+                  )}
+                  {summarizeStepMeta(step).length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2 pl-8">
+                      {summarizeStepMeta(step).map((item) => (
+                        <span
+                          key={item}
+                          className="rounded-full bg-stone-100 px-2 py-1 text-[11px] text-stone-600"
+                        >
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {buildTechnicalDetails(step) && (
+                    <details className="mt-2 pl-8">
+                      <summary className="cursor-pointer text-xs text-stone-500 hover:text-stone-700">
+                        Technical details
+                      </summary>
+                      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl bg-stone-50 p-2 text-[11px] text-stone-600">
+                        {buildTechnicalDetails(step)}
+                      </pre>
+                    </details>
+                  )}
                 </div>
-                <span className="rounded-full bg-stone-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-stone-600">
-                  {step.kind}/{step.status}
+                <span
+                  className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${stepStatusTone(step.status)}`}
+                >
+                  {formatStepStatus(step.status)}
                 </span>
               </div>
-              {(step.message || step.tool_name || step.task_id) && (
-                <div className="mt-2 space-y-1 text-xs text-stone-600">
-                  {step.message && <div>{step.message}</div>}
-                  {step.tool_name && <div>tool: {step.tool_name}</div>}
-                  {step.task_id && <div>task_id: {step.task_id}</div>}
-                </div>
-              )}
-              {step.details && Object.keys(step.details).length > 0 && (
-                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl bg-stone-50 p-2 text-[11px] text-stone-600">
-                  {JSON.stringify(step.details, null, 2)}
-                </pre>
-              )}
             </div>
           ))}
         </div>

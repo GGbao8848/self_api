@@ -101,3 +101,42 @@ def test_yolo_augment_supports_split_dataset_tree(
     assert len(val_out_images) == 1
     assert len(val_out_labels) == 1
     assert train_out_labels[0].read_text(encoding="utf-8").strip().startswith("0 ")
+
+
+def test_yolo_augment_accepts_numeric_brightness_and_contrast_factors(
+    client: TestClient,
+    case_dir: Path,
+) -> None:
+    images_dir = case_dir / "images"
+    labels_dir = case_dir / "labels"
+    output_dir = case_dir / "augment_numeric"
+
+    create_image(images_dir / "plain.png", color=(100, 120, 140), size=(12, 12))
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    (labels_dir / "plain.txt").write_text(
+        "0 0.500000 0.500000 0.400000 0.400000\n",
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/v1/preprocess/yolo-augment",
+        json={
+            "input_dir": str(case_dir),
+            "output_dir": str(output_dir),
+            "horizontal_flip": False,
+            "vertical_flip": False,
+            "brightness_up": 1.1,
+            "brightness_down": 0.9,
+            "contrast_up": 1.1,
+            "contrast_down": 0.9,
+            "gaussian_blur": False,
+        },
+    )
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["processed_images"] == 1
+    assert data["generated_images"] == 4
+    assert data["generated_labels"] == 4
+    assert len(list((output_dir / "images").rglob("*.png"))) == 4
+    assert len(list((output_dir / "labels").rglob("*.txt"))) == 4

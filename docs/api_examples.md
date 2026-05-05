@@ -381,11 +381,36 @@ curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/split-yolo-dataset/asyn
 - `contrast_down`
 - `gaussian_blur`
 
+其中：
+
+- `horizontal_flip`、`vertical_flip`、`gaussian_blur` 为布尔开关
+- `brightness_up`、`contrast_up` 支持 `true|false` 或直接传 `> 1` 的倍率
+- `brightness_down`、`contrast_down` 支持 `true|false` 或直接传 `0 ~ 1` 的倍率
+- 传 `true` 时使用内置默认倍率，传 `false` 时关闭对应增强
+
 ```bash
 curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-augment" \
   -H "Content-Type: application/json" \
   -d '{
     "input_dir": "/media/qzq/16T/datasets/demo"
+  }'
+```
+
+自定义倍率示例：
+
+```bash
+curl -X POST "http://192.168.2.26:8666/api/v1/preprocess/yolo-augment" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_dir": "/media/qzq/16T/datasets/demo",
+    "output_dir": "/media/qzq/16T/datasets/demo_aug",
+    "horizontal_flip": true,
+    "vertical_flip": false,
+    "brightness_up": 1.1,
+    "brightness_down": 0.9,
+    "contrast_up": 1.1,
+    "contrast_down": 0.9,
+    "gaussian_blur": false
   }'
 ```
 
