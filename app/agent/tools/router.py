@@ -136,7 +136,7 @@ def _matches_build_yolo_yaml(text: str, lower: str) -> bool:
 
 def _matches_publish_incremental(text: str, lower: str) -> bool:
     return "publish-incremental-yolo-dataset" in lower or _has_any(
-        text, ("增量发布数据集", "增量发布")
+        text, ("增量发布数据集", "增量发布", "老模型迭代")
     )
 
 
