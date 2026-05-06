@@ -698,3 +698,206 @@ def test_agent_resume_run_replays_interrupted_async_tool(client, case_dir, isola
     assert completed["tool_calls"][0]["name"] == "xml-to-yolo"
     assert completed["tool_calls"][0]["result"]["state"] == "succeeded"
     assert completed["steps"][-1]["details"]["resumed_from_task_id"] == "task-interrupted-1"
+
+
+def test_agent_cancel_run_cancels_pending_async_task_immediately(client, isolated_runtime) -> None:
+    agent_session_store.clear()
+
+    task_manager._ensure_initialized()
+    with task_manager._connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO tasks (
+                task_id,
+                task_type,
+                state,
+                created_at,
+                updated_at,
+                finished_at,
+                result_json,
+                error,
+                cancellation_requested,
+                callback_url,
+                callback_state,
+                callback_sent_at,
+                callback_status_code,
+                callback_error,
+                callback_events_json,
+                artifacts_json,
+                progress_current,
+                progress_total,
+                progress_message,
+                events_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "task-pending-cancel-1",
+                "publish_incremental_yolo_dataset",
+                "pending",
+                "2026-05-01T00:00:00+00:00",
+                "2026-05-01T00:00:00+00:00",
+                None,
+                None,
+                None,
+                0,
+                None,
+                "succeeded",
+                None,
+                None,
+                None,
+                "[]",
+                "[]",
+                None,
+                None,
+                None,
+                json.dumps([], ensure_ascii=True),
+            ),
+        )
+
+    run = AgentRunRecord(
+        session_id="cancel-session",
+        run_id="run-cancel-1",
+        user_message="终止这个任务",
+        message="Running publish-incremental-yolo-dataset.",
+        final_state="waiting_task",
+        root_run_id="run-cancel-1",
+        trigger_kind="new",
+        plan_summary="Goal: terminate task",
+        created_at="2026-05-01T00:00:00+00:00",
+        updated_at="2026-05-01T00:00:00+00:00",
+        request_payload={
+            "session_id": "cancel-session",
+            "message": "终止这个任务",
+            "async_run": True,
+            "trigger_kind": "new",
+        },
+        checkpoint={
+            "mode": "long_run",
+            "phase": "waiting_task",
+            "current_tool": {
+                "tool_name": "publish-incremental-yolo-dataset",
+                "tool_arguments": {"last_yaml": "sftp://host/root/detector/dataset/ver/ver.yaml"},
+                "task_id": "task-pending-cancel-1",
+                "task_type": "publish_incremental_yolo_dataset",
+                "step_id": "step-cancel-tool",
+            },
+        },
+        steps=[
+            AgentStepRecord(
+                step_id="step-cancel-tool",
+                step_index=1,
+                kind="tool",
+                status="running",
+                title="Execute publish-incremental-yolo-dataset",
+                tool_name="publish-incremental-yolo-dataset",
+                task_id="task-pending-cancel-1",
+                task_type="publish_incremental_yolo_dataset",
+                message="Running publish-incremental-yolo-dataset.",
+                started_at="2026-05-01T00:00:00+00:00",
+            ),
+        ],
+    )
+    agent_session_store.save_run(run)
+
+    response = client.post("/api/v1/agent/runs/run-cancel-1/cancel")
+    assert response.status_code == 200
+    payload = response.json()["run"]
+    assert payload["final_state"] == "cancelled"
+    assert payload["cancellation_requested"] is True
+    assert payload["steps"][-1]["status"] == "cancelled"
+    assert payload["steps"][-1]["details"]["termination_requested"] is True
+
+    task_payload = task_manager.get_task("task-pending-cancel-1")
+    assert task_payload is not None
+    assert task_payload["state"] == "cancelled"
+
+
+def test_agent_resume_publish_task_recovers_resume_artifacts_from_task_events(isolated_runtime) -> None:
+    from app.agent.runtime import agent_runtime
+
+    task_manager._ensure_initialized()
+    with task_manager._connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO tasks (
+                task_id,
+                task_type,
+                state,
+                created_at,
+                updated_at,
+                finished_at,
+                result_json,
+                error,
+                cancellation_requested,
+                callback_url,
+                callback_state,
+                callback_sent_at,
+                callback_status_code,
+                callback_error,
+                callback_events_json,
+                artifacts_json,
+                progress_current,
+                progress_total,
+                progress_message,
+                events_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "task-publish-interrupted-1",
+                "publish_incremental_yolo_dataset",
+                "interrupted",
+                "2026-05-01T00:00:00+00:00",
+                "2026-05-01T00:00:01+00:00",
+                None,
+                None,
+                "task interrupted by service restart before completion",
+                0,
+                None,
+                "succeeded",
+                None,
+                None,
+                None,
+                "[]",
+                "[]",
+                None,
+                None,
+                None,
+                json.dumps(
+                    [
+                        {
+                            "event_type": "publish_resume_ready",
+                            "message": "local staging archive is ready",
+                            "details": {
+                                "dataset_version": "demo_20260506_1517",
+                                "resume_staging_dataset_dir": "/tmp/staging_dataset",
+                                "resume_staging_output_yaml_path": "/tmp/staging_dataset/demo.yaml",
+                                "resume_local_archive_path": "/tmp/staging_dataset.zip",
+                            },
+                            "created_at": "2026-05-01T00:00:00+00:00",
+                        },
+                        {
+                            "event_type": "publish_resume_ready",
+                            "message": "remote archive upload completed",
+                            "details": {
+                                "resume_remote_archive_path": "sftp://host/root/demo_20260506_1517.zip",
+                            },
+                            "created_at": "2026-05-01T00:00:01+00:00",
+                        },
+                    ],
+                    ensure_ascii=True,
+                ),
+            ),
+        )
+
+    merged = agent_runtime._merge_publish_resume_arguments_from_task(
+        {
+            "last_yaml": "sftp://host/root/detector/dataset/ver/ver.yaml",
+            "local_paths": ["/tmp/input"],
+        },
+        task_id="task-publish-interrupted-1",
+    )
+
+    assert merged["resume_staging_dataset_dir"] == "/tmp/staging_dataset"
+    assert merged["resume_staging_output_yaml_path"] == "/tmp/staging_dataset/demo.yaml"
+    assert merged["resume_local_archive_path"] == "/tmp/staging_dataset.zip"
+    assert merged["resume_remote_archive_path"] == "sftp://host/root/demo_20260506_1517.zip"

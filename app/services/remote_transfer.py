@@ -11,7 +11,7 @@ from app.schemas.preprocess import (
     RemoteTransferRequest,
     RemoteTransferResponse,
 )
-from app.services.task_manager import ensure_current_task_active
+from app.services.task_manager import ensure_current_task_active, update_current_task_progress
 
 
 def _parse_target(target: str) -> tuple[str, int, str]:
@@ -158,7 +158,17 @@ def run_remote_transfer(request: RemoteTransferRequest) -> RemoteTransferRespons
             if remote_parent and remote_parent not in (".", "/"):
                 _mkdir_p(sftp, remote_parent)
 
-            sftp.put(str(source_path), remote_file)
+            update_current_task_progress(current=0, total=source_path.stat().st_size, message="uploading archive")
+
+            def _file_progress(transferred: int, total: int) -> None:
+                ensure_current_task_active()
+                update_current_task_progress(
+                    current=transferred,
+                    total=total,
+                    message=f"uploading archive ({transferred}/{total} bytes)",
+                )
+
+            sftp.put(str(source_path), remote_file, callback=_file_progress)
             transferred_files = 1
             total_bytes = source_path.stat().st_size
             transferred_type = "file"
@@ -186,6 +196,11 @@ def run_remote_transfer(request: RemoteTransferRequest) -> RemoteTransferRespons
                                 continue  # skip existing
                             except FileNotFoundError:
                                 pass
+                        update_current_task_progress(
+                            current=transferred_files,
+                            total=None,
+                            message=f"uploading file {item.name}",
+                        )
                         sftp.put(str(item), remote_item)
                         transferred_files += 1
                         total_bytes += item.stat().st_size

@@ -256,6 +256,7 @@ def _build_system_prompt(tools: list[ToolSpec]) -> str:
         "13. For clean-nested-dataset-flat, include output_dir as <input_dir>_cleaned_flat and default flatten=true, include_backgrounds=false, pairing_mode=images_xmls_subfolders, recursive=true, copy_files=true, overwrite=true unless user gives overrides.\n"
         "14. For publish-yolo-dataset, prefer {local_paths, remote_target, classes, use_index_as_class_names}. local_paths must be an array when the user gives one or more dataset folders. If remote_target is present, it should include detector_name at the end, like sftp://host/root/detector_name. If the user explicitly says to submit directly without class names, set use_index_as_class_names=true.\n"
         "15. For publish-incremental-yolo-dataset, use {last_yaml, local_paths}; if the user gives one local dataset path, local_paths should contain exactly one item.\n"
+        "15a. If the user provides last_yaml and the request means iterating an existing or old model, prefer publish-incremental-yolo-dataset over publish-yolo-dataset. Only fall back to publish-yolo-dataset when the old yaml is a legacy flat path that cannot infer detector_name.\n"
         "16. For build-yolo-yaml, include output_yaml_path as <input_dir>/data.yaml unless project_root_dir and detector_name are both provided.\n"
         "17. For aggregate-nested-dataset, include output_dir as <input_dir>_dataset unless user gives one.\n"
         "18. For zip-folder, if output_zip_path is omitted, use <input_dir>.zip.\n"

@@ -1240,6 +1240,22 @@ class PublishYoloDatasetRequest(BaseModel):
             "as class names such as 0->'0', 1->'1'."
         ),
     )
+    resume_staging_dataset_dir: str | None = Field(
+        default=None,
+        description="Internal resume hint: existing local staging dataset directory to reuse",
+    )
+    resume_staging_output_yaml_path: str | None = Field(
+        default=None,
+        description="Internal resume hint: existing local staging yaml path to reuse",
+    )
+    resume_local_archive_path: str | None = Field(
+        default=None,
+        description="Internal resume hint: existing local zip archive path to reuse",
+    )
+    resume_remote_archive_path: str | None = Field(
+        default=None,
+        description="Internal resume hint: existing remote archive path to unzip directly",
+    )
 
     @model_validator(mode="after")
     def _validate_inputs(self) -> "PublishYoloDatasetRequest":
@@ -1259,6 +1275,10 @@ class PublishYoloDatasetRequest(BaseModel):
         self.remote_username = (self.remote_username or "").strip() or None
         self.remote_private_key_path = (self.remote_private_key_path or "").strip() or None
         self.last_yaml = (self.last_yaml or "").strip() or None
+        self.resume_staging_dataset_dir = (self.resume_staging_dataset_dir or "").strip() or None
+        self.resume_staging_output_yaml_path = (self.resume_staging_output_yaml_path or "").strip() or None
+        self.resume_local_archive_path = (self.resume_local_archive_path or "").strip() or None
+        self.resume_remote_archive_path = (self.resume_remote_archive_path or "").strip() or None
         classes = [item.strip() for item in (self.classes or []) if isinstance(item, str) and item.strip()]
         self.classes = classes or None
         if not self.input_dir and not extras:
@@ -1306,6 +1326,10 @@ class PublishIncrementalYoloDatasetRequest(BaseModel):
             "directory is given, it auto-discovers the base sibling"
         ),
     )
+    resume_staging_dataset_dir: str | None = Field(default=None)
+    resume_staging_output_yaml_path: str | None = Field(default=None)
+    resume_local_archive_path: str | None = Field(default=None)
+    resume_remote_archive_path: str | None = Field(default=None)
 
     @model_validator(mode="after")
     def _validate_local_paths(self) -> "PublishIncrementalYoloDatasetRequest":
@@ -1313,6 +1337,10 @@ class PublishIncrementalYoloDatasetRequest(BaseModel):
         if not cleaned:
             raise ValueError("local_paths must contain at least one local dataset directory")
         self.local_paths = cleaned
+        self.resume_staging_dataset_dir = (self.resume_staging_dataset_dir or "").strip() or None
+        self.resume_staging_output_yaml_path = (self.resume_staging_output_yaml_path or "").strip() or None
+        self.resume_local_archive_path = (self.resume_local_archive_path or "").strip() or None
+        self.resume_remote_archive_path = (self.resume_remote_archive_path or "").strip() or None
         return self
 
 

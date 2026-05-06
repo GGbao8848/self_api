@@ -27,10 +27,13 @@ class SQLiteAgentSessionStore:
             self._ensure_schema()
             with self._connect() as connection:
                 existing = connection.execute(
-                    "SELECT created_index, created_at FROM agent_runs WHERE run_id = ?",
+                    "SELECT created_index, created_at, cancellation_requested FROM agent_runs WHERE run_id = ?",
                     (run.run_id,),
                 ).fetchone()
                 created_at = run.created_at or (existing["created_at"] if existing is not None else None)
+                cancellation_requested = bool(run.cancellation_requested)
+                if existing is not None:
+                    cancellation_requested = cancellation_requested or bool(existing["cancellation_requested"])
                 connection.execute(
                     """
                     INSERT OR REPLACE INTO agent_runs (
@@ -72,7 +75,7 @@ class SQLiteAgentSessionStore:
                         created_at,
                         run.updated_at,
                         run.finished_at,
-                        int(run.cancellation_requested),
+                        int(cancellation_requested),
                         json.dumps([self._tool_call_to_dict(item) for item in run.tool_calls], ensure_ascii=True),
                         json.dumps([self._step_to_dict(item) for item in run.steps], ensure_ascii=True),
                         json.dumps(run.request_payload, ensure_ascii=True),
