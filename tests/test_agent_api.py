@@ -949,6 +949,82 @@ def test_agent_executes_structured_publish_incremental_yolo_dataset_tool(
     assert tool_call["result"]["result"]["published_dataset_dir"] == "/remote/datasets/demo_20260428"
 
 
+def test_agent_publish_incremental_preserves_explicit_multi_local_paths_from_message(
+    client,
+    case_dir,
+    monkeypatch,
+    isolated_runtime,
+) -> None:
+    from app.agent import runtime as runtime_module
+    from app.schemas.preprocess import PublishYoloDatasetResponse
+
+    dataset_dir = case_dir / "dataset_publish_incremental_multi"
+    dataset_aug_dir = case_dir / "dataset_publish_incremental_multi_aug"
+    create_yolo_dataset(dataset_dir, sample_count=1)
+    create_yolo_dataset(dataset_aug_dir, sample_count=1)
+    last_yaml = "sftp://172.31.1.42/remote/demo/dataset/demo_prev/demo_prev.yaml"
+
+    monkeypatch.setattr(
+        runtime_module,
+        "request_tool_decision",
+        lambda **_: LLMToolDecision(
+            action="execute",
+            tool_name="publish-incremental-yolo-dataset",
+            tool_arguments={
+                "last_yaml": last_yaml,
+                "local_paths": [str(dataset_aug_dir)],
+            },
+        ),
+    )
+
+    def fake_run_publish_incremental_yolo_dataset(_payload):
+        return PublishYoloDatasetResponse(
+            publish_mode="remote_sftp",
+            output_yaml_path="/remote/demo/dataset/demo_20260506/demo_20260506.yaml",
+            dataset_root=str(dataset_dir),
+            source_dataset_roots=[str(dataset_dir), str(dataset_aug_dir)],
+            splits_included=["train"],
+            classes_count=1,
+            dataset_version="demo_20260506",
+            published_dataset_dir="/remote/demo/dataset/demo_20260506",
+            staging_published_dataset_dir=str(case_dir / "staging_publish_multi"),
+            staging_output_yaml_path=str(case_dir / "staging_publish_multi" / "demo_20260506.yaml"),
+            local_archive_path=str(case_dir / "staging_publish_multi" / "demo_20260506.zip"),
+            remote_target_host="172.31.1.42",
+            remote_target_port=22,
+            remote_archive_path="/remote/demo/dataset/demo_20260506.zip",
+            recommended_train_project="/remote/demo/runs/detect",
+            recommended_train_name="demo_20260506",
+            last_yaml_merged=True,
+            last_yaml_source="sftp",
+        )
+
+    monkeypatch.setattr(
+        "app.agent.tools.registry._run_publish_incremental_yolo_dataset",
+        fake_run_publish_incremental_yolo_dataset,
+    )
+
+    response = client.post(
+        "/api/v1/agent/chat",
+        json={
+            "message": (
+                f"老模型迭代，数据为：{dataset_dir}\n"
+                f"{dataset_aug_dir}\n\n"
+                f"老yaml为：{last_yaml}"
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["final_state"] == "completed"
+    tool_call = data["tool_calls"][0]
+    assert tool_call["name"] == "publish-incremental-yolo-dataset"
+    assert tool_call["arguments"]["local_paths"] == [str(dataset_dir), str(dataset_aug_dir)]
+    assert tool_call["arguments"]["last_yaml"] == last_yaml
+    assert tool_call["result"]["state"] == "succeeded"
+
+
 def test_agent_executes_structured_publish_yolo_dataset_tool(
     client,
     case_dir,

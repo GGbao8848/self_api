@@ -2,12 +2,14 @@
 
 import re
 import shlex
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 import paramiko
 
 from app.schemas.preprocess import RemoteUnzipRequest, RemoteUnzipResponse
+from app.services.task_manager import ensure_current_task_active, update_current_task_progress
 
 
 def _parse_remote_path(target: str) -> tuple[str, int, str]:
@@ -106,7 +108,13 @@ def run_remote_unzip(request: RemoteUnzipRequest) -> RemoteUnzipResponse:
     )
     try:
         _, stdout, stderr = client.exec_command(command)
-        exit_code = stdout.channel.recv_exit_status()
+        channel = stdout.channel
+        update_current_task_progress(current=6, total=6, message="remote unzip started")
+        while not channel.exit_status_ready():
+            ensure_current_task_active()
+            update_current_task_progress(current=6, total=6, message="waiting for remote unzip to finish")
+            time.sleep(0.5)
+        exit_code = channel.recv_exit_status()
         err_text = stderr.read().decode("utf-8", errors="replace").strip()
         if exit_code != 0:
             raise ValueError(

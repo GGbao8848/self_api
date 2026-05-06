@@ -106,8 +106,10 @@ interface Message {
   toolCalls?: ToolCall[];
   steps?: AgentStep[];
   state?: AgentRunState;
+  cancellationRequested?: boolean;
   canRetry?: boolean;
   canResume?: boolean;
+  canCancel?: boolean;
 }
 
 interface AgentRunEventPayload {
@@ -151,8 +153,10 @@ function buildModelMessage(run: AgentRun): Message {
     toolCalls: run.tool_calls,
     steps: run.steps,
     state: run.final_state,
+    cancellationRequested: run.cancellation_requested,
     canRetry: canRetryState(run.final_state),
     canResume: isInterruptedState(run.final_state),
+    canCancel: !isTerminalState(run.final_state) && !run.cancellation_requested,
   };
 }
 
@@ -183,6 +187,13 @@ function getLoadingStatus(history: Message[]): { title: string; detail?: string 
     return {
       title: 'Working on your request',
       detail: 'Starting the agent run and waiting for the first update.',
+    };
+  }
+
+  if (activeRun.cancellationRequested) {
+    return {
+      title: 'Termination requested',
+      detail: 'Waiting for the current task to stop and finalize the run.',
     };
   }
 
@@ -570,6 +581,28 @@ export default function App() {
     }
   };
 
+  const handleCancelRun = async (runId: string) => {
+    try {
+      const res = await fetch(apiUrl(`/api/v1/agent/runs/${runId}/cancel`), {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (data?.run) {
+        upsertRunMessage(data.run as AgentRun);
+      }
+      setLoading(false);
+      attachRunStream(runId);
+      void fetchSessions();
+    } catch (error) {
+      console.error('Cancel error:', error);
+    }
+  };
+
   const resetSession = () => {
     const nextSessionId = uuidv4();
     closeActiveStream();
@@ -742,6 +775,16 @@ export default function App() {
                         >
                           <RotateCcw className="h-3 w-3" />
                           Resume
+                        </button>
+                      )}
+                      {msg.canCancel && msg.runId && (
+                        <button
+                          type="button"
+                          onClick={() => void handleCancelRun(msg.runId!)}
+                          className="inline-flex items-center gap-1 rounded-full border border-red-300 bg-red-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-red-700 hover:bg-red-100"
+                        >
+                          <XCircle className="h-3 w-3" />
+                          Terminate
                         </button>
                       )}
                       {msg.runId && isTerminalState(msg.state) && (
@@ -935,6 +978,8 @@ function formatStatusText(status: string) {
   if (status === 'running') return 'Running...';
   if (status === 'completed') return 'Success';
   if (status === 'failed') return 'Failed';
+  if (status === 'cancelled') return 'Cancelled';
+  if (status === 'interrupted') return 'Interrupted';
   return formatStepStatus(status);
 }
 
@@ -953,7 +998,7 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
   return (
     <div
       className={`max-w-full min-w-0 overflow-hidden rounded-xl border border-stone-200 bg-white font-mono text-sm shadow-sm ${
-        step.status === 'failed' ? 'border-red-200' : ''
+        step.status === 'failed' ? 'border-red-200' : step.status === 'cancelled' ? 'border-amber-200' : ''
       }`}
     >
       <button
@@ -963,6 +1008,8 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
         <div className="flex min-w-0 items-center gap-2">
           {step.status === 'failed' ? (
             <XCircle className="h-4 w-4 text-red-500" />
+          ) : step.status === 'cancelled' || step.status === 'interrupted' ? (
+            <XCircle className="h-4 w-4 text-amber-500" />
           ) : step.status === 'completed' ? (
             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
           ) : (

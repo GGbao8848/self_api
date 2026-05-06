@@ -34,7 +34,11 @@ from app.services.build_yolo_yaml import (
 from app.services.file_operations import run_zip_folder
 from app.services.remote_transfer import run_remote_transfer
 from app.services.remote_unzip import run_remote_unzip
-from app.services.task_manager import ensure_current_task_active
+from app.services.task_manager import (
+    append_current_task_event,
+    ensure_current_task_active,
+    update_current_task_progress,
+)
 from app.utils.images import normalize_extensions
 
 
@@ -393,7 +397,42 @@ def _publish_merged_dataset_tree(
     return dataset_dir.resolve(), published_split_dirs, published_classes_path
 
 
+def _report_publish_stage(
+    current: int,
+    total: int,
+    message: str,
+    *,
+    details: dict | None = None,
+) -> None:
+    update_current_task_progress(current=current, total=total, message=message)
+    append_current_task_event(
+        event_type="publish_stage",
+        message=message,
+        details=details or {"current": current, "total": total},
+    )
+
+
+def _rebuild_split_dirs_from_staging(
+    staging_dataset_dir: Path,
+    split_names: list[str],
+) -> dict[str, list[Path]]:
+    exts = normalize_extensions(None)
+    effective_root, _layout_mode, _included, split_dirs = _pick_effective_root_and_layout(
+        staging_dataset_dir,
+        split_names,
+        "images",
+        exts,
+    )
+    if effective_root.resolve() != staging_dataset_dir.resolve():
+        raise ValueError(
+            f"resume staging dataset dir resolved to unexpected effective root: {effective_root}"
+        )
+    return split_dirs
+
+
 def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloDatasetResponse:
+    total_stages = 6 if request.publish_mode == "remote_sftp" else 4
+    _report_publish_stage(1, total_stages, "collecting local publish inputs")
     input_dirs = _resolve_input_dirs(request)
     inferred_local_target_ctx = (
         _infer_publish_context_from_local_target(request.project_root_dir)
@@ -431,6 +470,16 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
             detector_name=detector_name,
             dataset_version=dataset_version,
         )
+    _report_publish_stage(
+        1,
+        total_stages,
+        "resolved publish target",
+        details={
+            "detector_name": detector_name,
+            "dataset_version": dataset_version,
+            "publish_mode": request.publish_mode,
+        },
+    )
     split_names = list(_DEFAULT_SPLITS)
     source_specs, source_roots, class_names, first_dataset_root = _collect_source_specs(
         input_dirs,
@@ -441,6 +490,7 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
     last_yaml_text: str | None = None
     last_yaml_source: str | None = None
     if request.last_yaml:
+        _report_publish_stage(2, total_stages, "loading last_yaml for incremental merge")
         last_yaml_text, last_yaml_source = _load_last_yaml_text(
             BuildYoloYamlRequest(
                 input_dir=str(input_dirs[0]),
@@ -491,17 +541,50 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
                 + " (or configure matching SELF_API_REMOTE_SFTP_* entries in .env)"
             )
 
-    staging_dataset_dir, staging_split_dirs, _published_classes_path = _publish_merged_dataset_tree(
-        source_specs=source_specs,
-        project_root_dir=project_root_dir,
-        detector_name=detector_name,
-        dataset_version=dataset_version,
-        split_names=split_names,
+    resume_staging_dataset_dir = (
+        resolve_safe_path(request.resume_staging_dataset_dir, field_name="resume_staging_dataset_dir", must_exist=True)
+        if request.resume_staging_dataset_dir
+        else None
     )
-    (staging_dataset_dir / "classes.txt").write_text(
-        "".join(f"{name}\n" for name in class_names),
-        encoding="utf-8",
+    resume_staging_yaml_path = (
+        resolve_safe_path(
+            request.resume_staging_output_yaml_path,
+            field_name="resume_staging_output_yaml_path",
+            must_exist=True,
+            expect_file=True,
+        )
+        if request.resume_staging_output_yaml_path
+        else None
     )
+
+    if resume_staging_dataset_dir is not None and resume_staging_yaml_path is not None:
+        _report_publish_stage(
+            3,
+            total_stages,
+            "reusing existing local staging dataset",
+            details={
+                "staging_dataset_dir": str(resume_staging_dataset_dir),
+                "staging_output_yaml_path": str(resume_staging_yaml_path),
+                "dataset_version": dataset_version,
+            },
+        )
+        staging_dataset_dir = resume_staging_dataset_dir.resolve()
+        staging_split_dirs = _rebuild_split_dirs_from_staging(staging_dataset_dir, split_names)
+        staging_yaml_path = resume_staging_yaml_path.resolve()
+    else:
+        _report_publish_stage(3, total_stages, "building local staging dataset tree")
+        staging_dataset_dir, staging_split_dirs, _published_classes_path = _publish_merged_dataset_tree(
+            source_specs=source_specs,
+            project_root_dir=project_root_dir,
+            detector_name=detector_name,
+            dataset_version=dataset_version,
+            split_names=split_names,
+        )
+        (staging_dataset_dir / "classes.txt").write_text(
+            "".join(f"{name}\n" for name in class_names),
+            encoding="utf-8",
+        )
+        staging_yaml_path = staging_dataset_dir / f"{dataset_version}.yaml"
 
     split_abs_paths: dict[str, list[str]] = {}
     included = [split for split in split_names if staging_split_dirs.get(split)]
@@ -516,7 +599,16 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
         last_yaml_merged = bool(last_paths)
         included_order = _order_included_from_merged(split_abs_paths, split_names)
 
-    staging_yaml_path = staging_dataset_dir / f"{dataset_version}.yaml"
+    _report_publish_stage(
+        4,
+        total_stages,
+        "writing merged yaml",
+        details={
+            "staging_dataset_dir": str(staging_dataset_dir),
+            "staging_output_yaml_path": str(staging_yaml_path),
+            "dataset_version": dataset_version,
+        },
+    )
     local_yaml_text = _build_yaml_lines(
         split_abs_paths=split_abs_paths,
         included_order=included_order,
@@ -569,33 +661,104 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
         encoding="utf-8",
     )
 
-    zip_resp = run_zip_folder(
-        ZipFolderRequest(
-            input_dir=str(staging_dataset_dir),
-            output_zip_path=str(staging_dataset_dir.parent / f"{dataset_version}.zip"),
-            include_root_dir=True,
-            overwrite=False,
+    local_archive_path = request.resume_local_archive_path
+    if local_archive_path:
+        archive_path_obj = resolve_safe_path(
+            local_archive_path,
+            field_name="resume_local_archive_path",
+            must_exist=True,
+            expect_file=True,
         )
+        _report_publish_stage(
+            5,
+            total_stages,
+            "reusing existing local archive",
+            details={
+                "local_archive_path": str(archive_path_obj),
+                "staging_dataset_dir": str(staging_dataset_dir),
+                "dataset_version": dataset_version,
+            },
+        )
+        local_archive_path = str(archive_path_obj)
+    else:
+        _report_publish_stage(
+            5,
+            total_stages,
+            "packing local staging dataset to zip",
+            details={
+                "staging_dataset_dir": str(staging_dataset_dir),
+                "dataset_version": dataset_version,
+            },
+        )
+        zip_resp = run_zip_folder(
+            ZipFolderRequest(
+                input_dir=str(staging_dataset_dir),
+                output_zip_path=str(staging_dataset_dir.parent / f"{dataset_version}.zip"),
+                include_root_dir=True,
+                overwrite=False,
+            )
+        )
+        local_archive_path = zip_resp.output_zip_path
+
+    append_current_task_event(
+        event_type="publish_resume_ready",
+        message="local staging archive is ready",
+        details={
+            "dataset_version": dataset_version,
+            "resume_staging_dataset_dir": str(staging_dataset_dir),
+            "resume_staging_output_yaml_path": str(staging_yaml_path),
+            "resume_local_archive_path": local_archive_path,
+        },
     )
 
     remote_datasets_parent = remote_project_root / detector_name / dataset_bucket
-    transfer_resp = run_remote_transfer(
-        RemoteTransferRequest(
-            source_path=zip_resp.output_zip_path,
-            target=_remote_posix_uri(remote_host or "", remote_datasets_parent, remote_port),
-            username=remote_username,
-            private_key_path=remote_private_key_path,
-            port=remote_port,
-            overwrite=False,
+    remote_archive_path = request.resume_remote_archive_path
+    if remote_archive_path:
+        _report_publish_stage(
+            6,
+            total_stages,
+            "reusing uploaded remote archive; resuming remote unzip",
+            details={
+                "remote_archive_path": remote_archive_path,
+                "dataset_version": dataset_version,
+                "local_archive_path": local_archive_path,
+            },
         )
-    )
+    else:
+        _report_publish_stage(
+            6,
+            total_stages,
+            "uploading archive to remote host",
+            details={
+                "local_archive_path": local_archive_path,
+                "dataset_version": dataset_version,
+            },
+        )
+        transfer_resp = run_remote_transfer(
+            RemoteTransferRequest(
+                source_path=local_archive_path,
+                target=_remote_posix_uri(remote_host or "", remote_datasets_parent, remote_port),
+                username=remote_username,
+                private_key_path=remote_private_key_path,
+                port=remote_port,
+                overwrite=False,
+            )
+        )
+        remote_archive_path = transfer_resp.target_path
+        append_current_task_event(
+            event_type="publish_resume_ready",
+            message="remote archive upload completed",
+            details={
+                "dataset_version": dataset_version,
+                "resume_staging_dataset_dir": str(staging_dataset_dir),
+                "resume_staging_output_yaml_path": str(staging_yaml_path),
+                "resume_local_archive_path": local_archive_path,
+                "resume_remote_archive_path": remote_archive_path,
+            },
+        )
     run_remote_unzip(
         RemoteUnzipRequest(
-            archive_path=_remote_posix_uri(
-                remote_host or "",
-                remote_datasets_parent / Path(zip_resp.output_zip_path).name,
-                remote_port,
-            ),
+            archive_path=remote_archive_path,
             output_dir=_remote_posix_uri(remote_host or "", remote_datasets_parent, remote_port),
             username=remote_username,
             private_key_path=remote_private_key_path,
@@ -615,10 +778,10 @@ def run_publish_yolo_dataset(request: PublishYoloDatasetRequest) -> PublishYoloD
         published_dataset_dir=remote_dataset_dir.as_posix(),
         staging_published_dataset_dir=str(staging_dataset_dir),
         staging_output_yaml_path=str(staging_yaml_path),
-        local_archive_path=zip_resp.output_zip_path,
+        local_archive_path=local_archive_path,
         remote_target_host=remote_host,
         remote_target_port=remote_port,
-        remote_archive_path=transfer_resp.target_path,
+        remote_archive_path=remote_archive_path,
         recommended_train_project=remote_train_project,
         recommended_train_name=dataset_version,
         last_yaml_merged=last_yaml_merged,
@@ -642,5 +805,9 @@ def run_publish_incremental_yolo_dataset(
             input_dirs=local_paths[1:] or None,
             publish_mode="remote_sftp",
             last_yaml=request.last_yaml,
+            resume_staging_dataset_dir=request.resume_staging_dataset_dir,
+            resume_staging_output_yaml_path=request.resume_staging_output_yaml_path,
+            resume_local_archive_path=request.resume_local_archive_path,
+            resume_remote_archive_path=request.resume_remote_archive_path,
         )
     )

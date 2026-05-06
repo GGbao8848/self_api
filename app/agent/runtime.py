@@ -1,3 +1,4 @@
+import re
 import time
 from dataclasses import dataclass
 from threading import Thread
@@ -23,8 +24,19 @@ class SessionResourceContext:
     images_dir: str | None = None
 
 
+@dataclass(frozen=True)
+class ExplicitPublishInputs:
+    local_paths: tuple[str, ...] = ()
+    last_yaml: str | None = None
+
+
 class AgentRunCancelledError(RuntimeError):
     pass
+
+
+_REMOTE_YAML_RE = re.compile(r"(?P<path>(?:sftp|ssh)://[^\s，。；;,]+\.ya?ml)")
+_LOCAL_PATH_RE = re.compile(r"(?P<path>/[^\s，。；;,]+)")
+_PUBLISH_TOOLS = {"publish-incremental-yolo-dataset", "publish-yolo-dataset"}
 
 
 def _now_iso() -> str:
@@ -52,7 +64,41 @@ class AgentRuntime:
         return self._run_inline(payload)
 
     def cancel_run(self, run_id: str) -> AgentRunRecord | None:
-        return self._store.cancel_run(run_id)
+        run = self._store.cancel_run(run_id)
+        if run is None:
+            return None
+        if run.final_state in {"completed", "failed", "cancelled", "interrupted", "clarification_required", "requires_provider"}:
+            return run
+
+        active_task_id = self._current_task_id_for_run(run)
+        self._mark_run_steps_cancelled(run, active_task_id=active_task_id)
+        run.updated_at = _now_iso()
+        self._store.save_run(run)
+        if active_task_id:
+            cancel_task(active_task_id)
+
+        refreshed = self._store.get_run(run_id) or run
+        if active_task_id:
+            task = get_task(active_task_id)
+            if task is not None and task["state"] == "cancelled":
+                self._finalize_run(
+                    refreshed,
+                    state="cancelled",
+                    message=task.get("error") or f"task cancelled: {active_task_id}",
+                )
+                return refreshed
+            refreshed.message = f"termination requested for task {active_task_id}"
+        else:
+            self._finalize_run(
+                refreshed,
+                state="cancelled",
+                message=f"agent run cancelled: {run_id}",
+            )
+            return refreshed
+
+        refreshed.updated_at = _now_iso()
+        self._store.save_run(refreshed)
+        return self._store.get_run(run_id) or refreshed
 
     def retry_run(
         self,
@@ -758,6 +804,11 @@ class AgentRuntime:
         step_id = current_tool.get("step_id")
         if not isinstance(tool_name, str) or not isinstance(tool_arguments, dict):
             return False
+        if isinstance(task_id, str) and task_id and tool_name in _PUBLISH_TOOLS:
+            tool_arguments = self._merge_publish_resume_arguments_from_task(
+                dict(tool_arguments),
+                task_id=task_id,
+            )
         step = next((item for item in run.steps if item.step_id == step_id), None)
         if step is None:
             step = self._start_step(run, kind="tool", title=f"Resume {tool_name}", tool_name=tool_name)
@@ -897,6 +948,8 @@ class AgentRuntime:
         return "LangGraph pipeline: " + " -> ".join(steps) if steps else "LangGraph pipeline"
 
     def _finalize_run(self, run: AgentRunRecord, *, state: str, message: str) -> None:
+        if state == "cancelled":
+            self._mark_run_steps_cancelled(run, active_task_id=self._current_task_id_for_run(run))
         run.final_state = state
         run.message = message
         run.updated_at = _now_iso()
@@ -908,6 +961,63 @@ class AgentRuntime:
         }
         run.checkpoint.pop("current_tool", None)
         self._store.save_run(run)
+
+    def _current_task_id_for_run(self, run: AgentRunRecord) -> str | None:
+        current_tool = run.checkpoint.get("current_tool") if isinstance(run.checkpoint, dict) else None
+        if isinstance(current_tool, dict):
+            task_id = current_tool.get("task_id")
+            if isinstance(task_id, str) and task_id.strip():
+                return task_id.strip()
+        for step in reversed(run.steps):
+            if step.task_id:
+                return step.task_id
+        return None
+
+    def _merge_publish_resume_arguments_from_task(
+        self,
+        tool_arguments: dict,
+        *,
+        task_id: str,
+    ) -> dict:
+        task = get_task(task_id)
+        if task is None:
+            return tool_arguments
+        merged = dict(tool_arguments)
+        for event in reversed(task.get("events", [])):
+            if not isinstance(event, dict):
+                continue
+            details = event.get("details")
+            if not isinstance(details, dict):
+                continue
+            for key in (
+                "dataset_version",
+                "resume_staging_dataset_dir",
+                "resume_staging_output_yaml_path",
+                "resume_local_archive_path",
+                "resume_remote_archive_path",
+            ):
+                value = details.get(key)
+                if isinstance(value, str) and value.strip() and not merged.get(key):
+                    merged[key] = value.strip()
+        return merged
+
+    def _mark_run_steps_cancelled(self, run: AgentRunRecord, *, active_task_id: str | None) -> None:
+        cancelled_at = _now_iso()
+        for step in reversed(run.steps):
+            if step.status != "running":
+                continue
+            if active_task_id and step.task_id and step.task_id != active_task_id:
+                continue
+            step.status = "cancelled"
+            if not step.message or step.message.startswith("Running "):
+                step.message = f"termination requested{f' for task {active_task_id}' if active_task_id else ''}"
+            step.finished_at = step.finished_at or cancelled_at
+            step.details = {
+                **step.details,
+                "termination_requested": True,
+                "terminated_at": cancelled_at,
+            }
+            break
 
     def _ensure_run_active(self, run_id: str) -> None:
         run = self._store.get_run(run_id)
@@ -1131,15 +1241,26 @@ class AgentRuntime:
         tool_name = decision.tool_name
         if not tool_name:
             return None
-        tool_arguments = self._hydrate_tool_arguments(
+        explicit_publish_inputs = self._extract_explicit_publish_inputs(user_message)
+        protected_arguments = self._protect_explicit_publish_arguments(
             tool_name,
             dict(decision.tool_arguments),
+            explicit_publish_inputs,
+        )
+        tool_arguments = self._hydrate_tool_arguments(
+            tool_name,
+            protected_arguments,
             prior_runs,
         )
         definition = get_tool_definition(tool_name)
         if definition is None:
             return None
         normalized_arguments = self._normalize_tool_arguments(definition, tool_arguments)
+        self._validate_explicit_publish_arguments(
+            tool_name,
+            normalized_arguments,
+            explicit_publish_inputs,
+        )
         signature = (
             tool_name,
             tuple(sorted((str(key), str(value)) for key, value in normalized_arguments.items())),
@@ -1251,6 +1372,8 @@ class AgentRuntime:
         normalized = dict(arguments)
         if tool_name in {"move-path", "copy-path", "unzip-archive", "restore-voc-crops-batch"}:
             return normalized
+        if tool_name in _PUBLISH_TOOLS and normalized.get("local_paths"):
+            return normalized
         if normalized.get("input_dir"):
             return normalized
         resources = self._build_session_resource_context(prior_runs)
@@ -1258,6 +1381,73 @@ class AgentRuntime:
         if inherited_path:
             normalized["input_dir"] = inherited_path
         return normalized
+
+    def _extract_explicit_publish_inputs(self, user_message: str) -> ExplicitPublishInputs:
+        text = user_message.strip()
+        if not text:
+            return ExplicitPublishInputs()
+
+        remote_matches = list(_REMOTE_YAML_RE.finditer(text))
+        stripped_text = text
+        last_yaml: str | None = None
+        if remote_matches:
+            last_yaml = remote_matches[-1].group("path").rstrip("'\"`)]}")
+            for match in reversed(remote_matches):
+                start, end = match.span()
+                stripped_text = stripped_text[:start] + " " + stripped_text[end:]
+
+        local_paths: list[str] = []
+        seen: set[str] = set()
+        for match in _LOCAL_PATH_RE.finditer(stripped_text):
+            path = match.group("path").rstrip("'\"`)]}")
+            if path.endswith((".yaml", ".yml")):
+                continue
+            if path not in seen:
+                seen.add(path)
+                local_paths.append(path)
+        return ExplicitPublishInputs(local_paths=tuple(local_paths), last_yaml=last_yaml)
+
+    def _protect_explicit_publish_arguments(
+        self,
+        tool_name: str,
+        arguments: dict,
+        explicit_inputs: ExplicitPublishInputs,
+    ) -> dict:
+        normalized = dict(arguments)
+        if tool_name not in _PUBLISH_TOOLS:
+            return normalized
+        if explicit_inputs.local_paths:
+            normalized["local_paths"] = list(explicit_inputs.local_paths)
+            normalized.pop("input_dir", None)
+            normalized.pop("input_dirs", None)
+        if explicit_inputs.last_yaml:
+            normalized["last_yaml"] = explicit_inputs.last_yaml
+        return normalized
+
+    def _validate_explicit_publish_arguments(
+        self,
+        tool_name: str,
+        arguments: dict,
+        explicit_inputs: ExplicitPublishInputs,
+    ) -> None:
+        if tool_name not in _PUBLISH_TOOLS:
+            return
+        if explicit_inputs.local_paths:
+            actual = tuple(
+                value.strip()
+                for value in arguments.get("local_paths", [])
+                if isinstance(value, str) and value.strip()
+            )
+            if actual != explicit_inputs.local_paths:
+                raise ValueError(
+                    "publish tool arguments no longer match the explicit local_paths from the current user message"
+                )
+        if explicit_inputs.last_yaml:
+            actual_last_yaml = arguments.get("last_yaml")
+            if not isinstance(actual_last_yaml, str) or actual_last_yaml.strip() != explicit_inputs.last_yaml:
+                raise ValueError(
+                    "publish tool arguments no longer match the explicit last_yaml from the current user message"
+                )
 
     def _resolve_input_dir_for_tool(
         self,

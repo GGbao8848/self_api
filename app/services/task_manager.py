@@ -335,6 +335,40 @@ def update_task_progress(
     )
 
 
+def append_current_task_event(
+    *,
+    event_type: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    task_id = get_current_task_id()
+    if not task_id:
+        return
+    append_task_event(
+        task_id,
+        event_type=event_type,
+        message=message,
+        details=details,
+    )
+
+
+def update_current_task_progress(
+    *,
+    current: int | None = None,
+    total: int | None = None,
+    message: str | None = None,
+) -> None:
+    task_id = get_current_task_id()
+    if not task_id:
+        return
+    update_task_progress(
+        task_id,
+        current=current,
+        total=total,
+        message=message,
+    )
+
+
 def _post_callback(callback_url: str, payload: dict[str, Any], timeout: float) -> int:
     body = json.dumps(payload).encode("utf-8")
     request = Request(
