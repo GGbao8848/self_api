@@ -611,12 +611,12 @@ export default function App() {
             <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-500">
               Recent Sessions
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               {sessions.map((sess) => (
                 <button
                   key={sess.id}
                   onClick={() => setSessionId(sess.id)}
-                  className={`flex w-full flex-col gap-1 rounded-xl px-3 py-3 text-left text-sm transition-colors ${sess.id === sessionId
+                  className={`flex w-full min-w-0 flex-col gap-1 rounded-xl px-3 py-3 text-left text-sm transition-colors ${sess.id === sessionId
                       ? 'bg-teal-700 text-white shadow-sm'
                       : 'bg-white text-stone-700 hover:bg-stone-50'
                     }`}
@@ -688,7 +688,7 @@ export default function App() {
             {history.map((msg, idx) => (
               <div
                 key={`${msg.role}-${msg.runId || idx}`}
-                className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                className={`flex min-w-0 gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
               >
                 <div
                   className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${msg.role === 'user' ? 'bg-teal-700' : 'bg-stone-800'
@@ -701,9 +701,9 @@ export default function App() {
                   )}
                 </div>
 
-                <div className={`flex-1 space-y-3 ${msg.role === 'user' ? 'flex flex-col items-end' : ''}`}>
+                <div className={`min-w-0 flex-1 space-y-3 ${msg.role === 'user' ? 'flex flex-col items-end' : ''}`}>
                   <div
-                    className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user'
+                    className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm [overflow-wrap:anywhere] ${msg.role === 'user'
                         ? 'rounded-tr-sm bg-teal-700 text-white'
                         : 'rounded-tl-sm border border-stone-200 bg-white text-stone-800'
                       }`}
@@ -712,7 +712,7 @@ export default function App() {
                   </div>
 
                   {msg.state && msg.role === 'model' && (
-                    <div className="flex max-w-[85%] items-center gap-2 text-xs font-medium uppercase tracking-wider text-stone-500">
+                    <div className="flex max-w-[85%] min-w-0 flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-wider text-stone-500">
                       <span>State: {msg.state}</span>
                       {msg.runId && (
                         <span className="rounded-full bg-stone-200 px-2 py-0.5 font-mono normal-case text-stone-700">
@@ -757,18 +757,8 @@ export default function App() {
                     </div>
                   )}
 
-                  {(msg.planSummary || msg.parentRunId || msg.rootRunId) && msg.role === 'model' && (
-                    <div className="w-full max-w-[85%] rounded-2xl border border-stone-200 bg-[#faf7ef] px-4 py-3 text-xs text-stone-700 shadow-sm">
-                      {msg.planSummary && <div className="mb-2"><span className="font-semibold">Plan:</span> {msg.planSummary}</div>}
-                      <div className="flex flex-wrap gap-3 font-mono text-[11px] text-stone-500">
-                        {msg.parentRunId && <span>parent={msg.parentRunId.slice(0, 8)}</span>}
-                        {msg.rootRunId && <span>root={msg.rootRunId.slice(0, 8)}</span>}
-                      </div>
-                    </div>
-                  )}
-
                   {msg.steps && msg.steps.length > 0 && (
-                    <div className="w-full max-w-[85%]">
+                    <div className="w-full max-w-[85%] min-w-0">
                       <StepTimeline steps={msg.steps} />
                     </div>
                   )}
@@ -864,7 +854,7 @@ export default function App() {
           <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-stone-500">
             Available Tools ({tools.length})
           </h3>
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             {tools.map((tool) => (
               <div key={tool.name}>
                 <ToolSpecCard tool={tool} />
@@ -881,17 +871,17 @@ function ToolSpecCard({ tool }: { tool: ToolDef }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
+    <div className="min-w-0 overflow-hidden rounded-2xl border border-stone-200 bg-white">
       <button
         type="button"
         onClick={() => setExpanded((current) => !current)}
-        className="flex w-full items-center justify-between gap-3 p-3 text-left transition-colors hover:bg-stone-50"
+        className="flex w-full min-w-0 items-center justify-between gap-3 p-3 text-left transition-colors hover:bg-stone-50"
       >
         <div className="flex min-w-0 items-center gap-2">
           <Wrench className="h-4 w-4 flex-shrink-0 text-teal-600" />
           <div className="min-w-0">
-            <h4 className="text-sm font-medium text-stone-900">{tool.name}</h4>
-            <p className="mt-1 text-xs text-stone-600">{tool.description}</p>
+            <h4 className="break-words text-sm font-medium text-stone-900 [overflow-wrap:anywhere]">{tool.name}</h4>
+            <p className="mt-1 break-words text-xs text-stone-600 [overflow-wrap:anywhere]">{tool.description}</p>
           </div>
         </div>
         {expanded ? (
@@ -916,7 +906,7 @@ function ToolSpecCard({ tool }: { tool: ToolDef }) {
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-stone-400">
                 Argument Hint
               </span>
-              <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-stone-50 p-2 text-stone-700">
+              <pre className="max-w-full whitespace-pre-wrap break-words rounded-lg bg-stone-50 p-2 text-stone-700 [overflow-wrap:anywhere]">
                 {tool.argument_hint || 'No hint'}
               </pre>
             </div>
@@ -962,13 +952,13 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
 
   return (
     <div
-      className={`max-w-full overflow-hidden rounded-xl border border-stone-200 bg-white font-mono text-sm shadow-sm ${
+      className={`max-w-full min-w-0 overflow-hidden rounded-xl border border-stone-200 bg-white font-mono text-sm shadow-sm ${
         step.status === 'failed' ? 'border-red-200' : ''
       }`}
     >
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center justify-between bg-stone-50 p-3 text-left transition-colors hover:bg-stone-100"
+        className="flex w-full min-w-0 items-center justify-between gap-3 bg-stone-50 p-3 text-left transition-colors hover:bg-stone-100"
       >
         <div className="flex min-w-0 items-center gap-2">
           {step.status === 'failed' ? (
@@ -993,13 +983,13 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
       </button>
 
       {expanded && (
-        <div className="space-y-3 border-t border-stone-100 bg-white p-3 flex flex-col items-start text-left w-full">
+        <div className="flex w-full min-w-0 flex-col items-start space-y-3 border-t border-stone-100 bg-white p-3 text-left">
           {step.message && (
             <div className="w-full">
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
                 Message
               </span>
-              <div className="text-xs text-stone-800 bg-stone-50 p-2 rounded whitespace-pre-wrap">{step.message}</div>
+              <div className="rounded bg-stone-50 p-2 text-xs whitespace-pre-wrap break-words text-stone-800 [overflow-wrap:anywhere]">{step.message}</div>
             </div>
           )}
 
@@ -1008,7 +998,7 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
                 Arguments
               </span>
-              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-stone-50 p-2 text-xs text-stone-800">
+              <pre className="max-w-full whitespace-pre-wrap break-words rounded bg-stone-50 p-2 text-xs text-stone-800 [overflow-wrap:anywhere]">
                 {JSON.stringify(step.tool_call.arguments, null, 2)}
               </pre>
             </div>
@@ -1019,7 +1009,7 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
                 Result
               </span>
-              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-emerald-50 p-2 text-xs text-emerald-700">
+              <pre className="max-w-full whitespace-pre-wrap break-words rounded bg-emerald-50 p-2 text-xs text-emerald-700 [overflow-wrap:anywhere]">
                 {JSON.stringify(step.tool_call.result, null, 2)}
               </pre>
             </div>
@@ -1030,7 +1020,7 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
                 Error
               </span>
-              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-red-50 p-2 text-xs text-red-600">
+              <pre className="max-w-full whitespace-pre-wrap break-words rounded bg-red-50 p-2 text-xs text-red-600 [overflow-wrap:anywhere]">
                 {step.tool_call.error}
               </pre>
             </div>
@@ -1041,7 +1031,7 @@ function StepCard({ step }: { step: AgentStep; key?: React.Key }) {
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-stone-400">
                 Details
               </span>
-              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-stone-50 p-2 text-xs text-stone-800">
+              <pre className="max-w-full whitespace-pre-wrap break-words rounded bg-stone-50 p-2 text-xs text-stone-800 [overflow-wrap:anywhere]">
                 {JSON.stringify(step.details, null, 2)}
               </pre>
             </div>
